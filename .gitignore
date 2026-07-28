@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Caches & models
+.cache/
+*.pt
+*.bin
+scispacy_models/
+
+# Pipeline outputs
+outputs/
+*.csv
+*.html
+!examples/*.csv
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+.pytest_cache/

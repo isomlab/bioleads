@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "bioleads"
+abstract: >-
+  Mine biomedical literature for enriched terms, co-occurrence networks, and
+  Swanson-style hypothesis leads from PDFs and PubMed/PMC, with optional
+  biomedical NER and PubMedBERT term clustering.
+type: software
+authors:
+  - family-names: Isom
+    given-names: Daniel
+    email: disom.biophysics@gmail.com
+    affiliation: "Isom Lab"
+license: MIT
+version: 0.1.0
+repository-code: "https://github.com/isomlab/bioleads"
+keywords:
+  - literature mining
+  - text mining
+  - co-occurrence
+  - hypothesis generation
+  - PubMed
+  - bioinformatics

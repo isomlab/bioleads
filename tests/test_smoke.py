@@ -1,0 +1,696 @@
+"""Smoke tests: exercise the full pipeline on a tiny synthetic corpus.
+
+These run without any model downloads or network access — the NER step falls
+back to the regex extractor and enrichment falls back to TF-IDF when no
+background is supplied.
+"""
+import os
+from collections import Counter
+
+import networkx as nx
+import pytest
+
+from bioleads.config import Config
+from bioleads.cooccurrence import write_graph_html
+from bioleads.embeddings import (
+    TermCluster,
+    term_to_cluster,
+    write_cluster_scatter,
+    to_dataframe as clusters_df,
+)
+from bioleads.sources import (
+    Document,
+    _expand_bfs,
+    _seed_pmids,
+    documents_from_texts,
+    expand_pmids,
+    load_refs,
+    parse_pmid_input,
+)
+from bioleads.pipeline import run_pipeline
+from bioleads.expansion import relevance_guided_expand, _top_k_relevant, _term_overlap_scores
+import bioleads.citations as citations
+from bioleads.citations import (
+    build_citation_graph,
+    build_author_citation_graph,
+    most_cited,
+    to_dataframe as citations_df,
+    authors_to_dataframe as authors_df,
+)
+
+
+# A toy corpus engineered so that "trpv1" and "raynaud" never co-occur
+# directly, but both connect through "vasodilation" / "bloodflow" — a planted
+# ABC link the discovery step should surface.
+CORPUS = [
+    "trpv1 activation drives vasodilation and bloodflow in arterial tissue.",
+    "trpv1 channels modulate vasodilation through calcium signaling pathways.",
+    "vasodilation improves bloodflow and relieves raynaud symptoms in patients.",
+    "reduced bloodflow and impaired vasodilation characterize raynaud phenomenon.",
+    "capsaicin targets trpv1 to promote vasodilation in peripheral vessels.",
+    "raynaud episodes follow vasoconstriction and loss of bloodflow.",
+]
+
+
+@pytest.fixture(autouse=True)
+def _force_regex_ner(monkeypatch):
+    """Keep entity extraction deterministic across environments.
+
+    These tests assert on specific extracted terms (the planted trpv1->raynaud
+    link, topic-overlap scores, etc.), which were designed around the regex
+    fallback NER. When scispaCy is installed it produces different / multi-word
+    entities, so we pin every test to the fallback path by making the model
+    loader return None. Real runs still use scispaCy when available.
+    """
+    import bioleads.ner as _ner
+    monkeypatch.setattr(_ner, "_load_scispacy", lambda model: None)
+
+
+def _cfg():
+    return Config(min_doc_freq=1, min_cooccurrence=1, min_pmi=None,
+                  min_b_links=1, max_direct_cooccurrence=0, top_terms=50)
+
+
+def test_pipeline_runs_and_ranks():
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg())
+    assert res.documents and res.entities
+    terms = {t.term for t in res.ranked_terms}
+    assert "vasodilation" in terms
+    assert res.graph.number_of_nodes() > 0
+
+
+def test_abc_finds_planted_link():
+    # Seed open discovery from trpv1. With the regex-fallback NER, global
+    # ranking is noisy (verbs leak in), so anchored discovery is the realistic
+    # and deterministic way to surface the planted trpv1->(B)->raynaud link.
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
+                       anchors=["trpv1"])
+    pairs = {frozenset((c.a, c.c)) for c in res.candidates}
+    assert frozenset(("trpv1", "raynaud")) in pairs
+
+
+def test_outputs_written(tmp_path):
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
+                       out_dir=str(tmp_path))
+    assert (tmp_path / "ranked_terms.csv").exists()
+    assert (tmp_path / "hypothesis_candidates.csv").exists()
+
+
+def test_parse_pmid_input_string():
+    # comma/space/semicolon separated, with PMID: prefixes and duplicates
+    ids = parse_pmid_input("PMID:12345, 67890 67890; pmid:111")
+    assert ids == ["12345", "67890", "111"]
+
+
+def test_parse_pmid_input_list_and_empty():
+    assert parse_pmid_input([12345, "67890"]) == ["12345", "67890"]
+    assert parse_pmid_input(None) == []
+    assert parse_pmid_input("") == []
+
+
+def test_parse_pmid_input_file(tmp_path):
+    f = tmp_path / "ids.txt"
+    f.write_text("12345\n67890\n12345\n")  # trailing dup should be dropped
+    assert parse_pmid_input(f"@{f}") == ["12345", "67890"]
+    assert parse_pmid_input(str(f)) == ["12345", "67890"]
+
+
+def test_clusters_to_dataframe_and_map():
+    clusters = [
+        TermCluster(0, ["vasodilation", "vasorelaxation"], "vasodilation"),
+        TermCluster(1, ["trpv1"], "trpv1"),
+    ]
+    df = clusters_df(clusters)
+    assert list(df.columns) == ["cluster_id", "centroid_term", "term", "is_centroid"]
+    assert len(df) == 3
+    assert df[df.term == "vasodilation"].is_centroid.iloc[0]
+    assert not df[df.term == "vasorelaxation"].is_centroid.iloc[0]
+    assert term_to_cluster(clusters) == {
+        "vasodilation": 0, "vasorelaxation": 0, "trpv1": 1}
+
+
+def test_graph_colored_by_cluster_group(tmp_path):
+    g = nx.Graph()
+    g.add_edge("a", "b", weight=2, pmi=0.5)
+    g.nodes["a"]["count"] = 3
+    g.nodes["b"]["count"] = 2
+    out = write_graph_html(g, str(tmp_path / "g.html"), groups={"a": 0, "b": 1})
+    assert os.path.exists(out)
+    # Without the viz extra this falls back to GraphML, where we persist the
+    # cluster id as a node attribute; assert it round-trips.
+    if out.endswith(".graphml"):
+        h = nx.read_graphml(out)
+        assert int(h.nodes["a"]["cluster"]) == 0
+
+
+RIS_SAMPLE = """\
+TY  - JOUR
+TI  - TRPV1 activation drives vasodilation
+AB  - This study shows trpv1 promotes vasodilation and
+bloodflow in arterial tissue.
+AN  - 12345678
+DO  - 10.1000/xyz
+UR  - https://example.org/a
+ER  -
+TY  - JOUR
+T1  - Raynaud phenomenon and reduced bloodflow
+N2  - Reduced bloodflow characterizes raynaud.
+AN  - WOS:000123
+ER  -
+"""
+
+ENDNOTE_XML_SAMPLE = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<xml><records>
+<record>
+<titles><title><style face="normal">Capsaicin targets TRPV1</style></title></titles>
+<abstract><style>capsaicin targets trpv1 to promote vasodilation.</style></abstract>
+<accession-num>87654321</accession-num>
+<electronic-resource-num>10.1000/abc</electronic-resource-num>
+</record>
+</records></xml>
+"""
+
+
+def test_load_refs_ris(tmp_path):
+    f = tmp_path / "lib.ris"
+    f.write_text(RIS_SAMPLE)
+    docs = load_refs(str(f))
+    assert len(docs) == 2
+    d0 = docs[0]
+    assert d0.title == "TRPV1 activation drives vasodilation"
+    assert "bloodflow in arterial tissue" in d0.text  # wrapped line joined
+    assert d0.meta["pmid"] == "12345678"
+    assert d0.meta["doi"] == "10.1000/xyz"
+    assert d0.doc_id == "PMID:12345678"
+    # non-numeric accession (Web of Science) is not treated as a PMID
+    assert "pmid" not in docs[1].meta
+    assert docs[1].doc_id.startswith("ref:")
+
+
+def test_load_refs_endnote_xml(tmp_path):
+    f = tmp_path / "lib.xml"
+    f.write_text(ENDNOTE_XML_SAMPLE)
+    docs = load_refs(str(f))
+    assert len(docs) == 1
+    assert docs[0].title == "Capsaicin targets TRPV1"
+    assert "capsaicin targets trpv1" in docs[0].text
+    assert docs[0].meta["pmid"] == "87654321"
+
+
+def test_load_refs_bad_format(tmp_path):
+    f = tmp_path / "notrefs.md"
+    f.write_text("# just some markdown, not a reference export\n")
+    with pytest.raises(ValueError):
+        load_refs(str(f))
+
+
+def test_expand_bfs_rounds_and_dedup():
+    # citation graph: 1 -> {2,3}; 2 -> {4}; 3 -> {4,5}; 4 -> {1 (cycle)}
+    graph = {"1": ["2", "3"], "2": ["4"], "3": ["4", "5"], "4": ["1"], "5": []}
+
+    def neighbors(frontier):
+        out = []
+        for n in frontier:
+            out += graph.get(n, [])
+        return out
+
+    # one round from seed 1 -> add its direct references only
+    assert _expand_bfs(["1"], neighbors, rounds=1, max_records=100) == ["1", "2", "3"]
+    # two rounds -> chase the new frontier, dedup the shared "4" and the cycle
+    assert _expand_bfs(["1"], neighbors, rounds=2, max_records=100) == \
+        ["1", "2", "3", "4", "5"]
+    # max_records caps total (seeds counted)
+    assert _expand_bfs(["1"], neighbors, rounds=3, max_records=3) == ["1", "2", "3"]
+
+
+def test_expand_pmids_guards():
+    # rounds<=0 or no seeds -> just the unique seeds, no network call
+    assert expand_pmids([], rounds=2) == []
+    assert expand_pmids(["1", "1", "2"], rounds=0) == ["1", "2"]
+    with pytest.raises(ValueError):
+        expand_pmids(["1"], rounds=1, link="bogus")
+
+
+def test_expand_both_unions_linknames(monkeypatch):
+    # "both" follows backward refs AND forward citations, deduped, seeds first.
+    # Stub the network so we exercise the union logic, not NCBI.
+    import bioleads.sources as S
+    monkeypatch.setattr(S, "_entrez", lambda email, api_key: (object(), None))
+
+    def fake_elink(Entrez, ids, linkname):
+        if linkname == "pubmed_pubmed_refs":
+            return ["10"]      # backward
+        if linkname == "pubmed_pubmed_citedin":
+            return ["20"]      # forward
+        return []
+
+    monkeypatch.setattr(S, "_elink_neighbors", fake_elink)
+    # pin source="ncbi" so the default union doesn't also reach for iCite
+    assert S.expand_pmids(["1"], rounds=1, link="references", source="ncbi") == ["1", "10"]
+    assert S.expand_pmids(["1"], rounds=1, link="cited_by", source="ncbi") == ["1", "20"]
+    assert S.expand_pmids(["1"], rounds=1, link="both", source="ncbi") == ["1", "10", "20"]
+
+
+def test_expand_source_guard_and_icite(monkeypatch):
+    import bioleads.sources as S
+    # unknown source rejected before any network call
+    with pytest.raises(ValueError):
+        expand_pmids(["1"], rounds=1, source="bogus")
+
+    # source="icite" routes through _icite_neighbors (not Entrez) and honors
+    # the same direction map. Stub the iCite fetch to keep it offline.
+    calls = {}
+
+    def fake_icite(ids, fields, timeout=30):
+        calls["fields"] = list(fields)
+        out = []
+        if "references" in fields:
+            out.append("100")
+        if "cited_by" in fields:
+            out.append("200")
+        return out
+
+    monkeypatch.setattr(S, "_icite_neighbors", fake_icite)
+    # if it touched Entrez we'd hit the network; assert it doesn't by stubbing it to blow up
+    monkeypatch.setattr(S, "_entrez", lambda *a, **k: (_ for _ in ()).throw(AssertionError("used ncbi")))
+    assert S.expand_pmids(["1"], rounds=1, link="references", source="icite") == ["1", "100"]
+    assert S.expand_pmids(["1"], rounds=1, link="both", source="icite") == ["1", "100", "200"]
+    assert calls["fields"] == ["references", "cited_by"]
+
+
+def test_expand_all_unions_and_tolerates(monkeypatch):
+    # source="all" (the default) unions NCBI + iCite, deduped...
+    import bioleads.sources as S
+    monkeypatch.setattr(S, "_entrez", lambda *a, **k: (object(), None))
+    monkeypatch.setattr(S, "_elink_neighbors", lambda Entrez, ids, linkname: ["10"])
+    monkeypatch.setattr(S, "_icite_neighbors", lambda ids, fields, timeout=30: ["20"])
+    assert S.expand_pmids(["1"], rounds=1, link="references", source="all") == ["1", "10", "20"]
+
+    # ...and if one backend fails, "all" still returns the other's results
+    def boom(*a, **k):
+        raise RuntimeError("service down")
+
+    monkeypatch.setattr(S, "_icite_neighbors", boom)
+    with pytest.warns(UserWarning):
+        assert S.expand_pmids(["1"], rounds=1, link="references", source="all") == ["1", "10"]
+
+    # a forced single backend that fails should NOT be swallowed
+    with pytest.raises(RuntimeError):
+        S.expand_pmids(["1"], rounds=1, link="references", source="icite")
+
+
+def test_cancel_stops_expansion_and_fetch(monkeypatch):
+    # A set cancel flag raises PipelineCancelled at the next checkpoint, before
+    # any further network work — the Stop button's contract.
+    import threading
+    import bioleads.sources as S
+    from bioleads.sources import PipelineCancelled
+
+    cancel = threading.Event()
+    cancel.set()
+
+    # expand_pmids checks the flag inside its per-batch neighbors loop, so the
+    # backend stubs must never be reached.
+    monkeypatch.setattr(S, "_entrez", lambda *a, **k: (object(), None))
+    monkeypatch.setattr(S, "_elink_neighbors",
+                        lambda *a, **k: pytest.fail("network hit after cancel"))
+    monkeypatch.setattr(S, "_icite_neighbors",
+                        lambda *a, **k: pytest.fail("network hit after cancel"))
+    with pytest.raises(PipelineCancelled):
+        S.expand_pmids(["1"], rounds=1, link="references", source="ncbi", cancel=cancel)
+
+    # fetch_pubmed_by_ids bails at its batch boundary too (efetch never called).
+    def boom_efetch(*a, **k):
+        pytest.fail("efetch hit after cancel")
+
+    monkeypatch.setattr(
+        S, "_entrez",
+        lambda *a, **k: (type("E", (), {"efetch": staticmethod(boom_efetch)}), object()))
+    with pytest.raises(PipelineCancelled):
+        S.fetch_pubmed_by_ids(["1", "2"], cancel=cancel)
+
+
+def test_write_cluster_scatter_html(tmp_path):
+    # 2D term-cluster scatter -> standalone interactive HTML. Pass embeddings
+    # directly (row-aligned to the flattened cluster terms) so no model is needed.
+    pytest.importorskip("plotly")
+    import numpy as np
+
+    clusters = [
+        TermCluster(cluster_id=0, terms=["trpv1", "vasodilation", "calcium"],
+                    centroid_term="trpv1"),
+        TermCluster(cluster_id=1, terms=["mitochondria", "glycolysis"],
+                    centroid_term="mitochondria"),
+    ]
+    # five rows, one per flattened term, in cluster order
+    rng = np.random.default_rng(0)
+    emb = rng.normal(size=(5, 16))
+    out = tmp_path / "term_clusters.html"
+    path = write_cluster_scatter(clusters, str(out), embeddings=emb)
+
+    assert path == str(out)
+    assert out.exists()
+    html = out.read_text()
+    assert "trpv1" in html and "mitochondria" in html   # labels/hover baked in
+    assert "Plotly" in html or "plotly" in html          # self-contained plot
+
+
+def test_progress_callback_reports_each_stage():
+    # The pipeline should stream a message for every major stage so the GUI log
+    # can show live progress. Feed documents directly to keep it offline.
+    docs = [
+        Document(doc_id="d0", text="trpv1 vasodilation calcium signaling",
+                 source="text"),
+        Document(doc_id="d1", text="trpv1 channel arterial tissue calcium",
+                 source="text"),
+    ]
+    msgs: list[str] = []
+    run_pipeline(documents=docs, cfg=Config(), progress=msgs.append)
+
+    blob = "\n".join(msgs).lower()
+    for stage in ("entit", "ranking", "co-occurrence", "abc"):
+        assert stage in blob, f"missing progress for stage {stage!r}: {msgs}"
+    cfg = Config()
+    profile = [Document(doc_id="PMID:1",
+                        text="trpv1 vasodilation calcium signaling", source="pubmed")]
+    cands = [
+        Document(doc_id="PMID:200", text="trpv1 vasodilation channel", source="pubmed"),
+        Document(doc_id="PMID:201", text="mitochondria glycolysis oxidative", source="pubmed"),
+    ]
+    s = _term_overlap_scores(profile, cands, cfg)
+    assert s[0] > s[1]  # the candidate sharing topic terms scores higher
+    # top-K gate keeps only the on-topic one
+    cfg.expand_top_k = 1
+    kept = _top_k_relevant(profile, cands, cfg)
+    assert [d.doc_id for d, _ in kept] == ["PMID:200"]
+
+
+def test_relevance_guided_expand_two_phase(monkeypatch):
+    # Forward citers seed the topic profile; backward refs are gated to top-K by
+    # relevance to it. Stub the network; with no `embed` extra the scorer falls
+    # back to NER term overlap.
+    import bioleads.expansion as E
+
+    seed_docs = [Document(doc_id="PMID:1",
+                          text="trpv1 vasodilation calcium signaling pathways",
+                          source="pubmed")]
+
+    def fake_expand(seeds, *, rounds, link, source, max_records, email, api_key,
+                    cancel=None, progress=None):
+        if link == "cited_by":
+            return list(seeds) + ["100"]          # forward citer (on-topic)
+        if link == "references":
+            return list(seeds) + ["200", "201"]   # backward candidates
+        return list(seeds)
+
+    texts = {
+        "100": "trpv1 vasodilation arterial tissue",                 # forward
+        "200": "trpv1 vasodilation channel calcium",                 # backward, on-topic
+        "201": "mitochondria glycolysis oxidative phosphorylation",  # backward, off-topic
+    }
+
+    def fake_fetch(ids, *, email=None, api_key=None, fulltext=False, cancel=None,
+                   progress=None):
+        return [Document(doc_id=f"PMID:{i}", text=texts[i], source="pubmed") for i in ids]
+
+    monkeypatch.setattr(E, "expand_pmids", fake_expand)
+    monkeypatch.setattr(E, "fetch_pubmed_by_ids", fake_fetch)
+
+    cfg = Config(expand_strategy="relevance", expand_top_k=1)
+    added = relevance_guided_expand(seed_docs, cfg)
+    ids = {d.doc_id for d in added}
+
+    # the forward citer is always kept and tagged
+    assert "PMID:100" in ids
+    fwd = [d for d in added if d.meta.get("expand_phase") == "forward"]
+    assert fwd and all(d.meta.get("expanded") for d in fwd)
+
+    # backward gated to top_k=1 -> on-topic 200 kept, off-topic 201 dropped
+    bwd = [d for d in added if d.meta.get("expand_phase") == "backward"]
+    assert [d.doc_id for d in bwd] == ["PMID:200"]
+    assert "relevance" in bwd[0].meta
+
+
+def test_seed_pmids_from_documents():
+    docs = [
+        Document(doc_id="PMID:111", text="a", source="pubmed"),
+        Document(doc_id="ref:0", text="b", source="ris", meta={"pmid": "222"}),
+        Document(doc_id="ref:1", text="c", source="ris"),  # no PMID -> skipped
+        Document(doc_id="PMID:111", text="dup", source="pubmed"),  # dedup
+    ]
+    assert _seed_pmids(docs) == ["111", "222"]
+
+
+def test_run_pipeline_with_refs(tmp_path):
+    f = tmp_path / "lib.ris"
+    f.write_text(RIS_SAMPLE)
+    res = run_pipeline(refs=str(f), cfg=_cfg())
+    assert len(res.documents) == 2
+    assert res.entities
+
+
+def test_log_odds_with_background():
+    cfg = _cfg()
+    cfg.enrichment_method = "log_odds"
+    bg = Counter({"the": 1000, "patients": 800, "tissue": 50, "trpv1": 1})
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=cfg, background=bg)
+    assert res.ranked_terms  # distinctive terms should outrank generic ones
+
+
+# --------------------------------------------------------------------------- #
+# Citation network
+# --------------------------------------------------------------------------- #
+# A 3-paper corpus: paper 1 is foundational (cited by 2 and 3), paper 2 is cited
+# by 3, paper 3 cites nobody in the set. Global citation_count is independent.
+_ICITE_FAKE = {
+    "1": {"pmid": 1, "title": "Foundational paper", "year": 2010,
+          "journal": "Cell", "citation_count": 500, "authors": "Alice A, Bob B",
+          "references": [], "cited_by": ["2", "3"]},
+    "2": {"pmid": 2, "title": "Follow-up", "year": 2015,
+          "journal": "Nature", "citation_count": 50, "authors": "Carol C, Alice A",
+          "references": ["1"], "cited_by": ["3"]},
+    "3": {"pmid": 3, "title": "Recent review", "year": 2020,
+          "journal": "Science", "citation_count": 5, "authors": "Dan D",
+          "references": ["1", "2"], "cited_by": []},
+}
+
+
+def _citation_docs():
+    return [
+        Document(doc_id="PMID:1", text="foundational work", title="Foundational paper",
+                 source="pubmed", meta={"pmid": "1"}),
+        Document(doc_id="PMID:2", text="follow up", title="Follow-up",
+                 source="pubmed", meta={"pmid": "2"}),
+        Document(doc_id="PMID:3", text="review", title="Recent review",
+                 source="pubmed", meta={"pmid": "3"}),
+    ]
+
+
+def test_citation_graph_in_corpus_and_global(monkeypatch):
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    g = build_citation_graph(_citation_docs(), Config())
+
+    # Edge A->B means "A cites B"; paper 1 is cited by 2 and 3 within the corpus.
+    assert g.number_of_nodes() == 3
+    assert g.nodes["PMID:1"]["in_corpus_citations"] == 2
+    assert g.nodes["PMID:2"]["in_corpus_citations"] == 1
+    assert g.nodes["PMID:3"]["in_corpus_citations"] == 0
+    # Global citation_count is carried straight from iCite.
+    assert g.nodes["PMID:1"]["global_citations"] == 500
+    assert g.has_edge("PMID:2", "PMID:1") and g.has_edge("PMID:3", "PMID:1")
+
+    ranked = most_cited(g)
+    assert [n for n, _ in ranked] == ["PMID:1", "PMID:2", "PMID:3"]
+
+
+def test_citation_graph_skips_non_pmid_docs(monkeypatch):
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    docs = _citation_docs() + [Document(doc_id="pdf0", text="local pdf", source="pdf")]
+    g = build_citation_graph(docs, Config())
+    assert "pdf0" not in g.nodes  # no PMID -> can't be placed in the network
+    assert g.number_of_nodes() == 3
+
+
+def test_citation_ranking_dataframe(monkeypatch):
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    g = build_citation_graph(_citation_docs(), Config())
+    df = citations_df(g)
+    assert list(df.columns) == ["pmid", "title", "year", "journal",
+                                "in_corpus_citations", "global_citations", "url"]
+    # Sorted most-cited first.
+    assert df.iloc[0]["pmid"] == "1"
+    assert df.iloc[0]["in_corpus_citations"] == 2
+    assert df.iloc[0]["global_citations"] == 500
+
+
+def test_pipeline_writes_citation_outputs(tmp_path, monkeypatch):
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    cfg = _cfg()
+    cfg.do_citation_network = True
+    res = run_pipeline(documents=_citation_docs(), cfg=cfg, out_dir=str(tmp_path))
+    assert res.citation_graph is not None
+    assert res.citation_graph.number_of_nodes() == 3
+    assert os.path.exists(res.outputs["citation_ranking"])
+    assert os.path.exists(res.outputs["citation_network"])
+    assert "citation net" in res.summary()
+    import importlib.util
+    if importlib.util.find_spec("plotly"):  # 3D views written alongside the 2D
+        assert os.path.exists(res.outputs["graph_3d"])
+        assert os.path.exists(res.outputs["citation_network_3d"])
+
+
+def test_write_citation_html(tmp_path, monkeypatch):
+    pytest.importorskip("pyvis")
+    from bioleads.citations import write_citation_html
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    g = build_citation_graph(_citation_docs(), Config())
+    out = tmp_path / "citation_network.html"
+    path = write_citation_html(g, str(out))
+    assert os.path.exists(path)
+    assert out.read_text().strip()
+
+
+# --------------------------------------------------------------------------- #
+# Author citation network (projected from the paper citation links)
+# --------------------------------------------------------------------------- #
+def test_author_citation_graph_aggregation(monkeypatch):
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    g = build_author_citation_graph(_citation_docs(), Config())
+
+    # Four distinct authors; Alice (co)authored papers 1 and 2.
+    assert g.number_of_nodes() == 4
+    assert g.nodes["Alice A"]["papers"] == 2
+    assert g.nodes["Bob B"]["papers"] == 1
+    # global_citations sum across an author's corpus papers (500 + 50 for Alice).
+    assert g.nodes["Alice A"]["global_citations"] == 550
+
+    # in_corpus_citations = weighted in-degree (how often the author is cited).
+    assert g.nodes["Alice A"]["in_corpus_citations"] == 3
+    assert g.nodes["Bob B"]["in_corpus_citations"] == 3
+    assert g.nodes["Carol C"]["in_corpus_citations"] == 1
+    assert g.nodes["Dan D"]["in_corpus_citations"] == 0
+
+    # Self-citations (shared authors on citing & cited paper) are dropped...
+    assert not g.has_edge("Alice A", "Alice A")
+    # ...and repeated author→author citations accumulate as edge weight.
+    assert g.edges["Dan D", "Alice A"]["weight"] == 2
+
+    ranked = most_cited(g)
+    assert [n for n, _ in ranked] == ["Alice A", "Bob B", "Carol C", "Dan D"]
+
+
+def test_parse_authors_formats():
+    from bioleads.citations import _parse_authors
+    # Live iCite returns a list of {"fullName": ...} dicts.
+    assert _parse_authors([{"fullName": "Ding, Li"}, {"fullName": "Getz, Gad"}]) == \
+        ["Ding, Li", "Getz, Gad"]
+    # Legacy comma-separated string form still works.
+    assert _parse_authors("Alice A, Bob B") == ["Alice A", "Bob B"]
+    # Other key spellings + case-insensitive de-dup.
+    assert _parse_authors([{"name": "Alice A"}, {"full_name": "alice a"}, "Bob B"]) == \
+        ["Alice A", "Bob B"]
+    assert _parse_authors(None) == [] and _parse_authors("") == []
+
+
+def test_author_graph_from_icite_dict_authors(monkeypatch):
+    # Mirror the live iCite payload shape (list-of-dicts authors) to guard the
+    # author network against silently emptying out.
+    fake = {
+        "1": {"pmid": 1, "citation_count": 9,
+              "authors": [{"fullName": "Ding, Li"}, {"fullName": "Getz, Gad"}],
+              "references": [], "cited_by": ["2"]},
+        "2": {"pmid": 2, "citation_count": 3,
+              "authors": [{"fullName": "Smith, Jane"}],
+              "references": ["1"], "cited_by": []},
+    }
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
+    docs = [Document(doc_id=f"PMID:{i}", text="x", source="pubmed", meta={"pmid": str(i)})
+            for i in (1, 2)]
+    g = build_author_citation_graph(docs, Config())
+    assert g.number_of_nodes() == 3  # not zero!
+    assert g.nodes["Ding, Li"]["in_corpus_citations"] == 1  # cited by Smith via 2→1
+    assert g.has_edge("Smith, Jane", "Ding, Li")
+
+
+def test_author_ranking_dataframe(monkeypatch):
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    g = build_author_citation_graph(_citation_docs(), Config())
+    df = authors_df(g)
+    assert list(df.columns) == ["author", "papers", "in_corpus_citations",
+                                "global_citations"]
+    assert df.iloc[0]["author"] == "Alice A"
+    assert df.iloc[0]["in_corpus_citations"] == 3
+
+
+def test_pipeline_writes_author_outputs(tmp_path, monkeypatch):
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    cfg = _cfg()
+    cfg.do_citation_network = True
+    res = run_pipeline(documents=_citation_docs(), cfg=cfg, out_dir=str(tmp_path))
+    assert res.author_graph is not None
+    assert res.author_graph.number_of_nodes() == 4
+    assert os.path.exists(res.outputs["author_ranking"])
+    assert os.path.exists(res.outputs["author_network"])
+    assert "author net" in res.summary()
+    import importlib.util
+    if importlib.util.find_spec("plotly"):
+        assert os.path.exists(res.outputs["author_network_3d"])
+
+
+def test_write_author_html(tmp_path, monkeypatch):
+    pytest.importorskip("pyvis")
+    from bioleads.citations import write_author_html
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    g = build_author_citation_graph(_citation_docs(), Config())
+    out = tmp_path / "author_network.html"
+    path = write_author_html(g, str(out))
+    assert os.path.exists(path)
+    assert out.read_text().strip()
+
+
+# --------------------------------------------------------------------------- #
+# Graph rendering: 2D heading fix + 3D Plotly
+# --------------------------------------------------------------------------- #
+def test_pyvis_heading_not_duplicated(tmp_path):
+    pytest.importorskip("pyvis")
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
+                       out_dir=str(tmp_path))
+    html = (tmp_path / "cooccurrence.html").read_text()
+    # pyvis 0.3.2 doubles the <h1>; our post-process collapses it to one.
+    assert html.count("<h1>bioleads co-occurrence</h1>") == 1
+    assert "graph" in res.outputs
+
+
+def test_write_graph_3d_cooccurrence(tmp_path):
+    pytest.importorskip("plotly")
+    from bioleads.cooccurrence import build_cooccurrence, write_graph_html_3d
+    from bioleads.ner import extract_entities
+    ents = extract_entities(documents_from_texts(CORPUS), _cfg())
+    g = build_cooccurrence(ents, _cfg())
+    out = tmp_path / "cooccurrence_3d.html"
+    path = write_graph_html_3d(g, str(out), seed=0)
+    assert path and os.path.exists(path)
+    assert "plotly" in out.read_text().lower()
+
+
+def test_write_citation_graph_3d(tmp_path, monkeypatch):
+    pytest.importorskip("plotly")
+    from bioleads.citations import write_citation_html_3d
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    g = build_citation_graph(_citation_docs(), Config())
+    out = tmp_path / "citation_network_3d.html"
+    path = write_citation_html_3d(g, str(out))
+    assert path and os.path.exists(path)
+    assert "plotly" in out.read_text().lower()
+
+
+def test_write_author_graph_3d(tmp_path, monkeypatch):
+    pytest.importorskip("plotly")
+    from bioleads.citations import write_author_html_3d
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    g = build_author_citation_graph(_citation_docs(), Config())
+    out = tmp_path / "author_network_3d.html"
+    path = write_author_html_3d(g, str(out))
+    assert path and os.path.exists(path)
+    assert "plotly" in out.read_text().lower()

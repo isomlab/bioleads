@@ -1,0 +1,706 @@
+"""Tkinter desktop GUI for bioleads.
+
+Launch with `bioleads-gui` (or `python -m bioleads.gui`). The pipeline runs in a
+background thread so the window stays responsive; results stream back to the UI
+through a queue polled on the Tk event loop.
+
+Only the standard library is needed for the GUI itself — Tkinter ships with
+CPython. The pipeline's own optional extras (pubmed, pdf, ...) still apply.
+"""
+from __future__ import annotations
+
+import os
+import queue
+import threading
+import traceback
+import webbrowser
+from collections import Counter
+
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+from .config import Config
+from .cooccurrence import write_graph_html, write_graph_html_3d
+from .embeddings import (
+    TermCluster,
+    cluster_terms,
+    term_to_cluster,
+    write_cluster_scatter,
+    to_dataframe as clusters_df,
+)
+from .enrichment import load_background
+from .pipeline import PipelineResult, run_pipeline
+from .sources import PipelineCancelled
+
+
+class BioleadsGUI:
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.root.title("bioleads")
+        self.root.geometry("1120x760")
+        self.root.minsize(900, 600)
+        self._queue: queue.Queue = queue.Queue()
+        self._worker: threading.Thread | None = None
+        self._cancel = threading.Event()
+        self._result: PipelineResult | None = None
+
+        self._build_inputs()
+        self._build_actions()
+        self._build_statusbar()   # pinned to the bottom edge before the notebook
+        self._build_results()
+        self.root.after(120, self._poll_queue)
+
+    # ----------------------------------------------------------------- UI --
+    def _build_inputs(self) -> None:
+        frm = ttk.LabelFrame(self.root, text="Inputs")
+        frm.pack(fill="x", padx=10, pady=(10, 6))
+        frm.columnconfigure(1, weight=1)
+
+        self.pdf_var = tk.StringVar()
+        self.pubmed_var = tk.StringVar()
+        self.pmids_var = tk.StringVar()
+        self.refs_var = tk.StringVar()
+        self.background_var = tk.StringVar()
+        self.out_var = tk.StringVar(value=os.path.abspath("./bioleads_out"))
+        self.anchors_var = tk.StringVar()
+        self.method_var = tk.StringVar(value="log_odds")
+        self.fulltext_var = tk.BooleanVar(value=False)
+        self.citations_var = tk.BooleanVar(value=Config.do_citation_network)
+        self.nclusters_var = tk.IntVar(value=Config.n_clusters)
+        self.expand_var = tk.IntVar(value=Config.expand_rounds)
+        self.expand_link_var = tk.StringVar(value=Config.expand_link)
+        self.expand_source_var = tk.StringVar(value=Config.expand_source)
+        self.expand_strategy_var = tk.StringVar(value=Config.expand_strategy)
+        self.expand_topk_var = tk.IntVar(value=Config.expand_top_k)
+        self.expand_max_var = tk.IntVar(value=Config.expand_max)
+        self.retmax_var = tk.IntVar(value=Config.pubmed_retmax)
+
+        r = 0
+        self._row_entry(frm, r, "PDF file/folder:", self.pdf_var,
+                        ("Browse…", self._pick_pdf),
+                        hint="a single PDF, or a folder of PDFs to ingest as documents"); r += 1
+        self._row_entry(frm, r, "PubMed query:", self.pubmed_var,
+                        hint='an Entrez search (e.g. "CFTR AND chloride channel"); '
+                             "fetches the matching PubMed abstracts"); r += 1
+        self._row_entry(frm, r, "PubMed IDs:", self.pmids_var,
+                        ("Load file…", self._pick_pmid_file),
+                        hint="comma/space-separated, or load a file of IDs"); r += 1
+        self._row_entry(frm, r, "References file:", self.refs_var,
+                        ("Browse…", self._pick_refs),
+                        hint="EndNote/Zotero export: RIS (.ris) or EndNote XML (.xml)"); r += 1
+        self._row_entry(frm, r, "Background JSON:", self.background_var,
+                        ("Browse…", self._pick_background),
+                        hint="term→count baseline for enrichment; uses a built-in "
+                             "background if left empty"); r += 1
+        self._row_entry(frm, r, "Output folder:", self.out_var,
+                        ("Browse…", self._pick_out),
+                        hint="where results are written: graphs, CSVs, and HTML"); r += 1
+        self._row_entry(frm, r, "ABC anchors:", self.anchors_var,
+                        hint="comma-separated seed concepts for Swanson ABC "
+                             "hypothesis search (optional)"); r += 1
+
+        opts = ttk.Frame(frm)
+        opts.grid(row=r, column=0, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Label(opts, text="Method:").pack(side="left")
+        method_menu = ttk.OptionMenu(opts, self.method_var, self.method_var.get(),
+                                     "log_odds", "hypergeometric", "tfidf")
+        method_menu.pack(side="left", padx=(4, 16))
+        self._add_placeholder_tooltip(
+            method_menu,
+            "how term enrichment is scored: log_odds (smoothed log-odds vs. "
+            "background), hypergeometric (over-representation p-value), or tfidf")
+        fulltext_chk = ttk.Checkbutton(opts, text="PMC full text (fall back to abstract)",
+                                       variable=self.fulltext_var)
+        fulltext_chk.pack(side="left", padx=(0, 16))
+        self._add_placeholder_tooltip(
+            fulltext_chk,
+            "fetch full text from PubMed Central when available, instead of just "
+            "the abstract (slower, richer)")
+        citations_chk = ttk.Checkbutton(opts, text="Citation network (iCite)",
+                                        variable=self.citations_var)
+        citations_chk.pack(side="left", padx=(0, 16))
+        self._add_placeholder_tooltip(
+            citations_chk,
+            "build a paper→paper citation graph from NIH iCite to rank the "
+            "most-cited papers in the corpus")
+        ttk.Label(opts, text="Max records:").pack(side="left")
+        retmax_spin = ttk.Spinbox(opts, from_=1, to=100000, width=8,
+                                  textvariable=self.retmax_var)
+        retmax_spin.pack(side="left", padx=(4, 16))
+        self._add_placeholder_tooltip(
+            retmax_spin, "cap on how many PubMed records a query may fetch")
+        ttk.Label(opts, text="Clusters:").pack(side="left")
+        nclusters_spin = ttk.Spinbox(opts, from_=2, to=200, width=5,
+                                     textvariable=self.nclusters_var)
+        nclusters_spin.pack(side="left", padx=(4, 0))
+        self._add_placeholder_tooltip(
+            nclusters_spin,
+            "target number of PubMedBERT term clusters (used by the Cluster "
+            "terms button)")
+
+        exp = ttk.Frame(frm)
+        exp.grid(row=r + 1, column=0, columnspan=3, sticky="ew", padx=6, pady=(0, 4))
+        ttk.Label(exp, text="Citation expansion rounds:").pack(side="left")
+        expand_spin = ttk.Spinbox(exp, from_=0, to=10, width=4,
+                                  textvariable=self.expand_var)
+        expand_spin.pack(side="left", padx=(4, 16))
+        self._add_placeholder_tooltip(
+            expand_spin,
+            "grow the corpus by following citation links from the PMID seeds "
+            "this many rounds (0 = off)")
+        ttk.Label(exp, text="Follow:").pack(side="left")
+        follow_menu = ttk.OptionMenu(exp, self.expand_link_var, self.expand_link_var.get(),
+                                     "references", "cited_by", "both")
+        follow_menu.pack(side="left", padx=(4, 16))
+        self._add_placeholder_tooltip(
+            follow_menu,
+            "which links to follow when expanding: references (papers a seed "
+            "cites, backward), cited_by (papers citing a seed, forward), or both")
+        ttk.Label(exp, text="Source:").pack(side="left")
+        source_menu = ttk.OptionMenu(exp, self.expand_source_var, self.expand_source_var.get(),
+                                     "all", "ncbi", "icite")
+        source_menu.pack(side="left", padx=(4, 16))
+        self._add_placeholder_tooltip(
+            source_menu,
+            "where citation links come from: ncbi (Entrez), icite (NIH iCite), "
+            "or all (union of both)")
+        ttk.Label(exp, text="Max records:").pack(side="left")
+        expand_max_spin = ttk.Spinbox(exp, from_=1, to=100000, width=8,
+                                      textvariable=self.expand_max_var)
+        expand_max_spin.pack(side="left", padx=(4, 0))
+        self._add_placeholder_tooltip(
+            expand_max_spin,
+            "cap on the total PMIDs (seeds + discovered) after expansion")
+
+        exp2 = ttk.Frame(frm)
+        exp2.grid(row=r + 2, column=0, columnspan=3, sticky="ew", padx=6, pady=(0, 6))
+        ttk.Label(exp2, text="Strategy:").pack(side="left")
+        strategy_menu = ttk.OptionMenu(exp2, self.expand_strategy_var, self.expand_strategy_var.get(),
+                                       "bfs", "relevance")
+        strategy_menu.pack(side="left", padx=(4, 16))
+        self._add_placeholder_tooltip(
+            strategy_menu,
+            "bfs adds every linked paper; relevance keeps only the top-K most "
+            "topically similar to the seed set each round")
+        ttk.Label(exp2, text="Relevance top-K:").pack(side="left")
+        topk_spin = ttk.Spinbox(exp2, from_=1, to=100000, width=6,
+                                textvariable=self.expand_topk_var)
+        topk_spin.pack(side="left", padx=(4, 0))
+        self._add_placeholder_tooltip(
+            topk_spin,
+            "Relevance strategy only (ignored for bfs). Each round, candidate "
+            "papers are scored by similarity to the seed set and only the top-K "
+            "are kept and expanded further. Lower K (~20–50) stays tight on the "
+            "seed topic but may miss links; higher K (~200+) casts a wider net "
+            "but pulls in more off-topic papers and grows the corpus faster. "
+            "Pair with expansion rounds and Max records, which cap the total.")
+
+    def _row_entry(self, parent, row, label, var, button=None, hint=None) -> None:
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=6, pady=3)
+        entry = ttk.Entry(parent, textvariable=var)
+        entry.grid(row=row, column=1, sticky="ew", padx=6, pady=3)
+        if hint:
+            self._add_placeholder_tooltip(entry, hint)
+        if button:
+            text, cmd = button
+            ttk.Button(parent, text=text, command=cmd).grid(
+                row=row, column=2, sticky="e", padx=6, pady=3)
+
+    def _add_placeholder_tooltip(self, widget, text) -> None:
+        # Lightweight hover tooltip — avoids cluttering the grid with help text.
+        tip = {"win": None}
+
+        def show(_):
+            if tip["win"] or not text:
+                return
+            x = widget.winfo_rootx() + 10
+            y = widget.winfo_rooty() + widget.winfo_height() + 2
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.wm_geometry(f"+{x}+{y}")
+            ttk.Label(win, text=text, relief="solid", borderwidth=1,
+                      background="#ffffe0", padding=3,
+                      wraplength=360, justify="left").pack()
+            tip["win"] = win
+
+        def hide(_):
+            if tip["win"]:
+                tip["win"].destroy()
+                tip["win"] = None
+
+        widget.bind("<Enter>", show)
+        widget.bind("<Leave>", hide)
+
+    def _build_actions(self) -> None:
+        bar = ttk.Frame(self.root)
+        bar.pack(fill="x", padx=10, pady=4)
+
+        # Left group: the primary run controls.
+        self.run_btn = ttk.Button(bar, text="Run pipeline", command=self._on_run)
+        self.run_btn.pack(side="left")
+        self.stop_btn = ttk.Button(bar, text="Stop", command=self._on_stop,
+                                   state="disabled")
+        self.stop_btn.pack(side="left", padx=6)
+        self.cluster_btn = ttk.Button(bar, text="Cluster terms",
+                                      command=self._on_cluster, state="disabled")
+        self.cluster_btn.pack(side="left", padx=6)
+
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=(10, 6))
+
+        # "Open networks" group: revealing the artifacts a run produced. Every
+        # item here is a network graph, so each is named by what it relates
+        # (Terms / Citations / Authors) rather than the generic word "Graph".
+        # Each gets separate 2D / 3D buttons so both views are one click away
+        # (the 3D button only enables when Plotly produced a 3D file). A vertical
+        # separator brackets each entity so the 2D/3D pairs don't run together.
+        ttk.Label(bar, text="Open network —").pack(side="left", padx=(2, 6))
+
+        def _net_group(label, open2d, open3d, tip):
+            ttk.Label(bar, text=label).pack(side="left", padx=(2, 2))
+            b2 = ttk.Button(bar, text="2D", command=open2d, state="disabled")
+            b2.pack(side="left", padx=(0, 2))
+            b3 = ttk.Button(bar, text="3D", command=open3d, state="disabled")
+            b3.pack(side="left", padx=(0, 6))
+            self._add_placeholder_tooltip(b2, tip + " (interactive 2D)")
+            self._add_placeholder_tooltip(b3, tip + " (rotatable 3D)")
+            ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=(2, 6))
+            return b2, b3
+
+        self.open_graph_btn, self.open_graph3d_btn = _net_group(
+            "Terms", self._open_graph, self._open_graph3d,
+            "term co-occurrence network (which concepts appear together)")
+        self.open_citations_btn, self.open_citations3d_btn = _net_group(
+            "Citations", self._open_citations, self._open_citations3d,
+            "paper-to-paper citation network (which papers cite which)")
+        self.open_authors_btn, self.open_authors3d_btn = _net_group(
+            "Authors", self._open_authors, self._open_authors3d,
+            "author-to-author citation network (which authors cite which)")
+
+        self.open_clusters_btn = ttk.Button(bar, text="Cluster plot",
+                                             command=self._open_clusters, state="disabled")
+        self.open_clusters_btn.pack(side="left", padx=4)
+        self.open_out_btn = ttk.Button(bar, text="Output folder",
+                                       command=self._open_out, state="disabled")
+        self.open_out_btn.pack(side="left", padx=4)
+
+    def _build_statusbar(self) -> None:
+        """A dedicated bottom strip for status text + the progress indicator.
+
+        Keeping these off the action row means the button count can grow without
+        crowding the progress bar against the window edge.
+        """
+        bar = ttk.Frame(self.root, relief="groove", padding=(8, 3))
+        bar.pack(side="bottom", fill="x")
+        self.progress = ttk.Progressbar(bar, mode="indeterminate", length=180)
+        self.progress.pack(side="right")
+        self.status_var = tk.StringVar(value="Ready.")
+        ttk.Label(bar, textvariable=self.status_var, anchor="w").pack(
+            side="left", fill="x", expand=True)
+
+    def _build_results(self) -> None:
+        nb = ttk.Notebook(self.root)
+        nb.pack(fill="both", expand=True, padx=10, pady=(4, 10))
+
+        log_tab = ttk.Frame(nb)
+        nb.add(log_tab, text="Log")
+        self.log = tk.Text(log_tab, wrap="word", height=10, state="disabled")
+        self.log.pack(side="left", fill="both", expand=True)
+        sb = ttk.Scrollbar(log_tab, command=self.log.yview)
+        sb.pack(side="right", fill="y")
+        self.log.configure(yscrollcommand=sb.set)
+
+        self.terms_tree = self._make_tree(
+            nb, "Ranked terms",
+            [("term", 280), ("score", 100), ("corpus_count", 110),
+             ("doc_freq", 90), ("bg_count", 90)])
+        self.cand_tree = self._make_tree(
+            nb, "Hypotheses",
+            [("a", 180), ("c", 180), ("score", 90),
+             ("direct", 70), ("shared_b", 320)])
+
+        clu_tab = ttk.Frame(nb)
+        nb.add(clu_tab, text="Clusters")
+        self.clusters_tree = ttk.Treeview(
+            clu_tab, columns=("size",), show="tree headings")
+        self.clusters_tree.heading("#0", text="Cluster / member terms")
+        self.clusters_tree.column("#0", width=520, anchor="w")
+        self.clusters_tree.heading("size", text="size")
+        self.clusters_tree.column("size", width=80, anchor="e")
+        self.clusters_tree.pack(side="left", fill="both", expand=True)
+        clu_sb = ttk.Scrollbar(clu_tab, command=self.clusters_tree.yview)
+        clu_sb.pack(side="right", fill="y")
+        self.clusters_tree.configure(yscrollcommand=clu_sb.set)
+
+    def _make_tree(self, nb, title, columns) -> ttk.Treeview:
+        tab = ttk.Frame(nb)
+        nb.add(tab, text=title)
+        tree = ttk.Treeview(tab, columns=[c for c, _ in columns], show="headings")
+        for col, width in columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=width, anchor="w")
+        tree.pack(side="left", fill="both", expand=True)
+        sb = ttk.Scrollbar(tab, command=tree.yview)
+        sb.pack(side="right", fill="y")
+        tree.configure(yscrollcommand=sb.set)
+        return tree
+
+    # -------------------------------------------------------------- file pickers --
+    def _pick_pdf(self) -> None:
+        path = filedialog.askdirectory(title="Select folder of PDFs")
+        if not path:
+            path = filedialog.askopenfilename(
+                title="…or select a single PDF",
+                filetypes=[("PDF", "*.pdf"), ("All files", "*.*")])
+        if path:
+            self.pdf_var.set(path)
+
+    def _pick_pmid_file(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Select a file of PubMed IDs",
+            filetypes=[("Text", "*.txt *.csv *.tsv"), ("All files", "*.*")])
+        if path:
+            self.pmids_var.set(f"@{path}")
+
+    def _pick_refs(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Select a reference-manager export (RIS or EndNote XML)",
+            filetypes=[("RIS / EndNote XML", "*.ris *.xml *.txt"),
+                       ("All files", "*.*")])
+        if path:
+            self.refs_var.set(path)
+
+    def _pick_background(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Select background term-count JSON",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if path:
+            self.background_var.set(path)
+
+    def _pick_out(self) -> None:
+        path = filedialog.askdirectory(title="Select output folder")
+        if path:
+            self.out_var.set(path)
+
+    # ----------------------------------------------------------------- run --
+    def _on_run(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        pdf = self.pdf_var.get().strip() or None
+        pubmed = self.pubmed_var.get().strip() or None
+        pmids = self.pmids_var.get().strip() or None
+        refs = self.refs_var.get().strip() or None
+        if not (pdf or pubmed or pmids or refs):
+            messagebox.showwarning(
+                "No input",
+                "Provide at least one of: PDF path, PubMed query, PubMed IDs, "
+                "or a references file.")
+            return
+
+        out_dir = self.out_var.get().strip() or "./bioleads_out"
+        bg_path = self.background_var.get().strip() or None
+        anchors_raw = self.anchors_var.get().strip()
+        anchors = [a.strip() for a in anchors_raw.split(",") if a.strip()] or None
+
+        cfg = Config(
+            enrichment_method=self.method_var.get(),
+            pubmed_retmax=int(self.retmax_var.get()),
+            pubmed_fulltext=self.fulltext_var.get(),
+            do_citation_network=self.citations_var.get(),
+            expand_rounds=int(self.expand_var.get()),
+            expand_link=self.expand_link_var.get(),
+            expand_source=self.expand_source_var.get(),
+            expand_strategy=self.expand_strategy_var.get(),
+            expand_top_k=int(self.expand_topk_var.get()),
+            expand_max=int(self.expand_max_var.get()),
+            background_path=bg_path,
+        )
+
+        self._cancel.clear()
+        self._set_running(True)
+        self._clear_results()
+        self._log(f"Starting pipeline → {out_dir}")
+        self.status_var.set("Starting…")
+        relevance = cfg.expand_strategy == "relevance"
+        if (relevance or cfg.expand_rounds > 0) and pdf and not (pubmed or pmids or refs):
+            self._log("Note: citation expansion needs PMID seeds; a PDF-only "
+                      "run has none, so nothing will be expanded.")
+        self._worker = threading.Thread(
+            target=self._run_worker,
+            args=(pdf, pubmed, pmids, refs, cfg, bg_path, anchors, out_dir),
+            daemon=True,
+        )
+        self._worker.start()
+
+    def _run_worker(self, pdf, pubmed, pmids, refs, cfg, bg_path, anchors, out_dir) -> None:
+        try:
+            background: Counter | None = load_background(bg_path) if bg_path else None
+            result = run_pipeline(
+                pdf_path=pdf, pubmed_query=pubmed, pmids=pmids, refs=refs, cfg=cfg,
+                background=background, anchors=anchors, out_dir=out_dir,
+                cancel=self._cancel, progress=self._emit_progress,
+            )
+            self._queue.put(("done", result, out_dir))
+        except PipelineCancelled:
+            self._queue.put(("cancelled",))
+        except Exception as exc:  # noqa: BLE001 - surface any failure to the UI
+            self._queue.put(("error", exc, traceback.format_exc()))
+
+    # ------------------------------------------------------------- cluster --
+    def _on_cluster(self) -> None:
+        if (self._worker and self._worker.is_alive()) or not self._result:
+            return
+        terms = [t.term for t in self._result.ranked_terms]
+        if not terms:
+            messagebox.showinfo("No terms", "Run the pipeline first to get ranked terms.")
+            return
+        cfg = Config(n_clusters=int(self.nclusters_var.get()))
+        self._set_running(True)
+        self.status_var.set("Embedding & clustering… (first run downloads the model)")
+        self.clusters_tree.delete(*self.clusters_tree.get_children())
+        self._log(f"Clustering {len(terms)} terms into up to "
+                  f"{cfg.n_clusters} groups with PubMedBERT…")
+        self._worker = threading.Thread(
+            target=self._cluster_worker, args=(terms, cfg), daemon=True)
+        self._worker.start()
+
+    def _cluster_worker(self, terms, cfg) -> None:
+        try:
+            clusters = cluster_terms(terms, cfg, progress=self._emit_progress)
+            # Render the 2D scatter here (off the UI thread) so a slow reduction
+            # doesn't freeze the window.
+            scatter = None
+            out_dir = getattr(self, "_out_dir", None)
+            if clusters and out_dir:
+                try:
+                    self._emit_progress("Rendering term-cluster scatter…")
+                    scatter = write_cluster_scatter(
+                        clusters, os.path.join(out_dir, "term_clusters.html"), cfg)
+                except Exception as exc:  # noqa: BLE001 - scatter is best-effort
+                    self._emit_progress(f"  could not render cluster scatter: {exc}")
+            self._queue.put(("clusters", clusters, scatter))
+        except Exception as exc:  # noqa: BLE001 - surface to the UI (e.g. missing extra)
+            self._queue.put(("error", exc, traceback.format_exc()))
+
+    def _emit_progress(self, msg: str) -> None:
+        """Thread-safe progress sink: hand the message to the Tk event loop."""
+        self._queue.put(("log", msg))
+
+    def _on_progress(self, msg: str) -> None:
+        """Render a streamed progress message (runs on the Tk thread)."""
+        self._log(msg)
+        # Mirror the latest line in the status bar, unless a Stop is pending.
+        if self.status_var.get() != "Stopping…":
+            self.status_var.set(msg.strip()[:140] or "Working…")
+
+    def _on_clusters_done(self, clusters: list[TermCluster], scatter=None) -> None:
+        self._set_running(False)
+        self.status_var.set("Done.")
+        self._log(f"Built {len(clusters)} clusters.")
+        for clu in sorted(clusters, key=lambda c: len(c.terms), reverse=True):
+            members = sorted(clu.terms)
+            parent = self.clusters_tree.insert(
+                "", "end",
+                text=f"#{clu.cluster_id} · {clu.centroid_term}",
+                values=(len(members),), open=False)
+            for term in members:
+                self.clusters_tree.insert(parent, "end", text=term, values=("",))
+        self._persist_clusters(clusters)
+        if scatter and os.path.exists(scatter):
+            if self._result is not None:
+                self._result.outputs["cluster_scatter"] = scatter
+            self._log(f"  cluster plot   -> {scatter}")
+            self.open_clusters_btn.configure(state="normal")
+
+    def _persist_clusters(self, clusters: list[TermCluster]) -> None:
+        """Write term_clusters.csv and recolor the co-occurrence graph by cluster."""
+        out_dir = getattr(self, "_out_dir", None)
+        if not (clusters and out_dir and self._result):
+            return
+        try:
+            csv_path = os.path.join(out_dir, "term_clusters.csv")
+            clusters_df(clusters).to_csv(csv_path, index=False)
+            self._result.outputs["clusters"] = csv_path
+            self._log(f"  clusters       -> {csv_path}")
+
+            graph_html = os.path.join(out_dir, "cooccurrence.html")
+            groups = term_to_cluster(clusters)
+            path = write_graph_html(self._result.graph, graph_html, groups=groups)
+            self._result.outputs["graph"] = path
+            self._log(f"  graph (colored)-> {path}")
+            path_3d = write_graph_html_3d(
+                self._result.graph, os.path.join(out_dir, "cooccurrence_3d.html"),
+                groups=groups)
+            if path_3d:
+                self._result.outputs["graph_3d"] = path_3d
+                self._log(f"  graph 3d       -> {path_3d}")
+                self.open_graph3d_btn.configure(state="normal")
+            if os.path.exists(path):
+                self.open_graph_btn.configure(state="normal")
+        except Exception as exc:  # noqa: BLE001 - persistence is best-effort
+            self._log(f"  could not persist clusters: {exc}")
+
+    # ----------------------------------------------------------- queue poll --
+    def _poll_queue(self) -> None:
+        try:
+            while True:
+                kind, *payload = self._queue.get_nowait()
+                if kind == "done":
+                    self._on_done(*payload)
+                elif kind == "clusters":
+                    self._on_clusters_done(*payload)
+                elif kind == "log":
+                    self._on_progress(*payload)
+                elif kind == "cancelled":
+                    self._on_cancelled()
+                elif kind == "error":
+                    self._on_error(*payload)
+        except queue.Empty:
+            pass
+        self.root.after(120, self._poll_queue)
+
+    def _on_done(self, result: PipelineResult, out_dir: str) -> None:
+        self._result = result
+        self._out_dir = out_dir
+        self._set_running(False)
+        self.status_var.set("Done.")
+        self._log(result.summary())
+        for label, path in result.outputs.items():
+            self._log(f"  {label:14s} -> {path}")
+        n_full = sum(1 for d in result.documents if d.meta.get("fulltext"))
+        if n_full:
+            self._log(f"  full text retrieved for {n_full} of "
+                      f"{len(result.documents)} documents")
+        n_exp = sum(1 for d in result.documents if d.meta.get("expanded"))
+        expansion_requested = (int(self.expand_var.get()) > 0
+                               or self.expand_strategy_var.get() == "relevance")
+        if n_exp:
+            n_fwd = sum(1 for d in result.documents
+                        if d.meta.get("expand_phase") == "forward")
+            n_bwd = sum(1 for d in result.documents
+                        if d.meta.get("expand_phase") == "backward")
+            detail = f" ({n_fwd} forward, {n_bwd} backward)" if (n_fwd or n_bwd) else ""
+            self._log(f"  {n_exp} documents added via citation expansion{detail}")
+        elif expansion_requested:
+            self._log("  citation expansion added 0 documents — seeds may lack "
+                      "PMIDs or have no linked records for this source/direction "
+                      "(try Source: icite, or Follow: both)")
+
+        for t in sorted(result.ranked_terms, key=lambda r: r.score, reverse=True):
+            self.terms_tree.insert(
+                "", "end",
+                values=(t.term, f"{t.score:.4g}", t.corpus_count, t.doc_freq, t.bg_count))
+        for c in result.candidates:
+            self.cand_tree.insert(
+                "", "end",
+                values=(c.a, c.c, f"{c.score:.4g}", c.direct_cooccurrence,
+                        ", ".join(c.shared_b)))
+
+        self.open_out_btn.configure(state="normal")
+        self._enable_if_output(self.open_graph_btn, "graph")
+        self._enable_if_output(self.open_graph3d_btn, "graph_3d")
+        self._enable_if_output(self.open_clusters_btn, "cluster_scatter")
+        self._enable_if_output(self.open_citations_btn, "citation_network")
+        self._enable_if_output(self.open_citations3d_btn, "citation_network_3d")
+        self._enable_if_output(self.open_authors_btn, "author_network")
+        self._enable_if_output(self.open_authors3d_btn, "author_network_3d")
+
+    def _enable_if_output(self, btn, key: str) -> None:
+        outs = self._result.outputs if self._result else {}
+        path = outs.get(key)
+        if path and os.path.exists(path):
+            btn.configure(state="normal")
+
+    def _on_stop(self) -> None:
+        if not (self._worker and self._worker.is_alive()):
+            return
+        self._cancel.set()
+        self.stop_btn.configure(state="disabled")
+        self.status_var.set("Stopping…")
+        self._log("Stop requested — finishing the current step, then halting "
+                  "(an in-flight fetch can't be interrupted mid-call)…")
+
+    def _on_cancelled(self) -> None:
+        self._set_running(False)
+        self.status_var.set("Stopped.")
+        self._log("Pipeline stopped before completion. No results written.")
+
+    def _on_error(self, exc: Exception, tb: str) -> None:
+        self._set_running(False)
+        self.status_var.set("Error.")
+        self._log(f"ERROR: {exc}\n{tb}")
+        messagebox.showerror("Pipeline failed", str(exc))
+
+    # ------------------------------------------------------------- helpers --
+    def _open_first(self, *keys: str) -> None:
+        """Open the first existing output among `keys`."""
+        outs = self._result.outputs if self._result else {}
+        for key in keys:
+            path = outs.get(key)
+            if path and os.path.exists(path):
+                webbrowser.open(f"file://{os.path.abspath(path)}")
+                return
+
+    def _open_graph(self) -> None:
+        self._open_first("graph")
+
+    def _open_graph3d(self) -> None:
+        self._open_first("graph_3d")
+
+    def _open_clusters(self) -> None:
+        path = (self._result.outputs.get("cluster_scatter") if self._result else None)
+        if path and os.path.exists(path):
+            webbrowser.open(f"file://{os.path.abspath(path)}")
+
+    def _open_citations(self) -> None:
+        self._open_first("citation_network")
+
+    def _open_citations3d(self) -> None:
+        self._open_first("citation_network_3d")
+
+    def _open_authors(self) -> None:
+        self._open_first("author_network")
+
+    def _open_authors3d(self) -> None:
+        self._open_first("author_network_3d")
+
+    def _open_out(self) -> None:
+        out = getattr(self, "_out_dir", None)
+        if out and os.path.isdir(out):
+            webbrowser.open(f"file://{os.path.abspath(out)}")
+
+    def _set_running(self, running: bool) -> None:
+        self.run_btn.configure(state="disabled" if running else "normal")
+        self.stop_btn.configure(state="normal" if running else "disabled")
+        if running:
+            self.cluster_btn.configure(state="disabled")
+            self.progress.start(12)
+        else:
+            self.progress.stop()
+            has_terms = bool(self._result and self._result.ranked_terms)
+            self.cluster_btn.configure(state="normal" if has_terms else "disabled")
+
+    def _clear_results(self) -> None:
+        for tree in (self.terms_tree, self.cand_tree, self.clusters_tree):
+            tree.delete(*tree.get_children())
+        for btn in (self.open_graph_btn, self.open_graph3d_btn,
+                    self.open_clusters_btn, self.open_citations_btn,
+                    self.open_citations3d_btn, self.open_authors_btn,
+                    self.open_authors3d_btn, self.open_out_btn):
+            btn.configure(state="disabled")
+
+    def _log(self, msg: str) -> None:
+        self.log.configure(state="normal")
+        self.log.insert("end", msg + "\n")
+        self.log.see("end")
+        self.log.configure(state="disabled")
+
+
+def main() -> int:
+    root = tk.Tk()
+    BioleadsGUI(root)
+    root.mainloop()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

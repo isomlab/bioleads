@@ -1,0 +1,23 @@
+# Conda environment for bioleads.
+#
+#   cd <repo root>             # run from here: the pip block installs "-e ."
+#   conda env create -f environment.yml
+#   conda activate bioleads
+#
+# This installs Python plus the full pipeline with PDF input, PubMed/PMC
+# fetching, citation expansion, interactive graph viz (incl. UMAP layout for the
+# term-cluster scatter), the Tkinter GUI, and the test suite. Tkinter ships with
+# the conda-forge Python build, so `bioleads-gui` works out of the box.
+#
+# The two heavy extras are opt-in (see the "Environment" section in README.md):
+#   pip install -e ".[ner]"      # scispaCy biomedical NER (+ a model download)
+#   pip install -e ".[embed]"    # PubMedBERT term clustering (torch/transformers)
+# or grab everything at once with:  pip install -e ".[all]"
+name: bioleads
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11   # 3.10+ required; 3.11 is the scispaCy-compatible sweet spot
+  - pip
+  - pip:
+      - "-e .[pdf,pubmed,viz,dev]"

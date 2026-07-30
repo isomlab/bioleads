@@ -22,10 +22,32 @@ paper→paper graph (via NIH iCite) that ranks the most-cited papers both *withi
 your set* (in-degree — the work your corpus is built on) and *globally* (iCite's
 citation count across all of PubMed).
 
-## Install
+## Install & run
+
+**Most people: just use the launcher — no typing.**
+
+- **macOS:** in the `launchers` folder, double-click **`Launch bioleads.command`**
+- **Windows:** double-click **`launchers\Launch bioleads.bat`**
+
+The first launch sets everything up on its own — Python, the app, and its full pipeline
+(it needs [Miniforge](https://conda-forge.org/download/) — a free, one-time install;
+brand new to this? see the [install-from-scratch guide](docs/INSTALL.md)); after that it
+opens straight away. Step-by-step, including how to download the code:
+**[getting started](docs/getting_started.md)**.
+
+bioleads is a **public** repository, so nothing here needs a GitHub account.
+
+<details>
+<summary><b>Prefer the command line?</b> — conda or pip</summary>
 
 ```bash
-pip install -e .            # core (runs with regex NER + TF-IDF)
+# conda (its Python includes the GUI toolkit):
+conda env create -f environment.yml
+conda activate bioleads
+bioleads --help          # or: bioleads-gui
+
+# or plain pip, from a clone:
+pip install -e .            # core (regex NER + TF-IDF)
 pip install -e ".[all]"     # PDF, PubMed, scispaCy NER, embeddings, viz
 ```
 
@@ -34,6 +56,8 @@ Extras: `pdf`, `pubmed`, `ner`, `embed`, `viz`, `dev`. For real NER also fetch a
 ```bash
 pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_sm-0.5.4.tar.gz
 ```
+
+</details>
 
 ## Environment
 

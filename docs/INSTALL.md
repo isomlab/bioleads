@@ -1,53 +1,36 @@
 # Install from scratch (first time)
 
-This is the **one-time setup of your computer** so it can run bioleads. You don't need
-to know how to code — do these two things once, in order. When you're done, go to
-**[getting_started.md](getting_started.md)** to download and run the app.
+Getting a computer ready for bioleads is the same one-time groundwork every Isom Lab
+tool needs. You do it once, not once per tool.
 
-> **Mac vs Windows:** steps are the same. Where Mac says **Terminal**, Windows users use
-> **Miniforge Prompt**.
+## The shared setup
 
-> **No GitHub account needed.** This is a public repository — anyone can
-> download it without signing up for anything.
+Follow **[Setting up your computer](https://dangerisom.github.io/Isom-Lab/setup/)** on the lab site. For bioleads you need:
 
----
+- **Miniforge**, which brings Python and everything the app needs
+- **GitHub Desktop** (optional, for downloading and updating with buttons)
 
-## 1. Install Miniforge (free)
+That page covers Mac and Windows equally, and needs no typing. **If you've already
+set this computer up for another lab tool, you can skip it entirely.**
 
-Miniforge gives you a private copy of Python plus everything the app needs, without
-disturbing anything else on your computer.
-
-**Mac:**
-1. Go to **[conda-forge.org/download](https://conda-forge.org/download/)**.
-2. Choose the **macOS** installer matching your Mac — **Apple Silicon** (`arm64`) for
-   M1/M2/M3/M4, **Intel** (`x86_64`) for older Macs. Use the **`.pkg`** installer.
-3. Double-click it and click through, accepting the defaults.
-4. **Quit Terminal, then open a fresh one.** Seeing **`(base)`** means it worked.
-
-**Windows:** download the Windows installer from the same page, run it with the
-defaults, then open **Miniforge Prompt** from the Start menu.
-
----
-
-## 2. Install GitHub Desktop (optional, free)
-
-1. Go to **[desktop.github.com](https://desktop.github.com)**, download, and install.
-2. Open it — you can skip the sign-in, since this repo is public.
+> **No GitHub account needed.** `bioleads` is a public repository — anyone can
+> download it without signing up for anything, so skip step 1 on that page.
 
 ---
 
 ## You're set up
 
-- ✅ **conda** (Python + the tools the app needs), and
-- ✅ **GitHub Desktop** (optional).
-
-Next, follow **[getting_started.md](getting_started.md)** to download the code and
-launch bioleads.
+Next: **[getting_started.md](getting_started.md)** — download the code and launch
+bioleads.
 
 ---
 
 ### Trouble?
 
-- **After installing Miniforge you don't see `(base)`** — quit Terminal fully and open a
-  new window. On Mac, `source ~/miniforge3/bin/activate` once if it still doesn't show.
-- **Already have Anaconda or Miniconda?** That works too; any `conda` on your PATH is fine.
+Setup problems are covered under **Trouble?** on the
+[shared setup page](https://dangerisom.github.io/Isom-Lab/setup/#trouble): Miniforge not showing `(base)`, SmartScreen
+warnings on Windows, the administrator-password prompt, a launcher window that
+flashes shut, and missing invitation emails.
+
+Anything specific to bioleads is in
+**[getting_started.md](getting_started.md)**.

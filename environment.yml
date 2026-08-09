@@ -1,5 +1,8 @@
 # Conda environment for bioleads.
 #
+# Most people never touch this: double-click launchers/Launch bioleads instead,
+# which builds this environment on first run. To do it by hand, from inside the repo:
+#
 #   cd <repo root>             # run from here: the pip block installs "-e ."
 #   conda env create -f environment.yml
 #   conda activate bioleads

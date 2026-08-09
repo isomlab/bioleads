@@ -40,7 +40,8 @@ all = [
     "plotly>=5.18",
     "umap-learn>=0.5",
 ]
-dev = ["pytest>=7.4"]
+test = ["pytest>=7.4"]
+dev = ["bioleads[test]"]   # alias: the lab-wide name for this extra is "test"
 
 [project.scripts]
 bioleads = "bioleads.cli:main"

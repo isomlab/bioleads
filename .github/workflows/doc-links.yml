@@ -1,0 +1,37 @@
+name: Doc links
+
+# Checks the links in README.md and docs/, so a moved file or a renamed heading
+# on the shared website does not quietly leave a dead link in this guide.
+#
+# The push check is offline and deterministic: it confirms only that relative
+# links point at files actually committed here — the failure that looks fine on
+# your own machine and 404s for everyone else. External links, including the
+# shared guide's anchors, run on the weekly job and on demand, because someone
+# else's server being down is not a reason to fail a push.
+
+on:
+  push:
+    paths:
+      - '**.md'
+      - 'tools/check_doc_links.py'
+      - '.github/workflows/doc-links.yml'
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 13 * * 1'          # Mondays, 09:30 Miami time
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Relative links
+        run: python3 tools/check_doc_links.py
+
+      - name: External links and website anchors
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python3 tools/check_doc_links.py --external

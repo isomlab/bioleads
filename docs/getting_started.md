@@ -36,8 +36,12 @@ The **first** launch takes a few minutes while it builds a private, isolated con
 environment named `bioleads` containing Python and everything the app needs. Every
 launch after that opens straight away. You don't need to type anything.
 
-If macOS blocks the file, or double-clicking does nothing, see **[Launch
-it](https://dangerisom.github.io/Isom-Lab/getting-started/#launch-it)**.
+New to this? **[Launch
+it](https://dangerisom.github.io/Isom-Lab/getting-started/#launch-it)** walks through
+what you will see, and **[the first-time
+hiccups](https://dangerisom.github.io/Isom-Lab/getting-started/#the-first-time-hiccups)**
+covers macOS blocking the file, Windows SmartScreen, and a double-click that does
+nothing.
 
 ---
 
@@ -79,7 +83,9 @@ conda env remove -n bioleads
 
 ## If something goes wrong
 
-The usual problems are on the shared page: **[If something goes
+Most problems are one of a handful of things — start with **[Try these
+first](https://dangerisom.github.io/Isom-Lab/getting-started/#try-these-first)**, then
+the rest of **[If something goes
 wrong](https://dangerisom.github.io/Isom-Lab/getting-started/#if-something-goes-wrong)**.
 
-Stuck? Send Dan (<a href="&#109;&#97;&#105;&#108;&#116;&#111;&#58;&#100;&#105;&#115;&#111;&#109;&#64;&#109;&#105;&#97;&#109;&#105;&#46;&#101;&#100;&#117;">&#100;&#105;&#115;&#111;&#109;<span>&#64;</span>&#109;&#105;&#97;&#109;&#105;<span>&#46;</span>&#101;&#100;&#117;</a>) the exact command you ran and the message you got.
+Stuck? Send Dan (<a href="&#109;&#97;&#105;&#108;&#116;&#111;&#58;&#100;&#105;&#115;&#111;&#109;&#64;&#109;&#105;&#97;&#109;&#105;&#46;&#101;&#100;&#117;">&#100;&#105;&#115;&#111;&#109;<span>&#64;</span>&#109;&#105;&#97;&#109;&#105;<span>&#46;</span>&#101;&#100;&#117;</a>) the exact command you ran and the message you got — the shared page lists **[what to include](https://dangerisom.github.io/Isom-Lab/getting-started/#still-stuck)**.

@@ -256,9 +256,52 @@ This also explains the inert negative term without appealing to text quality: no
 setting of γ can move an aggregate when the thing γ controls is one twentieth of
 the output.
 
-The obvious implication is to gate the forward direction rather than the backward
-one, or to stop adding it wholesale. That is a design change, not a
-documentation change, and it has not been made.
+### Measured: gating the other way is much better
+
+The obvious implication — gate forward rather than backward — was then tested
+directly. Two arms, 12 reviews, γ=0.25:
+
+- **`relevance_fwd`** inverts the design: profile on seeds + backward references,
+  gate the forward citers, pass backward through.
+- **`relevance_seeds`** is the control: profile on the **seeds alone** and gate
+  *both* directions, trusting neither. It exists because `relevance_fwd`
+  profiles on backward references while the ground truth *is* a reference list,
+  which could flatter it circularly.
+
+| arm | median P | median R | median F1 | retrieved | hits | overall precision |
+|---|---|---|---|---|---|---|
+| `relevance` (shipped) | 0.0247 | 0.2659 | 0.0434 | 47,974 | 173 | 0.36% |
+| `both` (= bfs) | 0.0244 | **0.3252** | 0.0442 | 49,683 | 205 | 0.41% |
+| `backward` | 0.0399 | 0.1426 | 0.0634 | 2,342 | 95 | 4.06% |
+| `relevance_fwd` | 0.0520 | 0.1760 | 0.0718 | 2,712 | 121 | 4.46% |
+| **`relevance_seeds`** | **0.0854** | 0.1406 | **0.0927** | **975** | 103 | **10.56%** |
+
+Both inversions beat the shipped strategy, and **the control wins outright** —
+`relevance_seeds` has the better F1 in 10 of 12 reviews, the better precision in
+11 of 12, and beats `relevance_fwd` in 11 of 12. Since the arm *least* exposed to
+the circularity worry is the strongest, the result is not an artefact of the
+ground truth being a reference list.
+
+Read together with everything above, the conclusion is specific: **profiling on
+forward citers is actively harmful.** Dropping them from the profile and gating
+both directions turns 47,974 retrieved documents at 0.36% precision into 975 at
+10.56% — a 29× improvement in precision for 49× less material.
+
+**This is measured but not implemented.** Changing what the profile is built from
+changes what the strategy *is*, and that is a decision for the maintainer, not a
+docs edit.
+
+### The knob that actually matters
+
+One caveat on reading the table as a verdict. `both` still has by far the best
+**recall** (0.3252 against 0.1406), and this pipeline's downstream job — term
+enrichment and ABC discovery — may well prefer breadth to cleanliness. F1 is the
+benchmark's summary statistic, not necessarily the right objective for a corpus
+that feeds stage 6.
+
+The lever there is **`expand_top_k`**, which caps each gated direction and so
+bounds `relevance_seeds`' recall by construction. Everything measured here says
+top-K, not `rocchio_gamma`, is the parameter worth sweeping.
 
 ### The assumption, and when it breaks
 

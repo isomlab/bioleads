@@ -395,11 +395,12 @@ def run_benchmark(trials, arms, ctx, *, year_cutoff: bool = True, log=print):
 
 def print_summary(summary: dict, log=print) -> None:
     log("")
-    log(f"{'arm':<18}{'median P':>10}{'median R':>10}{'median F1':>11}"
+    width = max([len(a) for a in summary] + [12]) + 2
+    log(f"{'arm':<{width}}{'median P':>10}{'median R':>10}{'median F1':>11}"
         f"{'median n':>10}{'reviews':>9}")
-    log("-" * 68)
+    log("-" * (width + 50))
     for arm, s in summary.items():
-        log(f"{arm:<18}{s['median_precision']:>10.4f}{s['median_recall']:>10.4f}"
+        log(f"{arm:<{width}}{s['median_precision']:>10.4f}{s['median_recall']:>10.4f}"
             f"{s['median_f1']:>11.4f}{s['median_n_retrieved']:>10.0f}"
             f"{s['n_reviews']:>9d}")
 

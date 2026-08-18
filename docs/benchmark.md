@@ -99,8 +99,9 @@ for the numbers and what follows from them.
 The gamma sweep is measured in the same place. Headline: at the default
 `rocchio_gamma=0.25` the negative term moves one document across twelve reviews,
 and the gate as a whole governs only ~5% of what the relevance strategy returns
-(the rest being ungated forward citers). Both results are titles-only; `--abstracts`
-is the fidelity test.
+(the rest being ungated forward citers). Both were re-run with `--abstracts` (title + abstract
+scoring) and are unchanged — richer text does not rescue the gate, so the cause
+is structural rather than a scoring-fidelity artefact.
 
 If you re-run and get a different answer, the parameters that matter most are
 `--seeds` (fewer seeds means a narrower profile), `--min-refs`, and whether the

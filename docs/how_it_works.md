@@ -228,12 +228,18 @@ Two things fall out.
 
 **The negative term is inert at its default.** Going from γ=0 to γ=0.25 changes
 the outcome in 4 of 12 reviews and moves the total from 172 hits to 173 — one
-document across nearly 48,000 retrieved. γ=0.5 moves it to 177. Whatever the
-Rocchio term is worth, this benchmark cannot see it. The likely reason is the
-input: scoring on iCite *titles* leaves every candidate pointing in much the same
-direction in embedding space, so the tail centroid nearly parallels the positive
-one and subtracting it rescales more than it reorients. Re-running with
-`--abstracts` is the test of that.
+document across nearly 48,000 retrieved. γ=0.5 moves it to 177.
+
+The obvious suspect was the input: scoring on iCite *titles* would leave every
+candidate pointing much the same way in embedding space, so the tail centroid
+would nearly parallel the positive one and subtracting it would rescale more than
+it reorients. **That explanation was tested and is wrong.** Re-run with
+`--abstracts`, scoring on title + abstract, the gate finds *exactly* the same
+number of hits — 172, 173, 172 for γ = 0, 0.25, 0.5 — against 172, 173, 177 on
+titles. Richer text bought nothing; at γ=0.5 it cost 5 hits.
+
+So the negative term is inert regardless of how good the text is, which points
+back at the structural problem below rather than at the scoring.
 
 **The gate is attached to the wrong 5%.** Compared with `both`, relevance
 retrieves 3.4% fewer candidates and loses 15.6% of the hits. It looks
@@ -245,6 +251,10 @@ measurement above) the cleaner twentieth at that.
 
 Plain `backward` retrieves 2,342 documents for 95 hits — 4.1% precision, against
 0.4% for `both`. On this benchmark, doing less is worth more.
+
+This also explains the inert negative term without appealing to text quality: no
+setting of γ can move an aggregate when the thing γ controls is one twentieth of
+the output.
 
 The obvious implication is to gate the forward direction rather than the backward
 one, or to stop adding it wholesale. That is a design change, not a

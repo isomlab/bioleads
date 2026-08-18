@@ -211,6 +211,45 @@ sit closer to backward's home turf than a topic-labelled benchmark would. That
 is a reason to want a second, non-citation ground truth — not a reason to keep
 asserting an asymmetry that measured the other way.
 
+### Measured: the gate governs 5% of what the strategy returns
+
+A second run (12 reviews, 5 seeds, gamma swept, titles-only scoring) measured the
+gate itself:
+
+| arm | median P | median R | median F1 | total retrieved | total hits |
+|---|---|---|---|---|---|
+| `backward` (ungated) | 0.0399 | 0.1426 | **0.0634** | 2,342 | 95 |
+| `both` (= bfs) | 0.0244 | 0.3252 | 0.0442 | 49,683 | 205 |
+| `relevance` γ=0 | 0.0247 | 0.2659 | 0.0434 | 47,975 | 172 |
+| `relevance` γ=0.25 | 0.0247 | 0.2659 | 0.0434 | 47,974 | 173 |
+| `relevance` γ=0.5 | 0.0263 | 0.2726 | 0.0461 | 47,972 | 177 |
+
+Two things fall out.
+
+**The negative term is inert at its default.** Going from γ=0 to γ=0.25 changes
+the outcome in 4 of 12 reviews and moves the total from 172 hits to 173 — one
+document across nearly 48,000 retrieved. γ=0.5 moves it to 177. Whatever the
+Rocchio term is worth, this benchmark cannot see it. The likely reason is the
+input: scoring on iCite *titles* leaves every candidate pointing in much the same
+direction in embedding space, so the tail centroid nearly parallels the positive
+one and subtracting it rescales more than it reorients. Re-running with
+`--abstracts` is the test of that.
+
+**The gate is attached to the wrong 5%.** Compared with `both`, relevance
+retrieves 3.4% fewer candidates and loses 15.6% of the hits. It looks
+ineffective because it *is* barely acting: backward references are only 2,342 of
+the ~49,700 documents this strategy returns. The other ~95% are forward citers,
+added with no filtering at all. So the entire apparatus — profile, negative term,
+top-K — tunes a knob controlling one twentieth of the output, and (per the
+measurement above) the cleaner twentieth at that.
+
+Plain `backward` retrieves 2,342 documents for 95 hits — 4.1% precision, against
+0.4% for `both`. On this benchmark, doing less is worth more.
+
+The obvious implication is to gate the forward direction rather than the backward
+one, or to stop adding it wholesale. That is a design change, not a
+documentation change, and it has not been made.
+
 ### The assumption, and when it breaks
 
 "Forward converges" is a heuristic, not a law. It holds for a **topical research

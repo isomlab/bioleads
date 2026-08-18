@@ -96,6 +96,12 @@ run at scale (40 reviews, 5 seeds) found the opposite: backward won on *both*, i
 33 of 40 reviews. See [How bioleads works](how_it_works.md#measured-the-precision-half-of-this-claim-does-not-hold)
 for the numbers and what follows from them.
 
+The gamma sweep is measured in the same place. Headline: at the default
+`rocchio_gamma=0.25` the negative term moves one document across twelve reviews,
+and the gate as a whole governs only ~5% of what the relevance strategy returns
+(the rest being ungated forward citers). Both results are titles-only; `--abstracts`
+is the fidelity test.
+
 If you re-run and get a different answer, the parameters that matter most are
 `--seeds` (fewer seeds means a narrower profile), `--min-refs`, and whether the
 year cutoff is on — check those before concluding the earlier run was wrong.

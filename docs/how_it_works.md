@@ -178,6 +178,39 @@ more characteristic than a one-off), and candidates are scored by cosine against
 it. The fallback is automatic, and a failure in the embedding path degrades to
 it rather than sinking the run.
 
+### Measured: the precision half of this claim does not hold
+
+The asymmetry above is the design's *rationale*. It is also an empirical claim,
+and [the benchmark](benchmark.md) now tests it against systematic reviews
+instead of argument. On 40 reviews, 5 seeds each, one round, with the
+publication-year correction applied:
+
+| direction | median precision | median recall | median candidates |
+|---|---|---|---|
+| forward (`cited_by`) | 0.0152 | 0.1154 | 487 |
+| backward (`references`) | **0.0530** | **0.1667** | 164 |
+
+**Backward wins on both, in 33 of the 40 reviews** (median precision ratio 0.43).
+The two directions surface a comparable number of true hits — 403 forward against
+397 backward — but forward has to drag in 2.88× as many candidates to do it, and
+one seed set pulled 30,848.
+
+So the direction this pipeline treats as *reliable* is, on this measure, the
+noisy one. Two consequences worth being blunt about:
+
+- **The stated justification for `relevance` is unsupported.** It may still build
+  a better corpus than `bfs` — that is a separate question, measured separately —
+  but not for the reason given.
+- **The ungated half looks like the wrong half.** Phase 1 adds *every* forward
+  citer without filtering and only gates the backward references. The measurement
+  says the filtering effort is being spent on the cleaner direction.
+
+One caveat, stated once and not used to explain the result away: the ground truth
+*is* a reference list, so "can a seed's references predict other references" may
+sit closer to backward's home turf than a topic-labelled benchmark would. That
+is a reason to want a second, non-citation ground truth — not a reason to keep
+asserting an asymmetry that measured the other way.
+
 ### The assumption, and when it breaks
 
 "Forward converges" is a heuristic, not a law. It holds for a **topical research

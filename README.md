@@ -19,7 +19,9 @@ Optional PubMedBERT embeddings cluster terms semantically so synonyms group toge
 
 **For a stage-by-stage walkthrough of the whole pipeline — what each step does,
 why it's there, and which control changes it — see [How bioleads
-works](docs/how_it_works.md).**
+works](docs/how_it_works.md).** The citation-expansion strategy is benchmarked
+against systematic reviews with `tools/benchmark_expansion.py`; see
+[Benchmarking citation expansion](docs/benchmark.md).
 
 It can also **map the citation network** of your corpus (`--citations`): a directed
 paper→paper graph (via NIH iCite) that ranks the most-cited papers both *within
@@ -239,9 +241,11 @@ either source. Cycles are avoided: a record already seen is never re-queued.
 
 **Relevance-guided expansion** (`--expand-strategy relevance`) is a smarter,
 two-phase alternative to the plain BFS snowball. It exploits an asymmetry
-between the two link directions — forward citations are topically *precise* but
-limited, backward references are *comprehensive* but noisy — by spending the
-precision of the first direction as a filter on the recall of the second. (No
+between the two link directions — forward citations were expected to be
+topically *precise* but limited, backward references *comprehensive* but noisy —
+by spending the precision of the first direction as a filter on the recall of the
+second. **Benchmarking has not borne that out** (backward measured *more*
+precise, in 33 of 40 systematic reviews); see [docs/benchmark.md](docs/benchmark.md). (No
 model is trained: this is pseudo-relevance feedback, the profile is a centroid,
 and the gate is a cosine ranking. Full reasoning in
 [How bioleads works](docs/how_it_works.md#2-grow-the-corpus-by-following-citations).)

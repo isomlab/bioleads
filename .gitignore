@@ -27,3 +27,6 @@ outputs/
 .vscode/
 .pytest_cache/
 .obsidian/
+
+# Benchmark harness cache (tools/benchmark_expansion.py)
+.benchmark_cache/

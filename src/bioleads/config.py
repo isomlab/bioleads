@@ -85,6 +85,27 @@ class Config:
     expand_back_rounds: int = 1  # phase-2 (references) depth
     expand_top_k: int = 50       # keep this many most-relevant backward papers
 
+    # --- Relevance gating (Rocchio) ---
+    # Phase 2 scores each backward reference against the phase-1 topic profile.
+    # With rocchio_gamma > 0 the profile carries a *negative* term as well:
+    # candidates are ranked once against the positive centroid, the worst
+    # rocchio_neg_frac of them are taken as pseudo-non-relevant, and their
+    # centroid is subtracted from the query vector —
+    #     q = normalize(centroid(profile) - gamma * centroid(worst candidates))
+    # — so the gate is pushed *away* from the off-topic bulk of a reference list
+    # instead of only toward the topic. This is the negative half of Rocchio
+    # (1971); the beta term is implicit, since q is renormalized and only the
+    # gamma/beta ratio matters.
+    #
+    # The negatives come from the candidate pool itself: a reference list is
+    # mostly off-topic by assumption (that is why phase 2 exists), so its
+    # low-scoring tail is a supply of *hard* negatives — citation-adjacent but
+    # off-topic — at no extra fetch or embedding cost. Set gamma to 0 for the
+    # plain positive-only centroid.
+    rocchio_gamma: float = 0.25
+    rocchio_neg_frac: float = 0.25   # fraction of the tail used as negatives
+    rocchio_min_candidates: int = 8  # below this, the tail is too small to trust
+
     # --- Citation network ---
     # Build a directed paper-to-paper citation graph over the corpus's
     # PMID-bearing records (via NIH iCite) and rank papers by how often they're

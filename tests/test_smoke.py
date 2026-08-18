@@ -694,3 +694,114 @@ def test_write_author_graph_3d(tmp_path, monkeypatch):
     path = write_author_html_3d(g, str(out))
     assert path and os.path.exists(path)
     assert "plotly" in out.read_text().lower()
+
+
+# ------------------------------------------------ Rocchio negative term --
+
+def _pinned_entities(monkeypatch, mapping):
+    """Pin NER output so these tests don't depend on which engine is installed."""
+    import bioleads.ner as ner_mod
+    monkeypatch.setattr(
+        ner_mod, "extract_entities",
+        lambda docs, cfg=None, **kw: {d.doc_id: mapping[d.doc_id] for d in docs})
+
+
+def _rocchio_fixture(monkeypatch):
+    """A profile that cannot separate an on-topic paper from a methods paper.
+
+    The profile carries the topic *and* the methods vocabulary its own papers
+    use, so X (on topic) and Y (methods) overlap it equally — a positive-only
+    centroid ties them. The tail shares Y's vocabulary, diluted with its own
+    jargon, so it ranks last and supplies hard negatives for free.
+    """
+    from bioleads.sources import Document
+
+    def doc(i):
+        return Document(doc_id=f"PMID:{i}", text="x", source="pubmed")
+
+    ents = {
+        "PMID:1": ["trpv1", "vasodilation", "artery", "calcium", "imaging", "microscopy"],
+        "PMID:100": ["trpv1", "vasodilation", "artery"],
+        "PMID:101": ["calcium", "imaging", "microscopy"],
+    }
+    junk = ["buffer", "pipette", "coverslip", "objective", "laser", "filter", "dish"]
+    for i in range(8):
+        ents[f"PMID:{200 + i}"] = ["calcium", "imaging", "microscopy"] + junk + [f"s{i:02d}"]
+    _pinned_entities(monkeypatch, ents)
+    return [doc(1)], [doc(100), doc(101)] + [doc(200 + i) for i in range(8)]
+
+
+def test_rocchio_negative_term_separates_a_hard_negative(monkeypatch):
+    from bioleads.expansion import _term_overlap_scores
+
+    profile, cands = _rocchio_fixture(monkeypatch)
+
+    positive_only = _term_overlap_scores(profile, cands, Config(rocchio_gamma=0.0))
+    assert positive_only[0] == pytest.approx(positive_only[1]), (
+        "fixture should tie the on-topic and methods papers under a bare centroid")
+
+    with_negative = _term_overlap_scores(
+        profile, cands, Config(rocchio_gamma=0.25, expand_top_k=1))
+    # X (on topic) is promoted over Y (methods) once the tail is subtracted.
+    assert with_negative[0] > with_negative[1]
+    # ...and the off-topic tail is pushed down, not merely reordered.
+    assert max(with_negative[2:]) < min(with_negative[:2])
+
+
+def test_rocchio_gamma_zero_is_the_old_behavior(monkeypatch):
+    from bioleads.expansion import _term_overlap_scores
+
+    profile, cands = _rocchio_fixture(monkeypatch)
+    cfg = Config(rocchio_gamma=0.0)
+    once = _term_overlap_scores(profile, cands, cfg)
+    assert once == _term_overlap_scores(profile, cands, cfg)
+    assert all(x >= 0 for x in once), "positive-only scores are cosines of counts"
+
+
+def test_rocchio_applies_to_the_embedding_path_too(monkeypatch):
+    """Same construction, but through the PubMedBERT scorer with pinned vectors."""
+    np = pytest.importorskip("numpy")
+    import bioleads.embeddings as emb_mod
+    from bioleads.expansion import _embedding_scores
+    from bioleads.sources import Document
+
+    topic, methods = np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])
+    vecs = {
+        "PMID:1": topic + methods,                 # profile: topic AND methods
+        "PMID:100": topic,                         # on topic
+        "PMID:101": methods,                       # methods, equally close
+    }
+    for i in range(8):                             # tail: methods + own jargon
+        vecs[f"PMID:{200 + i}"] = methods + np.array([0.0, 0.0, 2.0])
+
+    monkeypatch.setattr(emb_mod, "embed_texts",
+                        lambda texts, cfg=None: np.vstack([vecs[t] for t in texts]))
+
+    def doc(i):
+        return Document(doc_id=f"PMID:{i}", text=f"PMID:{i}", source="pubmed")
+
+    profile = [doc(1)]
+    cands = [doc(100), doc(101)] + [doc(200 + i) for i in range(8)]
+
+    positive_only = _embedding_scores(profile, cands, Config(rocchio_gamma=0.0))
+    assert positive_only[0] == pytest.approx(positive_only[1])
+
+    with_negative = _embedding_scores(
+        profile, cands, Config(rocchio_gamma=0.25, expand_top_k=1))
+    assert with_negative[0] > with_negative[1]
+
+
+def test_pseudo_negatives_never_eat_the_kept_top_k():
+    from bioleads.expansion import _pseudo_negative_idx
+
+    # Off by default when the pool is too small for a meaningful tail.
+    assert _pseudo_negative_idx([1.0, 0.5], Config(rocchio_gamma=0.5), top_k=1) == []
+    # gamma = 0 disables it regardless of pool size.
+    assert _pseudo_negative_idx(list(range(50)), Config(rocchio_gamma=0.0), top_k=5) == []
+    # A greedy tail is clamped so it cannot overlap the top-K.
+    greedy = Config(rocchio_gamma=0.5, rocchio_neg_frac=0.9)
+    assert len(_pseudo_negative_idx(list(range(10)), greedy, top_k=8)) == 2
+    # The tail is the *worst*-scoring end.
+    scores = [0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.5, 0.05]
+    idx = _pseudo_negative_idx(scores, Config(rocchio_gamma=0.5), top_k=1)
+    assert set(idx) == {9, 1}, f"expected the two lowest scores, got {idx}"

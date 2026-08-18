@@ -267,8 +267,9 @@ class BioleadsGUI:
             "reference list spans every field the seed touched. relevance uses "
             "the reliable direction to filter the unreliable one: papers citing "
             "your seeds are topically tight, so it averages them into a topic "
-            "profile, then keeps only the top-K of the seeds' own references by "
-            "cosine similarity to it — backward reach without backward noise.")
+            "profile, subtracts the candidate pool's own off-topic tail from it, "
+            "then keeps only the top-K of the seeds' references by cosine "
+            "similarity — backward reach without backward noise.")
         ttk.Label(exp2, text="Relevance top-K:").pack(side="left")
         topk_spin = ttk.Spinbox(exp2, from_=1, to=100000, width=6,
                                 textvariable=self.expand_topk_var)

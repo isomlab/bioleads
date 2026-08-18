@@ -257,7 +257,12 @@ and the gate is a cosine ranking. Full reasoning in
    `--expand-top-k` most relevant are kept.
 
 Relevance is measured by **NER term-overlap cosine**, automatically upgraded to
-**PubMedBERT cosine** when the `embed` extra is installed. Added records are
+**PubMedBERT cosine** when the `embed` extra is installed. The profile is a
+**Rocchio query vector**: the positive centroid of the Phase-1 documents *minus*
+`rocchio_gamma` times the centroid of the worst-scoring candidates. Those
+negatives come free from the candidate pool's own tail — citation-adjacent but
+off-topic, which is the distinction the gate actually has to make. Set
+`rocchio_gamma=0` for a positive-only centroid. Added records are
 tagged with their phase (`forward`/`backward`) and, for kept references, a
 `relevance` score. Caveat: the "forward converges" assumption is strongest for
 topical research seeds; a popular *method/tool/review* seed gets cited across

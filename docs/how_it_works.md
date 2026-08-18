@@ -132,17 +132,43 @@ on the recall of the backward one:
    by **cosine similarity to the profile**. Keep only the top **K**. The rest
    are discarded before they ever reach the corpus.
 
+The profile is a **Rocchio query vector**, which means it has a negative half as
+well:
+
+> q = normalize( centroid(profile) − γ · centroid(worst-scoring candidates) )
+
+Pointing the gate only *toward* the topic is not the same as pointing it *away
+from* what the topic isn't. A methods paper that shares the profile's technique
+vocabulary can sit as close to a positive centroid as a genuinely on-topic paper
+does — the centroid has no way to tell them apart, because the profile documents
+use that technique vocabulary too. Subtracting a negative centroid is what
+creates the separation.
+
+**The negatives come free, from the candidate pool itself.** Phase 2 exists
+precisely because a reference list is mostly off-topic, which means its
+low-scoring tail is already a supply of *hard* negatives — citation-adjacent,
+plausible, and wrong — which is exactly the region the gate has to discriminate.
+So candidates are scored twice: once against the positive centroid to find the
+tail, then again against the full Rocchio vector. No extra fetches, and no extra
+model calls (the candidate embeddings are computed once and reused).
+
+Guards: the negative term switches off when the pool is smaller than
+`rocchio_min_candidates` (its tail wouldn't mean anything), and the tail is
+clamped so it can never reach into the top-K the gate is about to keep. Setting
+`rocchio_gamma` to 0 reduces the whole thing to the positive-only centroid.
+
 The result is meant to be backward-direction *recall* at forward-direction
 *precision*: you reach the foundational literature without inheriting the
 reference list's off-topic bulk.
 
 **No model is trained here.** Nothing is fit, and there are no learned
-parameters — the profile is an average of vectors and the gate is a cosine
-threshold-by-rank. In information-retrieval terms this is **pseudo-relevance
-feedback** (the Rocchio family): assume a set you retrieved is relevant, build a
-query representation out of it, then re-rank with that. The parts are all
-standard; what's specific to bioleads is *which* set it trusts as the feedback
-source — the forward citers — and why.
+parameters — the profile is a weighted difference of two averages, and the gate
+is a rank cutoff. In information-retrieval terms this is **pseudo-relevance
+feedback** in the classical Rocchio (1971) form: assume a set you retrieved is
+relevant, build a query representation out of it, then re-rank with that. The
+parts are all standard; what's specific to bioleads is *which* sets it trusts —
+forward citers as the positive evidence, the backward tail as the negative — and
+why those roles fall out of the citation direction.
 
 **How relevance is measured.** With the `embed` extra installed, PubMedBERT
 cosine as described above. Without it, the same shape in a cheaper space: the
@@ -187,6 +213,10 @@ Two things about the controls are easy to get wrong:
   the GUI doesn't expose — one round forward, one round backward.
 - **`Follow` is ignored by `relevance`**, which by construction always goes
   forward first and backward second.
+
+The Rocchio settings (`rocchio_gamma`, `rocchio_neg_frac`,
+`rocchio_min_candidates`) are Python-API only — the GUI and CLI use the
+defaults.
 
 ## 3. Extract entities
 

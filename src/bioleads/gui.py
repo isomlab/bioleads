@@ -15,6 +15,7 @@ import threading
 import traceback
 import webbrowser
 from collections import Counter
+from dataclasses import replace
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -42,7 +43,12 @@ class BioleadsGUI:
         self._queue: queue.Queue = queue.Queue()
         self._worker: threading.Thread | None = None
         self._cancel = threading.Event()
+        # Everything below describes the *current* run and is reset by
+        # _clear_results() when a new one starts, so a failed or stopped run
+        # can't leave the previous run's results wired to the buttons.
         self._result: PipelineResult | None = None
+        self._out_dir: str | None = None
+        self._cfg: Config | None = None
 
         self._build_inputs()
         self._build_actions()
@@ -418,6 +424,10 @@ class BioleadsGUI:
         self._cancel.clear()
         self._set_running(True)
         self._clear_results()
+        # Claim the run's output folder and settings up front: clustering can be
+        # asked for as soon as terms exist, and it needs both.
+        self._out_dir = out_dir
+        self._cfg = cfg
         self._log(f"Starting pipeline → {out_dir}")
         self.status_var.set("Starting…")
         relevance = cfg.expand_strategy == "relevance"
@@ -453,7 +463,9 @@ class BioleadsGUI:
         if not terms:
             messagebox.showinfo("No terms", "Run the pipeline first to get ranked terms.")
             return
-        cfg = Config(n_clusters=int(self.nclusters_var.get()))
+        # Carry the run's settings (embed model, batch size, seed, ...) over and
+        # only override the cluster count from the spinbox.
+        cfg = replace(self._cfg or Config(), n_clusters=int(self.nclusters_var.get()))
         self._set_running(True)
         self.status_var.set("Embedding & clustering… (first run downloads the model)")
         self.clusters_tree.delete(*self.clusters_tree.get_children())
@@ -469,7 +481,7 @@ class BioleadsGUI:
             # Render the 2D scatter here (off the UI thread) so a slow reduction
             # doesn't freeze the window.
             scatter = None
-            out_dir = getattr(self, "_out_dir", None)
+            out_dir = self._out_dir
             if clusters and out_dir:
                 try:
                     self._emit_progress("Rendering term-cluster scatter…")
@@ -513,7 +525,7 @@ class BioleadsGUI:
 
     def _persist_clusters(self, clusters: list[TermCluster]) -> None:
         """Write term_clusters.csv and recolor the co-occurrence graph by cluster."""
-        out_dir = getattr(self, "_out_dir", None)
+        out_dir = self._out_dir
         if not (clusters and out_dir and self._result):
             return
         try:
@@ -664,7 +676,7 @@ class BioleadsGUI:
         self._open_first("author_network_3d")
 
     def _open_out(self) -> None:
-        out = getattr(self, "_out_dir", None)
+        out = self._out_dir
         if out and os.path.isdir(out):
             webbrowser.open(f"file://{os.path.abspath(out)}")
 
@@ -680,6 +692,8 @@ class BioleadsGUI:
             self.cluster_btn.configure(state="normal" if has_terms else "disabled")
 
     def _clear_results(self) -> None:
+        self._result = None
+        self._out_dir = None
         for tree in (self.terms_tree, self.cand_tree, self.clusters_tree):
             tree.delete(*tree.get_children())
         for btn in (self.open_graph_btn, self.open_graph3d_btn,

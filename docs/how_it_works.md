@@ -291,17 +291,46 @@ both directions turns 47,974 retrieved documents at 0.36% precision into 975 at
 changes what the strategy *is*, and that is a decision for the maintainer, not a
 docs edit.
 
-### The knob that actually matters
+### The knob that actually matters: top-K, swept
 
-One caveat on reading the table as a verdict. `both` still has by far the best
-**recall** (0.3252 against 0.1406), and this pipeline's downstream job — term
-enrichment and ABC discovery — may well prefer breadth to cleanliness. F1 is the
-benchmark's summary statistic, not necessarily the right objective for a corpus
-that feeds stage 6.
+`both` has the better **recall** in the table above (0.3252 against 0.1406), and
+this pipeline's downstream job — term enrichment and ABC discovery — may prefer
+breadth to cleanliness. But that gap is not a property of the gate; it is
+`expand_top_k`, which caps each gated direction. Swept on `relevance_seeds`
+(12 reviews, γ=0.25):
 
-The lever there is **`expand_top_k`**, which caps each gated direction and so
-bounds `relevance_seeds`' recall by construction. Everything measured here says
-top-K, not `rocchio_gamma`, is the parameter worth sweeping.
+| K | median P | median R | median F1 | retrieved | hits | overall P |
+|---|---|---|---|---|---|---|
+| 10 | **0.1255** | 0.0333 | 0.0504 | 199 | 28 | **14.07%** |
+| 25 | 0.0941 | 0.0903 | **0.0948** | 486 | 56 | 11.52% |
+| 50 | 0.0854 | 0.1406 | 0.0927 | 975 | 103 | 10.56% |
+| 100 | 0.0624 | 0.2473 | 0.0865 | 1,948 | 146 | 7.49% |
+| 200 | 0.0511 | 0.2992 | 0.0745 | 3,350 | 183 | 5.46% |
+| 400 | 0.0385 | 0.3186 | 0.0611 | 4,780 | 195 | 4.08% |
+| 800 | 0.0328 | **0.3252** | 0.0542 | 6,595 | 201 | 3.05% |
+| *`both`* | *0.0244* | *0.3252* | *0.0442* | *49,683* | *205* | *0.41%* |
+| *`backward`* | *0.0399* | *0.1426* | *0.0634* | *2,342* | *95* | *4.06%* |
+
+Three things worth taking from this.
+
+**The gate dominates `bfs` rather than trading against it.** At K=800 it reaches
+the same median recall as `both` — 0.3252 — with 201 of its 205 hits, from 6,595
+documents instead of 49,683. That is 98% of the findings for 13% of the material,
+at 7.4× the precision. There is no recall argument for `both`: whatever breadth
+you want, the gate gets it more cleanly.
+
+**The shipped `expand_top_k = 50` is a good default.** It has the better F1 in 11
+of 12 reviews against `both` and 10 of 12 against `backward` — the best paired
+record of any K tried. The parameter was never the problem; the profile source
+was.
+
+**Pick K by what stage 6 needs, not by F1.** F1 peaks at K=25, but ABC discovery
+wants intermediates, and an A–C pair can only be found if some B is in the
+corpus. K≈100–200 buys recall of 0.25–0.30 at 5–7× `both`'s precision, which is
+likely the right region for hypothesis generation; K≈10–25 is for reading a tight
+corpus yourself.
+
+`rocchio_gamma`, by contrast, changed one document in twelve reviews. Sweep K.
 
 ### The assumption, and when it breaks
 

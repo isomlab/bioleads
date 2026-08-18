@@ -276,3 +276,64 @@ def test_max_profile_caps_the_profile_but_not_what_is_retrieved(bench, monkeypat
     assert seen["profile_size"] == 11                       # 1 seed + 10 citers
     assert capped == uncapped, "the cap must not change what the arm retrieves"
     assert len(capped) == 50
+
+
+def test_relevance_fwd_inverts_which_direction_is_gated(bench, monkeypatch):
+    """relevance_fwd must pass backward through and gate forward — the mirror
+    image of the shipped strategy."""
+    import bioleads.expansion as exp_mod
+    from bioleads.config import Config
+
+    calls = []
+
+    def fake_top_k(profile_docs, cand_docs, cfg, **kw):
+        calls.append({"profile": {d.meta["pmid"] for d in profile_docs},
+                      "cands": {d.meta["pmid"] for d in cand_docs}})
+        return [(cand_docs[0], 1.0)]
+
+    monkeypatch.setattr(exp_mod, "_top_k_relevant", fake_top_k)
+
+    records = {"1": {"cited_by": ["10", "11"], "references": ["20", "21"], "title": "s"}}
+    for pid in ("10", "11", "20", "21"):
+        records[pid] = {"title": f"t{pid}"}
+    t = _trial(bench, ["1"], records, target=[])
+    ctx = {"records": records, "texts": None, "cfg": Config()}
+
+    got = bench.run_arm("relevance_fwd:0.25", t, ctx)
+    assert {"20", "21"} <= got, "backward passes through ungated"
+    assert len(got & {"10", "11"}) == 1, "forward is gated to the kept top-K"
+    assert calls[0]["profile"] == {"1", "20", "21"}, "profile = seeds + backward"
+    assert calls[0]["cands"] == {"10", "11"}, "candidates = forward"
+
+
+def test_relevance_seeds_gates_both_directions(bench, monkeypatch):
+    import bioleads.expansion as exp_mod
+    from bioleads.config import Config
+
+    calls = []
+
+    def fake_top_k(profile_docs, cand_docs, cfg, **kw):
+        calls.append({d.meta["pmid"] for d in profile_docs})
+        return [(cand_docs[0], 1.0)]
+
+    monkeypatch.setattr(exp_mod, "_top_k_relevant", fake_top_k)
+
+    records = {"1": {"cited_by": ["10", "11"], "references": ["20", "21"], "title": "s"}}
+    for pid in ("10", "11", "20", "21"):
+        records[pid] = {"title": f"t{pid}"}
+    t = _trial(bench, ["1"], records, target=[])
+
+    got = bench.run_arm("relevance_seeds:0.25", t,
+                        {"records": records, "texts": None, "cfg": Config()})
+    assert len(got) == 2, "one kept from each direction"
+    assert len(got & {"10", "11"}) == 1 and len(got & {"20", "21"}) == 1
+    assert all(p == {"1"} for p in calls), "profile is the seeds alone, both times"
+
+
+def test_scored_pmids_follows_the_arms_requested(bench):
+    records = {"1": {"cited_by": ["10", "11"], "references": ["20"]}}
+    t = _trial(bench, ["1"], records, target=[])
+    assert bench.scored_pmids(t, 0, ["relevance:0"]) == {"1", "10", "11", "20"}
+    assert bench.scored_pmids(t, 0, ["relevance_fwd:0"]) == {"1", "10", "11", "20"}
+    # A cap shrinks only the profile side of whichever arm is asked for.
+    assert bench.scored_pmids(t, 1, ["relevance:0"]) < {"1", "10", "11", "20"}

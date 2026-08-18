@@ -228,20 +228,41 @@ def _seed_links(trial: Trial, field_name: str) -> set[str]:
     return out - set(trial.seeds)
 
 
-def profile_forward(forward, cap: int):
-    """The forward citers used to build the profile — deterministic, so the
-    caller can pre-fetch text for exactly the documents that get scored."""
-    ordered = sorted(forward)
+def capped_profile(pmids, cap: int):
+    """Deterministically cap a profile-side set, so the caller can pre-fetch text
+    for exactly the documents that get scored."""
+    ordered = sorted(pmids)
     if cap and len(ordered) > cap:
         ordered = sorted(random.Random(0).sample(ordered, cap))
     return ordered
 
 
-def scored_pmids(trial: Trial, cap: int) -> set[str]:
-    """Every PMID the relevance arm will embed for this trial."""
+# Which direction each relevance variant profiles on, and which it gates.
+#   relevance        the shipped strategy: trust forward, gate backward
+#   relevance_fwd    the inversion the benchmark argues for: trust backward
+#                    (measured the more precise direction), gate forward
+#                    (95% of the volume)
+#   relevance_seeds  profile from the seeds alone and gate both directions — the
+#                    control, since it assumes neither direction is trustworthy.
+#                    Worth having because relevance_fwd profiles on backward
+#                    references while the ground truth *is* a reference list,
+#                    which could flatter it for a circular reason.
+RELEVANCE_ARMS = ("relevance", "relevance_fwd", "relevance_seeds")
+
+
+def scored_pmids(trial: Trial, cap: int, arms=()) -> set[str]:
+    """Every PMID the given relevance arms will embed for this trial."""
     forward = _seed_links(trial, "cited_by")
     backward = _seed_links(trial, "references")
-    return set(trial.seeds) | set(profile_forward(forward, cap)) | backward
+    kinds = {a.split(":", 1)[0] for a in arms} or {"relevance"}
+    need = set(trial.seeds)
+    if "relevance" in kinds:
+        need |= set(capped_profile(forward, cap)) | backward
+    if "relevance_fwd" in kinds:
+        need |= set(capped_profile(backward, cap)) | forward
+    if "relevance_seeds" in kinds:
+        need |= forward | backward
+    return need
 
 
 def _docs_from_records(pmids, records: dict, texts: dict | None = None):
@@ -300,14 +321,15 @@ def run_arm(name: str, trial: Trial, ctx: dict) -> set[str]:
         return backward
     if name == "both":
         return forward | backward
-    if name.startswith("relevance"):
+    kind, _, g = name.partition(":")
+    if kind in RELEVANCE_ARMS:
         from dataclasses import replace as _replace
 
         from bioleads.config import Config
         from bioleads.expansion import _top_k_relevant
 
-        gamma = float(name.split(":", 1)[1]) if ":" in name else Config.rocchio_gamma
-        cfg = _replace(ctx["cfg"], rocchio_gamma=gamma)
+        cfg = _replace(ctx["cfg"],
+                       rocchio_gamma=float(g) if g else Config.rocchio_gamma)
         records, texts = ctx["records"], ctx.get("texts")
         # A single heavily-cited seed can pull tens of thousands of citers, which
         # would dominate the sweep's runtime. Cap the documents used to *build
@@ -315,16 +337,26 @@ def run_arm(name: str, trial: Trial, ctx: dict) -> set[str]:
         # must stay exactly what the pipeline would return or precision and
         # recall stop meaning anything. (Benchmark-only; the pipeline itself has
         # no such cap.)
-        profile_fwd = profile_forward(forward, ctx.get("max_profile") or 0)
-        # Faithful to relevance_guided_expand: seeds + forward citers are the
-        # profile, backward references are the gated candidates, and the return
-        # is every forward citer plus the kept top-K.
-        profile = _docs_from_records(list(trial.seeds) + profile_fwd, records, texts)
-        cands = _docs_from_records(sorted(backward), records, texts)
-        if not cands:
-            return set(forward)
-        kept = _top_k_relevant(profile, cands, cfg)
-        return set(forward) | {d.meta["pmid"] for d, _ in kept}
+        cap = ctx.get("max_profile") or 0
+
+        def gate(profile_ids, candidate_ids) -> set[str]:
+            """Keep the top-K of `candidate_ids` by relevance to `profile_ids`."""
+            cands = _docs_from_records(sorted(candidate_ids), records, texts)
+            if not cands:
+                return set()
+            profile = _docs_from_records(profile_ids, records, texts)
+            return {d.meta["pmid"] for d, _ in _top_k_relevant(profile, cands, cfg)}
+
+        seeds = list(trial.seeds)
+        if kind == "relevance":
+            # The shipped strategy: forward passes through ungated.
+            return set(forward) | gate(seeds + capped_profile(forward, cap), backward)
+        if kind == "relevance_fwd":
+            # The inversion: backward passes through, forward is gated.
+            return set(backward) | gate(seeds + capped_profile(backward, cap), forward)
+        if kind == "relevance_seeds":
+            # Neither direction trusted: profile from the seeds, gate both.
+            return gate(seeds, forward) | gate(seeds, backward)
     raise ValueError(f"unknown arm: {name}")
 
 
@@ -406,7 +438,10 @@ def main(argv=None) -> int:
     p.add_argument("--min-refs", type=int, default=30,
                    help="skip reviews with fewer references than this")
     p.add_argument("--arms", default="forward,backward,both,relevance",
-                   help="comma-separated; 'relevance' expands over --gammas")
+                   help="comma-separated; any relevance* arm expands over "
+                        "--gammas. relevance = trust forward / gate backward "
+                        "(shipped); relevance_fwd = trust backward / gate "
+                        "forward; relevance_seeds = profile on seeds, gate both")
     p.add_argument("--gammas", default="0,0.25,0.5",
                    help="rocchio_gamma values for the relevance arm")
     p.add_argument("--top-k", type=int, default=50, help="expand_top_k for relevance")
@@ -435,8 +470,8 @@ def main(argv=None) -> int:
 
     arms: list[str] = []
     for arm in [a.strip() for a in args.arms.split(",") if a.strip()]:
-        if arm == "relevance":
-            arms += [f"relevance:{g.strip()}" for g in args.gammas.split(",") if g.strip()]
+        if arm in RELEVANCE_ARMS:
+            arms += [f"{arm}:{g.strip()}" for g in args.gammas.split(",") if g.strip()]
         else:
             arms.append(arm)
 
@@ -468,7 +503,7 @@ def main(argv=None) -> int:
         # for records no scorer ever reads.
         needed: set[str] = set()
         for t in trials:
-            needed |= scored_pmids(t, args.max_profile)
+            needed |= scored_pmids(t, args.max_profile, arms)
         print(f"Fetching abstracts for {len(needed)} scored document(s) "
               f"(of {len(candidates)} retrieved)…")
         texts = _fetch_abstracts(sorted(needed), cache,

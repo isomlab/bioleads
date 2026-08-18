@@ -240,3 +240,39 @@ def test_interpret_picks_the_best_gamma(bench):
     bench.interpret(summary, log=lines.append)
     assert any("Best gamma by median F1: 0.25" in l for l in lines)
     assert any("+0.0800" in l for l in lines), lines
+
+
+def test_max_profile_caps_the_profile_but_not_what_is_retrieved(bench, monkeypatch):
+    """The runtime guard must never change an arm's retrieved set.
+
+    Capping the profile is a benchmark-only concession to runtime; if it also
+    shrank the returned candidates it would silently alter precision and recall.
+    """
+    import bioleads.expansion as exp_mod
+    from bioleads.config import Config
+
+    seen = {}
+
+    def fake_top_k(profile_docs, cand_docs, cfg, **kw):
+        seen["profile_size"] = len(profile_docs)
+        return []
+
+    monkeypatch.setattr(exp_mod, "_top_k_relevant", fake_top_k)
+
+    citers = [str(100 + i) for i in range(50)]
+    records = {"1": {"cited_by": citers, "references": ["20"], "title": "seed"},
+               "20": {"title": "ref"}}
+    for c in citers:
+        records[c] = {"title": f"citer {c}"}
+    t = _trial(bench, ["1"], records, target=[])
+
+    uncapped = bench.run_arm("relevance:0.25", t,
+                             {"records": records, "texts": None, "cfg": Config()})
+    assert seen["profile_size"] == 51                       # 1 seed + 50 citers
+
+    capped = bench.run_arm("relevance:0.25", t,
+                           {"records": records, "texts": None, "cfg": Config(),
+                            "max_profile": 10})
+    assert seen["profile_size"] == 11                       # 1 seed + 10 citers
+    assert capped == uncapped, "the cap must not change what the arm retrieves"
+    assert len(capped) == 50

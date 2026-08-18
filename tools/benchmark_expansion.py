@@ -294,15 +294,19 @@ def run_arm(name: str, trial: Trial, ctx: dict) -> set[str]:
         cfg = _replace(ctx["cfg"], rocchio_gamma=gamma)
         records, texts = ctx["records"], ctx.get("texts")
         # A single heavily-cited seed can pull tens of thousands of citers, which
-        # would dominate the sweep's runtime. Cap the profile deterministically
-        # (benchmark-only; the pipeline itself has no such cap).
+        # would dominate the sweep's runtime. Cap the documents used to *build
+        # the profile* — deterministically, and never the retrieved set, which
+        # must stay exactly what the pipeline would return or precision and
+        # recall stop meaning anything. (Benchmark-only; the pipeline itself has
+        # no such cap.)
         cap = ctx.get("max_profile") or 0
-        if cap and len(forward) > cap:
-            forward = set(random.Random(0).sample(sorted(forward), cap))
+        profile_fwd = sorted(forward)
+        if cap and len(profile_fwd) > cap:
+            profile_fwd = sorted(random.Random(0).sample(profile_fwd, cap))
         # Faithful to relevance_guided_expand: seeds + forward citers are the
         # profile, backward references are the gated candidates, and the return
         # is every forward citer plus the kept top-K.
-        profile = _docs_from_records(list(trial.seeds) + sorted(forward), records, texts)
+        profile = _docs_from_records(list(trial.seeds) + profile_fwd, records, texts)
         cands = _docs_from_records(sorted(backward), records, texts)
         if not cands:
             return set(forward)

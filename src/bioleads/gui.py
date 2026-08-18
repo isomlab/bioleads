@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 import queue
+import subprocess
+import sys
 import threading
 import traceback
 import webbrowser
@@ -18,7 +20,7 @@ from collections import Counter
 from dataclasses import replace
 
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from .config import Config
 from .cooccurrence import write_graph_html, write_graph_html_3d
@@ -32,6 +34,36 @@ from .embeddings import (
 from .enrichment import load_background
 from .pipeline import PipelineResult, run_pipeline
 from .sources import PipelineCancelled
+
+# What the Outputs tab lists, in order: (group heading, [(row label, key)]),
+# where each key is a PipelineResult.outputs key. A group whose run produced
+# none of its files is hidden entirely; within a group that produced something,
+# missing siblings stay listed but greyed, so it's visible what wasn't made.
+# Any outputs key not named here still appears, under "Other outputs".
+OUTPUT_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("Term co-occurrence network", [
+        ("2D", "graph"),
+        ("3D", "graph_3d"),
+    ]),
+    ("Term clusters", [
+        ("Scatter", "cluster_scatter"),
+        ("Table (CSV)", "clusters"),
+    ]),
+    ("Paper citation network", [
+        ("2D", "citation_network"),
+        ("3D", "citation_network_3d"),
+        ("Ranking (CSV)", "citation_ranking"),
+    ]),
+    ("Author citation network", [
+        ("2D", "author_network"),
+        ("3D", "author_network_3d"),
+        ("Ranking (CSV)", "author_ranking"),
+    ]),
+    ("Tables", [
+        ("Ranked terms (CSV)", "ranked_terms"),
+        ("Hypotheses (CSV)", "candidates"),
+    ]),
+]
 
 
 class BioleadsGUI:
@@ -238,10 +270,14 @@ class BioleadsGUI:
         widget.bind("<Leave>", hide)
 
     def _build_actions(self) -> None:
+        """The run controls, and only those.
+
+        Everything a run *produces* is listed in the Outputs tab instead, so this
+        row stays short enough to survive the 900px minimum window width.
+        """
         bar = ttk.Frame(self.root)
         bar.pack(fill="x", padx=10, pady=4)
 
-        # Left group: the primary run controls.
         self.run_btn = ttk.Button(bar, text="Run pipeline", command=self._on_run)
         self.run_btn.pack(side="left")
         self.stop_btn = ttk.Button(bar, text="Stop", command=self._on_stop,
@@ -250,44 +286,6 @@ class BioleadsGUI:
         self.cluster_btn = ttk.Button(bar, text="Cluster terms",
                                       command=self._on_cluster, state="disabled")
         self.cluster_btn.pack(side="left", padx=6)
-
-        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=(10, 6))
-
-        # "Open networks" group: revealing the artifacts a run produced. Every
-        # item here is a network graph, so each is named by what it relates
-        # (Terms / Citations / Authors) rather than the generic word "Graph".
-        # Each gets separate 2D / 3D buttons so both views are one click away
-        # (the 3D button only enables when Plotly produced a 3D file). A vertical
-        # separator brackets each entity so the 2D/3D pairs don't run together.
-        ttk.Label(bar, text="Open network —").pack(side="left", padx=(2, 6))
-
-        def _net_group(label, open2d, open3d, tip):
-            ttk.Label(bar, text=label).pack(side="left", padx=(2, 2))
-            b2 = ttk.Button(bar, text="2D", command=open2d, state="disabled")
-            b2.pack(side="left", padx=(0, 2))
-            b3 = ttk.Button(bar, text="3D", command=open3d, state="disabled")
-            b3.pack(side="left", padx=(0, 6))
-            self._add_placeholder_tooltip(b2, tip + " (interactive 2D)")
-            self._add_placeholder_tooltip(b3, tip + " (rotatable 3D)")
-            ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=(2, 6))
-            return b2, b3
-
-        self.open_graph_btn, self.open_graph3d_btn = _net_group(
-            "Terms", self._open_graph, self._open_graph3d,
-            "term co-occurrence network (which concepts appear together)")
-        self.open_citations_btn, self.open_citations3d_btn = _net_group(
-            "Citations", self._open_citations, self._open_citations3d,
-            "paper-to-paper citation network (which papers cite which)")
-        self.open_authors_btn, self.open_authors3d_btn = _net_group(
-            "Authors", self._open_authors, self._open_authors3d,
-            "author-to-author citation network (which authors cite which)")
-
-        self.open_clusters_btn = ttk.Button(bar, text="Cluster plot",
-                                             command=self._open_clusters, state="disabled")
-        self.open_clusters_btn.pack(side="left", padx=4)
-        self.open_out_btn = ttk.Button(bar, text="Output folder",
-                                       command=self._open_out, state="disabled")
-        self.open_out_btn.pack(side="left", padx=4)
 
     def _build_statusbar(self) -> None:
         """A dedicated bottom strip for status text + the progress indicator.
@@ -336,6 +334,117 @@ class BioleadsGUI:
         clu_sb = ttk.Scrollbar(clu_tab, command=self.clusters_tree.yview)
         clu_sb.pack(side="right", fill="y")
         self.clusters_tree.configure(yscrollcommand=clu_sb.set)
+
+        self._build_outputs_tab(nb)
+
+    def _build_outputs_tab(self, nb) -> None:
+        """A scrollable list of the files a run produced, each with an Open button.
+
+        Built from result.outputs rather than from a fixed set of buttons, so a
+        new pipeline output shows up here without any UI bookkeeping.
+        """
+        tab = ttk.Frame(nb)
+        nb.add(tab, text="Outputs")
+
+        self._heading_font = tkfont.nametofont("TkDefaultFont").copy()
+        self._heading_font.configure(weight="bold")
+
+        canvas = tk.Canvas(tab, highlightthickness=0)
+        sb = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+        self.outputs_frame = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=self.outputs_frame, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        self.outputs_frame.bind(
+            "<Configure>",
+            lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        # Keep the inner frame exactly as wide as the canvas so each row's Open
+        # button right-aligns against the scrollbar.
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(window, width=e.width))
+
+        def _wheel(event):
+            # macOS sends ±1 per notch; Windows sends multiples of 120.
+            step = -event.delta
+            if abs(event.delta) >= 120:
+                step = int(step / 120)
+            canvas.yview_scroll(step, "units")
+
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", _wheel))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+
+        self._refresh_outputs()
+
+    def _refresh_outputs(self) -> None:
+        """Rebuild the Outputs tab from the current run's outputs."""
+        for child in self.outputs_frame.winfo_children():
+            child.destroy()
+
+        outs = dict(self._result.outputs) if self._result else {}
+        if not outs:
+            ttk.Label(self.outputs_frame, padding=(12, 12), justify="left",
+                      text="No outputs yet.\n\nRun the pipeline and the files it "
+                           "writes will be listed here.").pack(anchor="w")
+            return
+
+        named = {key for _, rows in OUTPUT_GROUPS for _, key in rows}
+        groups = list(OUTPUT_GROUPS)
+        extra = [(key.replace("_", " ").capitalize(), key)
+                 for key in outs if key not in named]
+        if extra:
+            groups.append(("Other outputs", extra))
+
+        for title, rows in groups:
+            if not any(outs.get(key) for _, key in rows):
+                continue
+            ttk.Label(self.outputs_frame, text=title, font=self._heading_font,
+                      padding=(12, 10, 12, 2)).pack(anchor="w")
+            for label, key in rows:
+                self._output_row(label, outs.get(key))
+
+        ttk.Separator(self.outputs_frame, orient="horizontal").pack(
+            fill="x", padx=12, pady=(12, 8))
+        foot = ttk.Frame(self.outputs_frame)
+        foot.pack(fill="x", padx=12, pady=(0, 12))
+        ttk.Button(foot, text="Open output folder", command=self._open_out
+                   ).pack(side="left")
+        ttk.Label(foot, text=self._display_path(self._out_dir or "")).pack(
+            side="left", padx=8)
+
+    def _output_row(self, label: str, path: str | None) -> None:
+        row = ttk.Frame(self.outputs_frame)
+        row.pack(fill="x", padx=(28, 12), pady=1)
+        exists = bool(path) and os.path.exists(path)
+
+        ttk.Label(row, text=label, width=18, anchor="w").pack(side="left")
+        btn = ttk.Button(row, text="Open", width=7,
+                         command=lambda p=path: self._open_path(p))
+        btn.pack(side="right")
+        if not exists:
+            btn.configure(state="disabled")
+
+        detail = ttk.Label(
+            row, anchor="w",
+            text=self._display_path(path) if exists else "— not produced this run")
+        detail.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        if exists:
+            self._add_placeholder_tooltip(detail, os.path.abspath(path))
+        else:
+            detail.configure(foreground="#888888")
+
+    @staticmethod
+    def _display_path(path: str, limit: int = 72) -> str:
+        """Home-relative, middle-elided path; the tooltip carries the full one."""
+        if not path:
+            return ""
+        home = os.path.expanduser("~")
+        shown = "~" + path[len(home):] if path.startswith(home) else path
+        if len(shown) > limit:
+            keep = (limit - 1) // 2
+            shown = f"{shown[:keep]}…{shown[-keep:]}"
+        return shown
 
     def _make_tree(self, nb, title, columns) -> ttk.Treeview:
         tab = ttk.Frame(nb)
@@ -521,7 +630,7 @@ class BioleadsGUI:
             if self._result is not None:
                 self._result.outputs["cluster_scatter"] = scatter
             self._log(f"  cluster plot   -> {scatter}")
-            self.open_clusters_btn.configure(state="normal")
+        self._refresh_outputs()
 
     def _persist_clusters(self, clusters: list[TermCluster]) -> None:
         """Write term_clusters.csv and recolor the co-occurrence graph by cluster."""
@@ -545,9 +654,6 @@ class BioleadsGUI:
             if path_3d:
                 self._result.outputs["graph_3d"] = path_3d
                 self._log(f"  graph 3d       -> {path_3d}")
-                self.open_graph3d_btn.configure(state="normal")
-            if os.path.exists(path):
-                self.open_graph_btn.configure(state="normal")
         except Exception as exc:  # noqa: BLE001 - persistence is best-effort
             self._log(f"  could not persist clusters: {exc}")
 
@@ -607,20 +713,7 @@ class BioleadsGUI:
                 values=(c.a, c.c, f"{c.score:.4g}", c.direct_cooccurrence,
                         ", ".join(c.shared_b)))
 
-        self.open_out_btn.configure(state="normal")
-        self._enable_if_output(self.open_graph_btn, "graph")
-        self._enable_if_output(self.open_graph3d_btn, "graph_3d")
-        self._enable_if_output(self.open_clusters_btn, "cluster_scatter")
-        self._enable_if_output(self.open_citations_btn, "citation_network")
-        self._enable_if_output(self.open_citations3d_btn, "citation_network_3d")
-        self._enable_if_output(self.open_authors_btn, "author_network")
-        self._enable_if_output(self.open_authors3d_btn, "author_network_3d")
-
-    def _enable_if_output(self, btn, key: str) -> None:
-        outs = self._result.outputs if self._result else {}
-        path = outs.get(key)
-        if path and os.path.exists(path):
-            btn.configure(state="normal")
+        self._refresh_outputs()
 
     def _on_stop(self) -> None:
         if not (self._worker and self._worker.is_alive()):
@@ -643,42 +736,28 @@ class BioleadsGUI:
         messagebox.showerror("Pipeline failed", str(exc))
 
     # ------------------------------------------------------------- helpers --
-    def _open_first(self, *keys: str) -> None:
-        """Open the first existing output among `keys`."""
-        outs = self._result.outputs if self._result else {}
-        for key in keys:
-            path = outs.get(key)
-            if path and os.path.exists(path):
-                webbrowser.open(f"file://{os.path.abspath(path)}")
-                return
+    def _open_path(self, path: str | None) -> None:
+        """Hand a file or folder to the OS's default handler.
 
-    def _open_graph(self) -> None:
-        self._open_first("graph")
-
-    def _open_graph3d(self) -> None:
-        self._open_first("graph_3d")
-
-    def _open_clusters(self) -> None:
-        path = (self._result.outputs.get("cluster_scatter") if self._result else None)
-        if path and os.path.exists(path):
-            webbrowser.open(f"file://{os.path.abspath(path)}")
-
-    def _open_citations(self) -> None:
-        self._open_first("citation_network")
-
-    def _open_citations3d(self) -> None:
-        self._open_first("citation_network_3d")
-
-    def _open_authors(self) -> None:
-        self._open_first("author_network")
-
-    def _open_authors3d(self) -> None:
-        self._open_first("author_network_3d")
+        webbrowser.open is right for the HTML graphs but turns a CSV into a
+        browser download and a folder into a directory listing, so go through
+        the platform opener first and keep the browser as the fallback.
+        """
+        if not path or not os.path.exists(path):
+            return
+        target = os.path.abspath(path)
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", target])
+            elif os.name == "nt":
+                os.startfile(target)  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["xdg-open", target])
+        except Exception:  # noqa: BLE001 - any opener failure falls back
+            webbrowser.open(f"file://{target}")
 
     def _open_out(self) -> None:
-        out = self._out_dir
-        if out and os.path.isdir(out):
-            webbrowser.open(f"file://{os.path.abspath(out)}")
+        self._open_path(self._out_dir)
 
     def _set_running(self, running: bool) -> None:
         self.run_btn.configure(state="disabled" if running else "normal")
@@ -696,11 +775,7 @@ class BioleadsGUI:
         self._out_dir = None
         for tree in (self.terms_tree, self.cand_tree, self.clusters_tree):
             tree.delete(*tree.get_children())
-        for btn in (self.open_graph_btn, self.open_graph3d_btn,
-                    self.open_clusters_btn, self.open_citations_btn,
-                    self.open_citations3d_btn, self.open_authors_btn,
-                    self.open_authors3d_btn, self.open_out_btn):
-            btn.configure(state="disabled")
+        self._refresh_outputs()
 
     def _log(self, msg: str) -> None:
         self.log.configure(state="normal")

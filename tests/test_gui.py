@@ -90,3 +90,82 @@ def test_cluster_inherits_the_runs_config(app, monkeypatch):
     assert cfg.seed == 7
     # and the run's own Config is left untouched.
     assert run_cfg.n_clusters == 4
+
+
+# --------------------------------------------------------------- Outputs tab --
+
+def _labels(app):
+    from tkinter import ttk
+    return [c.cget("text") for c in app.outputs_frame.winfo_children()
+            if isinstance(c, ttk.Label)]
+
+
+def _rows(app):
+    from tkinter import ttk
+    return [c for c in app.outputs_frame.winfo_children()
+            if isinstance(c, ttk.Frame)]
+
+
+@pytest.fixture()
+def run_with_outputs(app, tmp_path):
+    """A finished run whose outputs are real (empty) files on disk."""
+    def _make(**names):
+        outs = {}
+        for key, filename in names.items():
+            f = tmp_path / filename
+            f.write_text("")
+            outs[key] = str(f)
+        app._result = _finished_run()
+        app._result.outputs = outs
+        app._out_dir = str(tmp_path)
+        app._refresh_outputs()
+        return outs
+    return _make
+
+
+def test_outputs_tab_is_empty_before_a_run(app):
+    assert "No outputs yet" in _labels(app)[0]
+
+
+def test_outputs_tab_hides_groups_the_run_didnt_produce(run_with_outputs, app):
+    run_with_outputs(graph="cooccurrence.html", ranked_terms="ranked_terms.csv")
+    labels = _labels(app)
+    assert "Term co-occurrence network" in labels
+    assert "Tables" in labels
+    # Nothing clustered and no citation network this run.
+    assert "Term clusters" not in labels
+    assert "Paper citation network" not in labels
+
+
+def test_outputs_tab_lists_keys_it_doesnt_know_about(run_with_outputs, app):
+    run_with_outputs(graph="cooccurrence.html", some_new_output="new.html")
+    assert "Other outputs" in _labels(app)
+
+
+def test_missing_sibling_is_listed_but_disabled(run_with_outputs, app):
+    from tkinter import ttk
+    # 2D produced, 3D not (e.g. Plotly missing) — the row stays, greyed.
+    run_with_outputs(graph="cooccurrence.html")
+    greyed = [r for r in _rows(app)
+              if any(isinstance(k, ttk.Label) and "not produced" in k.cget("text")
+                     for k in r.winfo_children())]
+    assert len(greyed) == 1
+    btn = next(k for k in greyed[0].winfo_children() if isinstance(k, ttk.Button))
+    assert str(btn.cget("state")) == "disabled"
+
+
+def test_clearing_a_run_empties_the_outputs_tab(run_with_outputs, app):
+    run_with_outputs(graph="cooccurrence.html")
+    assert "No outputs yet" not in _labels(app)[0]
+    app._clear_results()
+    assert "No outputs yet" in _labels(app)[0]
+
+
+def test_display_path_is_home_relative_and_elided(app):
+    import os
+    home_file = os.path.join(os.path.expanduser("~"), "bioleads_out", "x.html")
+    assert app._display_path(home_file) == "~/bioleads_out/x.html"
+    long_name = os.path.join(os.path.expanduser("~"), "a" * 200 + ".html")
+    shown = app._display_path(long_name)
+    assert shown.startswith("~/") and shown.endswith(".html") and len(shown) <= 72
+

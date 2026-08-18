@@ -805,3 +805,45 @@ def test_pseudo_negatives_never_eat_the_kept_top_k():
     scores = [0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.5, 0.05]
     idx = _pseudo_negative_idx(scores, Config(rocchio_gamma=0.5), top_k=1)
     assert set(idx) == {9, 1}, f"expected the two lowest scores, got {idx}"
+
+
+def test_embedder_is_loaded_once_and_reused(monkeypatch):
+    """PubMedBERT must not be re-read from disk on every _embed call.
+
+    Regression guard: _embed used to call from_pretrained itself, so a single
+    clustering run or relevance sweep reloaded ~400MB of weights dozens of times.
+    """
+    import sys
+    import types
+
+    from bioleads import embeddings as emb
+
+    loads = {"tok": 0, "model": 0}
+
+    class _FakeAuto:
+        def __init__(self, key):
+            self.key = key
+
+        def from_pretrained(self, name):
+            loads[self.key] += 1
+            return object()
+
+    fake = types.ModuleType("transformers")
+    fake.AutoTokenizer = _FakeAuto("tok")
+    fake.AutoModel = _FakeAuto("model")
+    # the real model object needs .eval(); hand back something that has it
+    fake.AutoModel.from_pretrained = lambda name: types.SimpleNamespace(
+        eval=lambda: loads.__setitem__("model", loads["model"] + 1))
+
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+    emb._load_embedder.cache_clear()
+    try:
+        a = emb._load_embedder("some/model")
+        b = emb._load_embedder("some/model")
+        assert a is b, "second call must come from the cache"
+        assert loads["tok"] == 1, f"tokenizer loaded {loads['tok']} times"
+        # a different model name is a separate entry
+        emb._load_embedder("other/model")
+        assert loads["tok"] == 2
+    finally:
+        emb._load_embedder.cache_clear()

@@ -228,6 +228,22 @@ def _seed_links(trial: Trial, field_name: str) -> set[str]:
     return out - set(trial.seeds)
 
 
+def profile_forward(forward, cap: int):
+    """The forward citers used to build the profile — deterministic, so the
+    caller can pre-fetch text for exactly the documents that get scored."""
+    ordered = sorted(forward)
+    if cap and len(ordered) > cap:
+        ordered = sorted(random.Random(0).sample(ordered, cap))
+    return ordered
+
+
+def scored_pmids(trial: Trial, cap: int) -> set[str]:
+    """Every PMID the relevance arm will embed for this trial."""
+    forward = _seed_links(trial, "cited_by")
+    backward = _seed_links(trial, "references")
+    return set(trial.seeds) | set(profile_forward(forward, cap)) | backward
+
+
 def _docs_from_records(pmids, records: dict, texts: dict | None = None):
     """Documents for the relevance scorer: iCite titles, or fetched abstracts."""
     from bioleads.sources import Document
@@ -299,10 +315,7 @@ def run_arm(name: str, trial: Trial, ctx: dict) -> set[str]:
         # must stay exactly what the pipeline would return or precision and
         # recall stop meaning anything. (Benchmark-only; the pipeline itself has
         # no such cap.)
-        cap = ctx.get("max_profile") or 0
-        profile_fwd = sorted(forward)
-        if cap and len(profile_fwd) > cap:
-            profile_fwd = sorted(random.Random(0).sample(profile_fwd, cap))
+        profile_fwd = profile_forward(forward, ctx.get("max_profile") or 0)
         # Faithful to relevance_guided_expand: seeds + forward citers are the
         # profile, backward references are the gated candidates, and the return
         # is every forward citer plus the kept top-K.
@@ -450,8 +463,15 @@ def main(argv=None) -> int:
 
     texts = None
     if args.abstracts:
-        print(f"Fetching abstracts for {len(candidates)} candidate(s)…")
-        texts = _fetch_abstracts(sorted(candidates), cache,
+        # Only documents the relevance arm actually embeds need text; fetching
+        # every retrieved candidate would be an order of magnitude more requests
+        # for records no scorer ever reads.
+        needed: set[str] = set()
+        for t in trials:
+            needed |= scored_pmids(t, args.max_profile)
+        print(f"Fetching abstracts for {len(needed)} scored document(s) "
+              f"(of {len(candidates)} retrieved)…")
+        texts = _fetch_abstracts(sorted(needed), cache,
                                  email=email, api_key=args.api_key)
 
     ctx = {"records": records, "texts": texts,

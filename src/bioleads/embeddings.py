@@ -6,6 +6,7 @@ fragmented across surface variants. Optional: needs `bioleads[embed]`.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 
@@ -19,19 +20,33 @@ class TermCluster:
     centroid_term: str
 
 
+@lru_cache(maxsize=2)
+def _load_embedder(model_name: str):
+    """Load and cache a tokenizer+model pair, like ner._load_scispacy does.
+
+    Without this every call re-read ~400MB of weights from disk, so a single
+    clustering run or relevance sweep paid the load cost dozens of times. Held
+    for two models so switching cfg.embed_model once doesn't thrash; each entry
+    keeps its weights resident.
+    """
+    from transformers import AutoModel, AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModel.from_pretrained(model_name)
+    model.eval()
+    return tok, model
+
+
 def _embed(texts: list[str], cfg: Config, *, max_length: int) -> np.ndarray:
     """Mean-pooled PubMedBERT embeddings for `texts`, truncated to max_length."""
     try:
         import torch
-        from transformers import AutoModel, AutoTokenizer
+
+        tok, model = _load_embedder(cfg.embed_model)
     except ImportError as e:  # pragma: no cover
         raise ImportError(
             'Embeddings need transformers + torch. Install: pip install "bioleads[embed]"'
         ) from e
-
-    tok = AutoTokenizer.from_pretrained(cfg.embed_model)
-    model = AutoModel.from_pretrained(cfg.embed_model)
-    model.eval()
 
     vecs = []
     with torch.no_grad():

@@ -26,3 +26,4 @@ outputs/
 .idea/
 .vscode/
 .pytest_cache/
+.obsidian/

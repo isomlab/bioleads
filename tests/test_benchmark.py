@@ -104,13 +104,12 @@ def test_relevance_arm_keeps_all_forward_and_gates_backward(bench, monkeypatch):
 
     seen = {}
 
-    def fake_top_k(profile_docs, cand_docs, cfg, **kw):
+    def fake_scores(profile_docs, cand_docs, cfg, **kw):
         seen["gamma"] = cfg.rocchio_gamma
-        seen["top_k"] = cfg.expand_top_k
         seen["profile"] = {d.meta["pmid"] for d in profile_docs}
-        return [(cand_docs[0], 1.0)]          # keep exactly one candidate
+        return [1.0 / (i + 1) for i in range(len(cand_docs))]   # first ranks top
 
-    monkeypatch.setattr(exp_mod, "_top_k_relevant", fake_top_k)
+    monkeypatch.setattr(exp_mod, "_relevance_scores", fake_scores)
 
     from bioleads.config import Config
 
@@ -122,12 +121,15 @@ def test_relevance_arm_keeps_all_forward_and_gates_backward(bench, monkeypatch):
     t = _trial(bench, ["1"], records, target=[])
     ctx = {"records": records, "texts": None, "cfg": Config(expand_top_k=7)}
 
-    got = bench.run_arm("relevance:0.4", t, ctx)
+    got = bench.run_arm("relevance:0.4:1", t, ctx)
     assert {"10", "11"} <= got, "forward citers are added ungated"
     assert len(got & {"20", "21"}) == 1, "backward must be gated to the kept top-K"
     assert seen["gamma"] == pytest.approx(0.4), "gamma from the arm name must reach cfg"
-    assert seen["top_k"] == 7, "--top-k must reach cfg"
     assert seen["profile"] == {"1", "10", "11"}, "profile = seeds + forward citers"
+
+    # top-K comes from the arm name and overrides the run default.
+    ctx.pop("_ranked", None)
+    assert len(bench.run_arm("relevance:0.4:2", t, ctx) & {"20", "21"}) == 2
 
 
 def test_relevance_arm_without_candidates_returns_forward(bench):
@@ -253,11 +255,11 @@ def test_max_profile_caps_the_profile_but_not_what_is_retrieved(bench, monkeypat
 
     seen = {}
 
-    def fake_top_k(profile_docs, cand_docs, cfg, **kw):
+    def fake_scores(profile_docs, cand_docs, cfg, **kw):
         seen["profile_size"] = len(profile_docs)
-        return []
+        return [0.0] * len(cand_docs)
 
-    monkeypatch.setattr(exp_mod, "_top_k_relevant", fake_top_k)
+    monkeypatch.setattr(exp_mod, "_relevance_scores", fake_scores)
 
     citers = [str(100 + i) for i in range(50)]
     records = {"1": {"cited_by": citers, "references": ["20"], "title": "seed"},
@@ -275,7 +277,8 @@ def test_max_profile_caps_the_profile_but_not_what_is_retrieved(bench, monkeypat
                             "max_profile": 10})
     assert seen["profile_size"] == 11                       # 1 seed + 10 citers
     assert capped == uncapped, "the cap must not change what the arm retrieves"
-    assert len(capped) == 50
+    # 50 ungated forward citers + the one backward reference that survives the gate
+    assert len(capped) == 51
 
 
 def test_relevance_fwd_inverts_which_direction_is_gated(bench, monkeypatch):
@@ -286,12 +289,12 @@ def test_relevance_fwd_inverts_which_direction_is_gated(bench, monkeypatch):
 
     calls = []
 
-    def fake_top_k(profile_docs, cand_docs, cfg, **kw):
+    def fake_scores(profile_docs, cand_docs, cfg, **kw):
         calls.append({"profile": {d.meta["pmid"] for d in profile_docs},
                       "cands": {d.meta["pmid"] for d in cand_docs}})
-        return [(cand_docs[0], 1.0)]
+        return [1.0 / (i + 1) for i in range(len(cand_docs))]
 
-    monkeypatch.setattr(exp_mod, "_top_k_relevant", fake_top_k)
+    monkeypatch.setattr(exp_mod, "_relevance_scores", fake_scores)
 
     records = {"1": {"cited_by": ["10", "11"], "references": ["20", "21"], "title": "s"}}
     for pid in ("10", "11", "20", "21"):
@@ -299,7 +302,7 @@ def test_relevance_fwd_inverts_which_direction_is_gated(bench, monkeypatch):
     t = _trial(bench, ["1"], records, target=[])
     ctx = {"records": records, "texts": None, "cfg": Config()}
 
-    got = bench.run_arm("relevance_fwd:0.25", t, ctx)
+    got = bench.run_arm("relevance_fwd:0.25:1", t, ctx)
     assert {"20", "21"} <= got, "backward passes through ungated"
     assert len(got & {"10", "11"}) == 1, "forward is gated to the kept top-K"
     assert calls[0]["profile"] == {"1", "20", "21"}, "profile = seeds + backward"
@@ -312,18 +315,18 @@ def test_relevance_seeds_gates_both_directions(bench, monkeypatch):
 
     calls = []
 
-    def fake_top_k(profile_docs, cand_docs, cfg, **kw):
+    def fake_scores(profile_docs, cand_docs, cfg, **kw):
         calls.append({d.meta["pmid"] for d in profile_docs})
-        return [(cand_docs[0], 1.0)]
+        return [1.0 / (i + 1) for i in range(len(cand_docs))]
 
-    monkeypatch.setattr(exp_mod, "_top_k_relevant", fake_top_k)
+    monkeypatch.setattr(exp_mod, "_relevance_scores", fake_scores)
 
     records = {"1": {"cited_by": ["10", "11"], "references": ["20", "21"], "title": "s"}}
     for pid in ("10", "11", "20", "21"):
         records[pid] = {"title": f"t{pid}"}
     t = _trial(bench, ["1"], records, target=[])
 
-    got = bench.run_arm("relevance_seeds:0.25", t,
+    got = bench.run_arm("relevance_seeds:0.25:1", t,
                         {"records": records, "texts": None, "cfg": Config()})
     assert len(got) == 2, "one kept from each direction"
     assert len(got & {"10", "11"}) == 1 and len(got & {"20", "21"}) == 1
@@ -337,3 +340,32 @@ def test_scored_pmids_follows_the_arms_requested(bench):
     assert bench.scored_pmids(t, 0, ["relevance_fwd:0"]) == {"1", "10", "11", "20"}
     # A cap shrinks only the profile side of whichever arm is asked for.
     assert bench.scored_pmids(t, 1, ["relevance:0"]) < {"1", "10", "11", "20"}
+
+
+def test_parse_arm_reads_kind_gamma_and_topk(bench):
+    assert bench.parse_arm("relevance_seeds:0.25:100") == ("relevance_seeds", 0.25, 100)
+    assert bench.parse_arm("relevance:0.5") == ("relevance", 0.5, None)
+    assert bench.parse_arm("backward") == ("backward", None, None)
+
+
+def test_harness_cutoff_matches_the_librarys_top_k(bench, monkeypatch):
+    """The harness slices a memoized ranking instead of calling _top_k_relevant,
+    so the two must agree — otherwise the sweep measures something the pipeline
+    would not do."""
+    import bioleads.expansion as exp_mod
+    from bioleads.config import Config
+    from bioleads.sources import Document
+
+    scores = [0.1, 0.9, 0.5, 0.7]
+    monkeypatch.setattr(exp_mod, "_relevance_scores",
+                        lambda p, c, cfg, **kw: list(scores))
+
+    cands = [Document(doc_id=f"PMID:{i}", text="x", title="t", source="pubmed",
+                      meta={"pmid": str(i)}) for i in (10, 11, 12, 13)]
+    for k in (1, 2, 3, 4):
+        cfg = Config(expand_top_k=k)
+        expected = {d.meta["pmid"] for d, _ in
+                    exp_mod._top_k_relevant([], cands, cfg)}
+        ranked = sorted(zip((d.meta["pmid"] for d in cands), scores),
+                        key=lambda ps: ps[1], reverse=True)
+        assert {p for p, _ in ranked[:k]} == expected, f"cutoff differs at k={k}"

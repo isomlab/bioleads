@@ -250,6 +250,19 @@ def capped_profile(pmids, cap: int):
 RELEVANCE_ARMS = ("relevance", "relevance_fwd", "relevance_seeds")
 
 
+def parse_arm(name: str):
+    """'relevance_seeds:0.25:100' -> ('relevance_seeds', 0.25, 100).
+
+    Gamma and top-K are both optional; a missing one falls back to the run's
+    default. Plain arms like 'backward' parse to (name, None, None).
+    """
+    kind, _, rest = name.partition(":")
+    gamma, _, topk = rest.partition(":")
+    return (kind,
+            float(gamma) if gamma else None,
+            int(topk) if topk else None)
+
+
 def scored_pmids(trial: Trial, cap: int, arms=()) -> set[str]:
     """Every PMID the given relevance arms will embed for this trial."""
     forward = _seed_links(trial, "cited_by")
@@ -326,10 +339,12 @@ def run_arm(name: str, trial: Trial, ctx: dict) -> set[str]:
         from dataclasses import replace as _replace
 
         from bioleads.config import Config
-        from bioleads.expansion import _top_k_relevant
+        from bioleads.expansion import _relevance_scores
 
+        _, gamma, topk = parse_arm(name)
         cfg = _replace(ctx["cfg"],
-                       rocchio_gamma=float(g) if g else Config.rocchio_gamma)
+                       rocchio_gamma=Config.rocchio_gamma if gamma is None else gamma)
+        top_k = ctx["cfg"].expand_top_k if topk is None else topk
         records, texts = ctx["records"], ctx.get("texts")
         # A single heavily-cited seed can pull tens of thousands of citers, which
         # would dominate the sweep's runtime. Cap the documents used to *build
@@ -339,24 +354,40 @@ def run_arm(name: str, trial: Trial, ctx: dict) -> set[str]:
         # no such cap.)
         cap = ctx.get("max_profile") or 0
 
-        def gate(profile_ids, candidate_ids) -> set[str]:
+        # Sweeping top-K only moves a cutoff — the scoring is identical — so the
+        # ranked list is computed once per (trial, direction, gamma) and sliced.
+        # Without this a six-value sweep would embed everything six times.
+        memo = ctx.setdefault("_ranked", {})
+
+        def gate(profile_ids, candidate_ids, tag) -> set[str]:
             """Keep the top-K of `candidate_ids` by relevance to `profile_ids`."""
-            cands = _docs_from_records(sorted(candidate_ids), records, texts)
-            if not cands:
-                return set()
-            profile = _docs_from_records(profile_ids, records, texts)
-            return {d.meta["pmid"] for d, _ in _top_k_relevant(profile, cands, cfg)}
+            key = (trial.review.pmid, kind, tag, cfg.rocchio_gamma)
+            if key not in memo:
+                cands = _docs_from_records(sorted(candidate_ids), records, texts)
+                if not cands:
+                    memo[key] = []
+                else:
+                    profile = _docs_from_records(profile_ids, records, texts)
+                    scores = _relevance_scores(profile, cands, cfg)
+                    memo[key] = sorted(
+                        zip((d.meta["pmid"] for d in cands), scores),
+                        key=lambda ps: ps[1], reverse=True)
+            ranked = memo[key]
+            return {pmid for pmid, _ in
+                    (ranked[:top_k] if top_k and top_k > 0 else ranked)}
 
         seeds = list(trial.seeds)
         if kind == "relevance":
             # The shipped strategy: forward passes through ungated.
-            return set(forward) | gate(seeds + capped_profile(forward, cap), backward)
+            return set(forward) | gate(seeds + capped_profile(forward, cap),
+                                       backward, "bwd")
         if kind == "relevance_fwd":
             # The inversion: backward passes through, forward is gated.
-            return set(backward) | gate(seeds + capped_profile(backward, cap), forward)
+            return set(backward) | gate(seeds + capped_profile(backward, cap),
+                                        forward, "fwd")
         if kind == "relevance_seeds":
             # Neither direction trusted: profile from the seeds, gate both.
-            return gate(seeds, forward) | gate(seeds, backward)
+            return gate(seeds, forward, "fwd") | gate(seeds, backward, "bwd")
     raise ValueError(f"unknown arm: {name}")
 
 
@@ -446,6 +477,10 @@ def main(argv=None) -> int:
     p.add_argument("--gammas", default="0,0.25,0.5",
                    help="rocchio_gamma values for the relevance arm")
     p.add_argument("--top-k", type=int, default=50, help="expand_top_k for relevance")
+    p.add_argument("--top-ks", default="",
+                   help="comma-separated expand_top_k values to sweep; each "
+                        "relevance arm is run at every one (scoring is shared "
+                        "across them, so a sweep costs one pass)")
     p.add_argument("--max-profile", type=int, default=0,
                    help="cap the forward citers used as the relevance profile "
                         "(0 = uncapped); keeps one mega-cited seed from "
@@ -472,7 +507,10 @@ def main(argv=None) -> int:
     arms: list[str] = []
     for arm in [a.strip() for a in args.arms.split(",") if a.strip()]:
         if arm in RELEVANCE_ARMS:
-            arms += [f"{arm}:{g.strip()}" for g in args.gammas.split(",") if g.strip()]
+            gammas = [g.strip() for g in args.gammas.split(",") if g.strip()]
+            topks = [k.strip() for k in args.top_ks.split(",") if k.strip()]
+            arms += [f"{arm}:{g}:{k}" if k else f"{arm}:{g}"
+                     for g in gammas for k in (topks or [""])]
         else:
             arms.append(arm)
 

@@ -169,3 +169,40 @@ def test_display_path_is_home_relative_and_elided(app):
     shown = app._display_path(long_name)
     assert shown.startswith("~/") and shown.endswith(".html") and len(shown) <= 72
 
+
+# ------------------------------------------------- hover help vs. the docs --
+
+def test_tooltips_cite_stages_that_exist_in_the_docs(app, monkeypatch):
+    """Every "Stage N" in the hover help must be a real section of how_it_works.md.
+
+    The tooltips are written to mirror that document stage for stage; this keeps
+    a renumbered or renamed stage from silently orphaning the GUI's help.
+    """
+    import pathlib
+    import re
+
+    from bioleads import gui as gui_mod
+
+    doc = pathlib.Path(__file__).resolve().parents[1] / "docs" / "how_it_works.md"
+    if not doc.exists():  # installed without the docs tree
+        pytest.skip("docs/how_it_works.md not present")
+    documented = {int(n) for n in re.findall(r"^## (\d+)\.", doc.read_text(), re.M)}
+    assert documented, "no numbered stages found in how_it_works.md"
+
+    captured: list[str] = []
+    original = gui_mod.BioleadsGUI._add_tooltip
+
+    def spy(self, widget, text):
+        captured.append(text)
+        return original(self, widget, text)
+
+    monkeypatch.setattr(gui_mod.BioleadsGUI, "_add_tooltip", spy)
+    gui_mod.BioleadsGUI(app.root)
+
+    assert captured, "no tooltips were attached"
+    assert all(t and t.strip() for t in captured), "an empty tooltip was attached"
+
+    cited = {int(n) for t in captured for n in re.findall(r"[Ss]tage (\d+)", t)}
+    assert cited, "no tooltip references a pipeline stage"
+    assert cited <= documented, (
+        f"tooltips cite stages missing from how_it_works.md: {sorted(cited - documented)}")

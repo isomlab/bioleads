@@ -18,6 +18,10 @@ Your computer needs **conda** (Miniforge, Miniconda, or Anaconda).
 > computer](https://dangerisom.github.io/Isom-Lab/setup/)** first, then come back here.
 > bioleads's own install notes are in **[INSTALL.md](INSTALL.md)**.
 
+> **Want to know what the program actually does with your papers?**
+> **[How bioleads works](how_it_works.md)** walks through every stage of the
+> pipeline in plain language.
+
 ---
 
 ## Get it and launch it

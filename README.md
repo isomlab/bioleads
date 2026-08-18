@@ -17,6 +17,10 @@ Mine biomedical literature for candidate biological leads. Given a set of papers
 
 Optional PubMedBERT embeddings cluster terms semantically so synonyms group together.
 
+**For a stage-by-stage walkthrough of the whole pipeline — what each step does,
+why it's there, and which control changes it — see [How bioleads
+works](docs/how_it_works.md).**
+
 It can also **map the citation network** of your corpus (`--citations`): a directed
 paper→paper graph (via NIH iCite) that ranks the most-cited papers both *within
 your set* (in-degree — the work your corpus is built on) and *globally* (iCite's
@@ -209,9 +213,9 @@ supported (they often lack abstracts or aren't reliably structured).
 `--expand N` grows the corpus iteratively from the **PMID-bearing seeds** (from
 `--pmids`, `--pubmed`, or `--refs`): each round adds the papers linked from the
 current frontier and then chases those in the next round, up to `--expand-max`
-total records. `--expand-link references` (default) follows the papers each seed
-*cites* (backward); `cited_by` follows papers that *cite* the seeds (forward);
-`both` unions the two directions. Newly discovered records are fetched from
+total records. `--expand-link both` (the default) unions the two directions;
+`references` alone follows the papers each seed *cites* (backward), and
+`cited_by` alone follows papers that *cite* the seeds (forward). Newly discovered records are fetched from
 PubMed (honoring `--fulltext`) and tagged `expanded` in their metadata.
 
 `--expand-source` picks where the citation links come from. By default you
@@ -235,7 +239,12 @@ either source. Cycles are avoided: a record already seen is never re-queued.
 
 **Relevance-guided expansion** (`--expand-strategy relevance`) is a smarter,
 two-phase alternative to the plain BFS snowball. It exploits an asymmetry
-between the two link directions:
+between the two link directions — forward citations are topically *precise* but
+limited, backward references are *comprehensive* but noisy — by spending the
+precision of the first direction as a filter on the recall of the second. (No
+model is trained: this is pseudo-relevance feedback, the profile is a centroid,
+and the gate is a cosine ranking. Full reasoning in
+[How bioleads works](docs/how_it_works.md#2-grow-the-corpus-by-following-citations).)
 
 1. **Phase 1 — forward (`cited_by`).** Papers that cite your seeds tend to
    *converge* on the seed's topic, so the seeds plus their citers are used to
@@ -257,30 +266,35 @@ many fields, so its profile is broader and the Phase-2 gate discriminates less.
 ### GUI
 
 A Tkinter desktop front-end wraps the same pipeline — point-and-click inputs,
-a live log, tables of ranked terms and hypothesis candidates, and one-click
-opening of the interactive co-occurrence graph:
+a live log, tables of ranked terms and hypothesis candidates, and an **Outputs**
+tab that opens everything the run wrote:
 
 ```bash
 bioleads-gui          # installed entry point
 python -m bioleads.gui   # or run the module directly
 ```
 
+The action bar holds just the three run controls — **Run pipeline**, **Stop**,
+and **Cluster terms**. Everything a run *produces* is listed in the **Outputs**
+tab of the results notebook, grouped by what it describes (term co-occurrence,
+term clusters, paper citations, author citations, tables), each with its path
+and an **Open** button that hands the file to your default application. Files
+the run didn't produce stay listed but greyed, so it's visible what's missing
+and why — a `*_3d.html` row is empty when Plotly isn't installed, for example.
+
 Tick **Citation network (iCite)** before running to also build the paper→paper
 citation graph *and* the author→author citation graph; `citation_ranking.csv`
 and `author_ranking.csv` land in the output folder alongside the graph files.
-Each network gets its own **2D** and **3D** open buttons — the **Graph** pair for
-co-occurrence, the **Citations** pair for the paper network, and the **Authors**
-pair for the author network — so both the 2D pyvis layout and the rotatable 3D
-Plotly view are one click away. The **3D** button enables only when Plotly
-produced the `*_3d.html` file.
+Every network is written as both a 2D pyvis layout and a rotatable 3D Plotly
+view, listed side by side in the Outputs tab.
 
 After a run, the **Cluster terms** button groups the ranked terms semantically
 with PubMedBERT and shows them in a collapsible **Clusters** tab (centroid term
 + members). It also writes `term_clusters.csv` to the output folder, recolors
-the co-occurrence graph by cluster, and writes `term_clusters.html` — the
-**Open cluster plot** button opens this interactive 2D embedding scatter (every
-term a point, colored by cluster). Clustering runs on demand in a background
-thread — the first use downloads the embedding model and needs the `embed`
+the co-occurrence graph by cluster, and writes `term_clusters.html` — an
+interactive 2D embedding scatter (every term a point, colored by cluster) that
+appears under **Term clusters** in the Outputs tab. Clustering runs on demand
+in a background thread — the first use downloads the embedding model and needs the `embed`
 extra (and `viz` for the scatter). Tkinter ships with CPython, so the GUI itself
 needs no extra dependency beyond the pipeline's own extras (e.g. `pubmed` for
 PubMed/PMC fetching, `embed` for clustering, `viz` for the plots).

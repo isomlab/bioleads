@@ -116,26 +116,49 @@ class BioleadsGUI:
         r = 0
         self._row_entry(frm, r, "PDF file/folder:", self.pdf_var,
                         ("Browse…", self._pick_pdf),
-                        hint="a single PDF, or a folder of PDFs to ingest as documents"); r += 1
+                        hint="Stage 1 · Collect documents. A single PDF, or a "
+                             "folder of PDFs, read as full extracted text. PDFs "
+                             "carry no PMID, so they cannot seed citation "
+                             "expansion (stage 2) or appear in the citation "
+                             "networks (stage 8)."); r += 1
         self._row_entry(frm, r, "PubMed query:", self.pubmed_var,
-                        hint='an Entrez search (e.g. "CFTR AND chloride channel"); '
-                             "fetches the matching PubMed abstracts"); r += 1
+                        hint='Stage 1 · Collect documents. An Entrez search '
+                             '(e.g. "CFTR AND chloride channel"). Fetches title '
+                             "+ abstract for each hit, up to Max records. Tick "
+                             "PMC full text to upgrade open-access articles to "
+                             "their full body."); r += 1
         self._row_entry(frm, r, "PubMed IDs:", self.pmids_var,
                         ("Load file…", self._pick_pmid_file),
-                        hint="comma/space-separated, or load a file of IDs"); r += 1
+                        hint="Stage 1 · Collect documents. Specific records by "
+                             "PMID: comma/space-separated, or load a file of "
+                             "IDs. These are the seeds citation expansion "
+                             "(stage 2) follows."); r += 1
         self._row_entry(frm, r, "References file:", self.refs_var,
                         ("Browse…", self._pick_refs),
-                        hint="EndNote/Zotero export: RIS (.ris) or EndNote XML (.xml)"); r += 1
+                        hint="Stage 1 · Collect documents. An EndNote/Zotero "
+                             "export: RIS (.ris) or EndNote XML (.xml), "
+                             "auto-detected. Title + abstract are used as "
+                             "written; PMIDs found in the file can seed "
+                             "expansion and be upgraded to full text."); r += 1
         self._row_entry(frm, r, "Background JSON:", self.background_var,
                         ("Browse…", self._pick_background),
-                        hint="term→count baseline for enrichment; uses a built-in "
-                             "background if left empty"); r += 1
+                        hint="Stage 4 · Rank distinctive terms. A term→count "
+                             "baseline saying what is ordinary in biomedicine, "
+                             "so scoring can surface what is distinctive about "
+                             "this corpus. There is NO built-in background: "
+                             "leave this empty and log_odds / hypergeometric "
+                             "silently fall back to TF-IDF."); r += 1
         self._row_entry(frm, r, "Output folder:", self.out_var,
                         ("Browse…", self._pick_out),
-                        hint="where results are written: graphs, CSVs, and HTML"); r += 1
+                        hint="Stage 9 · Write outputs. Where the CSVs and "
+                             "interactive HTML land; they are also listed, with "
+                             "Open buttons, in the Outputs tab."); r += 1
         self._row_entry(frm, r, "ABC anchors:", self.anchors_var,
-                        hint="comma-separated seed concepts for Swanson ABC "
-                             "hypothesis search (optional)"); r += 1
+                        hint="Stage 6 · Propose hypotheses. Comma-separated "
+                             "concepts to use as A in the Swanson ABC search — "
+                             "open discovery from a starting point you care "
+                             "about. Leave empty to try every term in the "
+                             "network (exhaustive)."); r += 1
 
         opts = ttk.Frame(frm)
         opts.grid(row=r, column=0, columnspan=3, sticky="ew", padx=6, pady=4)
@@ -143,38 +166,50 @@ class BioleadsGUI:
         method_menu = ttk.OptionMenu(opts, self.method_var, self.method_var.get(),
                                      "log_odds", "hypergeometric", "tfidf")
         method_menu.pack(side="left", padx=(4, 16))
-        self._add_placeholder_tooltip(
+        self._add_tooltip(
             method_menu,
-            "how term enrichment is scored: log_odds (smoothed log-odds vs. "
-            "background), hypergeometric (over-representation p-value), or tfidf")
+            "Stage 4 · Rank distinctive terms. log_odds = weighted log-odds "
+            "vs. background as a z-score (robust; the usual choice); "
+            "hypergeometric = over-representation test as −log10(p); tfidf = "
+            "corpus-internal, needs no background. log_odds and hypergeometric "
+            "require a Background JSON — without one, all three run as TF-IDF.")
         fulltext_chk = ttk.Checkbutton(opts, text="PMC full text (fall back to abstract)",
                                        variable=self.fulltext_var)
         fulltext_chk.pack(side="left", padx=(0, 16))
-        self._add_placeholder_tooltip(
+        self._add_tooltip(
             fulltext_chk,
-            "fetch full text from PubMed Central when available, instead of just "
-            "the abstract (slower, richer)")
+            "Stage 1 · Collect documents. Upgrade articles that are "
+            "open-access in PubMed Central to their full body text "
+            "(intro/methods/results); articles that are not fall back to the "
+            "abstract. Richer, and materially slower — one extra fetch per "
+            "article.")
         citations_chk = ttk.Checkbutton(opts, text="Citation network (iCite)",
                                         variable=self.citations_var)
         citations_chk.pack(side="left", padx=(0, 16))
-        self._add_placeholder_tooltip(
+        self._add_tooltip(
             citations_chk,
-            "build a paper→paper citation graph from NIH iCite to rank the "
-            "most-cited papers in the corpus")
+            "Stage 8 · Map the citations. Builds the paper→paper AND "
+            "author→author citation networks from NIH iCite, ranking each by "
+            "in-corpus citations (how foundational within your set) and global "
+            "citations (across all of PubMed). Only PMID-bearing documents can "
+            "appear, so a PDF-only corpus produces neither.")
         ttk.Label(opts, text="Max records:").pack(side="left")
         retmax_spin = ttk.Spinbox(opts, from_=1, to=100000, width=8,
                                   textvariable=self.retmax_var)
         retmax_spin.pack(side="left", padx=(4, 16))
-        self._add_placeholder_tooltip(
-            retmax_spin, "cap on how many PubMed records a query may fetch")
+        self._add_tooltip(
+            retmax_spin,
+            "Stage 1 · Collect documents. Cap on how many records a PubMed "
+            "query may fetch.")
         ttk.Label(opts, text="Clusters:").pack(side="left")
         nclusters_spin = ttk.Spinbox(opts, from_=2, to=200, width=5,
                                      textvariable=self.nclusters_var)
         nclusters_spin.pack(side="left", padx=(4, 0))
-        self._add_placeholder_tooltip(
+        self._add_tooltip(
             nclusters_spin,
-            "target number of PubMedBERT term clusters (used by the Cluster "
-            "terms button)")
+            "Stage 7 · Cluster terms. Target number of KMeans groups in "
+            "PubMedBERT space. Applied by the Cluster terms button, not by Run "
+            "pipeline.")
 
         exp = ttk.Frame(frm)
         exp.grid(row=r + 1, column=0, columnspan=3, sticky="ew", padx=6, pady=(0, 4))
@@ -182,33 +217,42 @@ class BioleadsGUI:
         expand_spin = ttk.Spinbox(exp, from_=0, to=10, width=4,
                                   textvariable=self.expand_var)
         expand_spin.pack(side="left", padx=(4, 16))
-        self._add_placeholder_tooltip(
+        self._add_tooltip(
             expand_spin,
-            "grow the corpus by following citation links from the PMID seeds "
-            "this many rounds (0 = off)")
+            "Stage 2 · Grow the corpus. Follow citation links out from the "
+            "PMID seeds this many rounds (0 = off); each round chases what the "
+            "previous round found. Drives the bfs strategy only — relevance "
+            "always runs one round forward then one round backward, even with "
+            "this set to 0.")
         ttk.Label(exp, text="Follow:").pack(side="left")
         follow_menu = ttk.OptionMenu(exp, self.expand_link_var, self.expand_link_var.get(),
                                      "references", "cited_by", "both")
         follow_menu.pack(side="left", padx=(4, 16))
-        self._add_placeholder_tooltip(
+        self._add_tooltip(
             follow_menu,
-            "which links to follow when expanding: references (papers a seed "
-            "cites, backward), cited_by (papers citing a seed, forward), or both")
+            "Stage 2 · Grow the corpus. references = papers your seeds cite "
+            "(backward, into the foundations); cited_by = papers that cite your "
+            "seeds (forward, into the follow-up work); both = the union. "
+            "Ignored by the relevance strategy, which always runs forward then "
+            "backward.")
         ttk.Label(exp, text="Source:").pack(side="left")
         source_menu = ttk.OptionMenu(exp, self.expand_source_var, self.expand_source_var.get(),
                                      "all", "ncbi", "icite")
         source_menu.pack(side="left", padx=(4, 16))
-        self._add_placeholder_tooltip(
+        self._add_tooltip(
             source_menu,
-            "where citation links come from: ncbi (Entrez), icite (NIH iCite), "
-            "or all (union of both)")
+            "Stage 2 · Grow the corpus. Which backend supplies citation "
+            "links: ncbi (Entrez ELink, PMC-derived), icite (NIH iCite / Open "
+            "Citation Collection), or all (the union — broadest coverage, and "
+            "it still works if one backend is down).")
         ttk.Label(exp, text="Max records:").pack(side="left")
         expand_max_spin = ttk.Spinbox(exp, from_=1, to=100000, width=8,
                                       textvariable=self.expand_max_var)
         expand_max_spin.pack(side="left", padx=(4, 0))
-        self._add_placeholder_tooltip(
+        self._add_tooltip(
             expand_max_spin,
-            "cap on the total PMIDs (seeds + discovered) after expansion")
+            "Stage 2 · Grow the corpus. Hard cap on the total PMIDs (seeds + "
+            "discovered) after expansion.")
 
         exp2 = ttk.Frame(frm)
         exp2.grid(row=r + 2, column=0, columnspan=3, sticky="ew", padx=6, pady=(0, 6))
@@ -216,35 +260,40 @@ class BioleadsGUI:
         strategy_menu = ttk.OptionMenu(exp2, self.expand_strategy_var, self.expand_strategy_var.get(),
                                        "bfs", "relevance")
         strategy_menu.pack(side="left", padx=(4, 16))
-        self._add_placeholder_tooltip(
+        self._add_tooltip(
             strategy_menu,
-            "bfs adds every linked paper; relevance keeps only the top-K most "
-            "topically similar to the seed set each round")
+            "Stage 2 · Grow the corpus. bfs snowballs along Follow, adding "
+            "every linked paper — exhaustive, and it drifts off topic because a "
+            "reference list spans every field the seed touched. relevance uses "
+            "the reliable direction to filter the unreliable one: papers citing "
+            "your seeds are topically tight, so it averages them into a topic "
+            "profile, then keeps only the top-K of the seeds' own references by "
+            "cosine similarity to it — backward reach without backward noise.")
         ttk.Label(exp2, text="Relevance top-K:").pack(side="left")
         topk_spin = ttk.Spinbox(exp2, from_=1, to=100000, width=6,
                                 textvariable=self.expand_topk_var)
         topk_spin.pack(side="left", padx=(4, 0))
-        self._add_placeholder_tooltip(
+        self._add_tooltip(
             topk_spin,
-            "Relevance strategy only (ignored for bfs). Each round, candidate "
-            "papers are scored by similarity to the seed set and only the top-K "
-            "are kept and expanded further. Lower K (~20–50) stays tight on the "
-            "seed topic but may miss links; higher K (~200+) casts a wider net "
-            "but pulls in more off-topic papers and grows the corpus faster. "
-            "Pair with expansion rounds and Max records, which cap the total.")
+            "Stage 2 · Grow the corpus. Relevance strategy only (ignored by "
+            "bfs). In phase 2, the seeds' backward references are scored "
+            "against the topic profile and only the top-K are kept. Lower K "
+            "(~20–50) stays tight on the seed topic but may miss links; higher "
+            "K (~200+) casts a wider net but pulls in more off-topic papers. "
+            "Max records still caps the total.")
 
     def _row_entry(self, parent, row, label, var, button=None, hint=None) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=6, pady=3)
         entry = ttk.Entry(parent, textvariable=var)
         entry.grid(row=row, column=1, sticky="ew", padx=6, pady=3)
         if hint:
-            self._add_placeholder_tooltip(entry, hint)
+            self._add_tooltip(entry, hint)
         if button:
             text, cmd = button
             ttk.Button(parent, text=text, command=cmd).grid(
                 row=row, column=2, sticky="e", padx=6, pady=3)
 
-    def _add_placeholder_tooltip(self, widget, text) -> None:
+    def _add_tooltip(self, widget, text) -> None:
         # Lightweight hover tooltip — avoids cluttering the grid with help text.
         tip = {"win": None}
 
@@ -280,12 +329,28 @@ class BioleadsGUI:
 
         self.run_btn = ttk.Button(bar, text="Run pipeline", command=self._on_run)
         self.run_btn.pack(side="left")
+        self._add_tooltip(
+            self.run_btn,
+            "Runs stages 1–6 — collect documents, grow the corpus, extract "
+            "entities, rank distinctive terms, build the term network, propose "
+            "hypotheses — plus stage 8 if Citation network is ticked. Runs in a "
+            "background thread; progress streams to the Log tab.")
         self.stop_btn = ttk.Button(bar, text="Stop", command=self._on_stop,
                                    state="disabled")
         self.stop_btn.pack(side="left", padx=6)
+        self._add_tooltip(
+            self.stop_btn,
+            "Halts after the current step finishes — an in-flight network fetch "
+            "cannot be interrupted mid-call. No results are written.")
         self.cluster_btn = ttk.Button(bar, text="Cluster terms",
                                       command=self._on_cluster, state="disabled")
         self.cluster_btn.pack(side="left", padx=6)
+        self._add_tooltip(
+            self.cluster_btn,
+            "Stage 7 · Cluster terms. Groups the ranked terms in PubMedBERT "
+            "space, fills the Clusters tab, recolors the co-occurrence graph by "
+            "cluster, and writes the embedding scatter. Available after a run; "
+            "the first use downloads the model.")
 
     def _build_statusbar(self) -> None:
         """A dedicated bottom strip for status text + the progress indicator.
@@ -430,7 +495,7 @@ class BioleadsGUI:
             text=self._display_path(path) if exists else "— not produced this run")
         detail.pack(side="left", fill="x", expand=True, padx=(6, 6))
         if exists:
-            self._add_placeholder_tooltip(detail, os.path.abspath(path))
+            self._add_tooltip(detail, os.path.abspath(path))
         else:
             detail.configure(foreground="#888888")
 

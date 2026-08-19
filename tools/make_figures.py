@@ -925,6 +925,125 @@ def fig_directions(n=1):
     return svg(W, H, "".join(b), "The two citation directions")
 
 
+
+# --------------------------------------------------------------------------- #
+# 5c. What the twelve layers each do, and what the gate gets out of them
+# --------------------------------------------------------------------------- #
+# Measured, not drawn: tools in the repository history produce these. The top
+# panel is 1,500 real PubMed titles through PubMedBERT; the bottom is the gate's
+# own scoring rule run on document vectors pooled from each layer in turn.
+ATTN = [.54, .35, .33, .29, .26, .32, .29, .22, .20, .21, .15, .14]
+FFN = [.36, .27, .25, .25, .22, .21, .22, .21, .23, .21, .17, .19]
+PARKED = [.26, .40, .44, .42, .49, .41, .30, .64, .63, .69, .79, .75]
+WORDHEADS = [12, 8, 7, 9, 6, 9, 10, 1, 0, 0, 0, 0]
+AUC = [.934, .969, .971, .971, .961, .954, .944, .940, .929, .923, .930, .959, .963]
+
+
+def fig_depth(n=1):
+    """Why twelve: what each layer contributes, and whether the gate needs it."""
+    W, H = 880, 670
+    b = [text(24, 30, f"{n} · What each of the twelve layers does", 15, INK,
+              weight="600")]
+    b.append(text(24, 56, "Nothing here is illustrative. Top: 1,500 PubMed titles "
+                  "through the model. Bottom: the gate’s own scoring rule, run on "
+                  "paper vectors", 12, MUTED))
+    b.append(text(24, 74, "pooled from each layer in turn — 28 topics, 1,466 papers, "
+                  "5 seeds each.", 12, MUTED))
+
+    def xof(k):                      # layer k (0 = the lookup table, before layer 1)
+        return 58 + k * 61
+
+    # ---- panel A: how much each layer changes a token ---------------------
+    base, top = 262, 136
+    b.append(text(24, 104, "How big a correction each layer adds, and what its "
+                  "attention spends itself on", 12.5, INK, weight="600"))
+    b.append(f"<rect x='24' y='{114}' width='11' height='11' rx='2' fill='{BLUE}' "
+             f"opacity='0.85'/>")
+    b.append(text(41, 124, "attention", 11, BLUE, weight="600"))
+    b.append(f"<rect x='108' y='{114}' width='11' height='11' rx='2' fill='{GREEN}' "
+             f"opacity='0.85'/>")
+    b.append(text(125, 124, "feed-forward", 11, GREEN, weight="600"))
+    b.append(text(W - 30, 124, "correction size, ‖Δ‖ ÷ ‖what came in‖", 11, MUTED,
+                  "end"))
+
+    b.append(line(46, base, W - 30, base, GRID, 1.2))
+    for v in (0.2, 0.4, 0.6):
+        y = base - v / 0.6 * (base - top)
+        b.append(line(46, y, W - 30, y, GRID, 1, "3 4"))
+        b.append(text(42, y + 4, f"{v:.1f}", 9.5, MUTED, "end", mono=True))
+
+    for i in range(12):
+        cx = xof(i + 1)
+        for val, col, dx in ((ATTN[i], BLUE, -13), (FFN[i], GREEN, 1)):
+            h = val / 0.6 * (base - top)
+            b.append(f"<rect x='{cx + dx}' y='{base - h:.1f}' width='12' "
+                     f"height='{h:.1f}' rx='1.5' fill='{col}' opacity='0.85'/>")
+        b.append(text(cx, base + 16, str(i + 1), 10.5, INK, "middle", mono=True))
+
+    # the parked-attention strip
+    sy = base + 26
+    b.append(text(90, sy + 9, "attention", 10, MUTED, "end"))
+    b.append(text(90, sy + 21, "parked", 10, MUTED, "end"))
+    for i in range(12):
+        cx = xof(i + 1)
+        b.append(f"<rect x='{cx - 22}' y='{sy}' width='44' height='22' rx='2' "
+                 f"fill='{AMBER}' opacity='{PARKED[i]:.2f}'/>")
+        b.append(text(cx, sy + 15, f"{PARKED[i]*100:.0f}%", 9.5,
+                      INK if PARKED[i] < .6 else "#ffffff", "middle", mono=True))
+    b.append(text(W - 30, sy + 36, "share landing on [CLS], [SEP] and punctuation "
+                  "instead of on words", 10.5, MUTED, "end"))
+
+    hy = sy + 52
+    b.append(text(90, hy + 16, "heads reading", 10, MUTED, "end"))
+    b.append(text(90, hy + 28, "real words", 10, MUTED, "end"))
+    for i in range(12):
+        cx = xof(i + 1)
+        col = INK if WORDHEADS[i] else MUTED
+        b.append(text(cx, hy + 24, f"{WORDHEADS[i]}", 12.5, col, "middle",
+                      mono=True, weight="600" if WORDHEADS[i] else "normal"))
+    b.append(text(W - 30, hy + 44, "of the twelve heads in that layer", 10.5, MUTED,
+                  "end"))
+
+    # ---- panel B: what the gate gets from reading out at each layer -------
+    b.append(line(24, 406, W - 24, 406, GRID, 1))
+    b.append(text(24, 430, "What the gate gets if it reads the paper vector out at "
+                  "that layer instead of the last", 12.5, INK, weight="600"))
+
+    lo, hi = 0.918, 0.976
+    bot, tp = 580, 458
+
+    def yof(a):
+        return bot - (a - lo) / (hi - lo) * (bot - tp)
+
+    for v in (0.93, 0.95, 0.97):
+        b.append(line(46, yof(v), W - 30, yof(v), GRID, 1, "3 4"))
+        b.append(text(42, yof(v) + 4, f"{v:.2f}", 9.5, MUTED, "end", mono=True))
+
+    pts = " ".join(f"{xof(k)},{yof(AUC[k]):.1f}" for k in range(13))
+    b.append(f"<polyline points='{pts}' fill='none' stroke='{BLUE}' "
+             f"stroke-width='2.2'/>")
+    for k in range(13):
+        col = GREEN if k == 3 else (RED if k == 9 else BLUE)
+        b.append(f"<circle cx='{xof(k)}' cy='{yof(AUC[k]):.1f}' r='4' fill='{col}'/>")
+        b.append(text(xof(k), bot + 20, str(k), 10.5, INK, "middle", mono=True))
+    b.append(text(xof(0), bot + 36, "no layers —", 9.5, MUTED, "middle"))
+    b.append(text(xof(0), bot + 48, "the lookup table", 9.5, MUTED, "middle"))
+
+    b.append(text(xof(3), yof(AUC[3]) - 14, "best: layer 3, 0.971", 11, GREEN,
+                  "middle", weight="600"))
+    b.append(text(xof(9), yof(AUC[9]) + 20, "worst: layer 9, 0.923", 11, RED,
+                  "middle"))
+    b.append(text(xof(12) - 6, yof(AUC[12]) - 14, "what bioleads uses: 0.963", 11,
+                  BLUE, "end", weight="600"))
+    b.append(text(W - 30, tp - 8, "AUC — chance a same-topic paper outranks an "
+                  "off-topic one", 10.5, MUTED, "end"))
+
+    b.append(text(24, 652, "Read together: the topical signal the gate lives on is "
+                  "built in the first three layers, partly spent in the middle ones, "
+                  "and partly restored at the end.", 12, MUTED))
+    return svg(W, H, "".join(b), "What each of the twelve layers does")
+
+
 # The order figures appear in docs/how_it_works.md. The number printed on each
 # figure comes from this list, so the two can never disagree — reorder here and
 # the captions follow.
@@ -935,6 +1054,7 @@ ORDER = [
     ("head-mechanics", fig_head_mechanics),   # what a head is…
     ("layers-and-heads", fig_heads),          # …then what all 144 of them do
     ("one-layer", fig_layer),                 # …then the layer around them
+    ("twelve-layers", fig_depth),             # …then why there are twelve of them
     ("tokens-to-vector", fig_tokens),   # the recap, after all five steps are told
     ("seed-direction", fig_centroid),
     ("scoring-by-angle", fig_angle),

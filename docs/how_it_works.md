@@ -117,7 +117,9 @@ layer, each version built from the one before. No single step changes it much �
 consecutive versions stay above 0.79 cosine, and mostly above 0.95 — but the
 changes compound. By the final layer the vector retains a cosine of **0.403** to
 the one that entered layer 1. It never stops being `muscle`; it stops being
-`muscle` in general and becomes `muscle` in this sentence.
+`muscle` in general and becomes `muscle` in this sentence. What each of those
+twelve rounds contributes, and whether this stage needs all of them, is measured
+in step 1.
 
 ### The problem
 
@@ -311,14 +313,17 @@ figure has one square per head — rows are the layers, columns are the twelve
 heads *within* that layer. (Those squares are a summary statistic, not attention
 weights; only the bars on the left sum to 1.)
 
-But it would be misleading to suggest all 144 have tidy jobs. Counting only what
-the real words point at, **57 of them send over 70% of their attention to
-punctuation and the sentence markers** — a known idling behaviour, where a head
-with nothing to contribute parks its attention somewhere harmless. Just 23 mostly
-read the actual words. The useful mental model
-is not twelve experts with twelve labelled specialities, but a large pool of
-cheap, partly-redundant pattern detectors of which a minority matter for any given
-sentence.
+But it would be misleading to suggest all 144 have tidy jobs. On the sentence
+above, counting only what the real words point at, **57 of them send over 70% of
+their attention to punctuation and the sentence markers** — a known idling
+behaviour, where a head with nothing to contribute parks its attention somewhere
+harmless. Just 23 mostly read the actual words. How many idle depends on the
+text: run the same test over 1,500 real titles and it flags 33 rather than 57,
+because short input has proportionally more punctuation to park on. Either way
+the useful mental model is not twelve experts with twelve labelled specialities,
+but a large pool of cheap, partly-redundant pattern detectors of which a minority
+matter for any given sentence — and, as the next section shows, the idle ones sit
+almost entirely in the last five layers.
 
 **And "rewritten" means added to, not replaced.** Neither half overwrites the
 vector. Each computes a *correction* and adds it to what was already there — a
@@ -337,6 +342,121 @@ against its starting point without any single step discarding what was there.
 That also settles what a token can be influenced by: because each round starts
 from the last one's output, a word can affect a token it never directly attended
 to, reached through whatever the layer below folded in.
+
+**Why they are called layers.** The word is older than transformers and comes
+from how these networks are drawn: a row of units all computed at once, then
+another row computed from that row's output, stacked upward like strata. Here it
+means something specific. **One layer is one complete round of "attention, then
+feed-forward", holding its own private copy of every weight it uses.** The twelve
+rounds do not reuse one set of weights twelve times — each layer holds
+**7.09 million** parameters of its own, and the twelve together are **85.1M of
+the model's 109.5M**, the 30,522-row lookup table being most of the rest. The
+layers *are* the model.
+
+Two things follow from the name that are worth holding onto. Everything inside a
+layer is computed at the same moment, from the layer below and nothing else —
+that simultaneity is what makes it a layer rather than a step in a loop. And
+"layer" here names a *block* of two sublayers, which is why twelve layers give
+**twenty-four** corrections, and why asking the library for the hidden states
+returns **thirteen** arrays: the lookup table's output, then one per layer.
+
+**Why twelve.** For the same reason there are 768 numbers: it was inherited, not
+chosen. PubMedBERT is BERT-base retrained on PubMed, and BERT-base is 12 layers
+× 12 heads × 768 wide — a shape picked in 2018 to match the size of the model
+BERT was being compared against, then kept by everything built on it. The
+larger variant doubles the depth to 24 and widens to 1024. bioleads did not
+choose twelve; it chose a model that has twelve, the way you inherit a file
+format.
+
+What *depth* is for is easier to say than what twelve is for. Range is not the
+reason: one layer's attention already reaches every token in the text. What a
+second layer buys is **composition** — its attention can only mix what the layer
+below already assembled, so it can attend to a token that is by then "the token
+that folded in `smooth` and `muscle`", and a third to whatever that became.
+Depth buys ply, not reach.
+
+![Figure 7 — what each of the twelve layers does](figures/07-twelve-layers.svg)
+
+**What each one does.** Not jobs — tendencies. Measured over 1,500 real PubMed
+titles:
+
+| layer | attention correction | feed-forward correction | attention on markers | span | heads reading words | contextualisation |
+|---|---|---|---|---|---|---|
+| 1 | 0.54 | 0.36 | 26% | 7.1 | 12 | +0.252 |
+| 2 | 0.35 | 0.27 | 40% | 7.3 | 8 | +0.132 |
+| 3 | 0.33 | 0.25 | 44% | 7.3 | 7 | +0.081 |
+| 4 | 0.29 | 0.25 | 42% | 7.1 | 9 | +0.015 |
+| 5 | 0.26 | 0.22 | 49% | 8.0 | 6 | +0.045 |
+| 6 | 0.32 | 0.21 | 41% | 6.5 | 9 | +0.044 |
+| 7 | 0.29 | 0.22 | 30% | 4.5 | 10 | +0.009 |
+| 8 | 0.22 | 0.21 | 64% | 8.2 | 1 | −0.014 |
+| 9 | 0.20 | 0.23 | 63% | 8.7 | 0 | +0.007 |
+| 10 | 0.21 | 0.21 | 69% | 9.1 | 0 | +0.012 |
+| 11 | 0.15 | 0.17 | 79% | 10.0 | 0 | +0.039 |
+| 12 | 0.14 | 0.19 | 75% | 9.6 | 0 | +0.048 |
+
+The two correction columns are ‖correction‖ ÷ ‖what came in‖, the same
+measurement Figure 6 makes on one token. **Attention on markers** is the share
+landing on `[CLS]`, `[SEP]` and punctuation rather than on words; **span** is the
+average distance in tokens between a word and what it attends to; **heads reading
+words** counts, of that layer's twelve, how many are not dominated by anything
+else — under half their attention on markers, under half on the preceding token,
+under half on themselves.
+**Contextualisation** is the layer's share of the total separation of a word from
+its own occurrences elsewhere — how much of the "`muscle` stops being `muscle` in
+general" happens right there.
+
+Two things fall out of that table.
+
+*The first layer does the most of everything.* Its correction is the largest by
+half again, and **38% of all the contextualisation in the model happens in it**;
+70% has happened by the end of layer 3. Layers 1–3 are where a word stops being
+a dictionary entry.
+
+*Layers 1–7 read the sentence; 8–12 largely stop.* Six to twelve heads per layer
+are still reading words through layer 7 — layer 7 most locally of all, with a
+mean span of 4.5 tokens and 23% of attention going straight to the preceding
+word. From layer 8 there is at most one such head, five to nine heads park over
+70% of their attention on markers and punctuation, and the corrections shrink.
+The back half of the model does most of its work in the feed-forward half, on
+each token alone.
+
+**Does the gate need all twelve?** The rest of step 1 turns these token vectors
+into one vector per paper by averaging them and scaling to length 1. Do that at
+*every* layer instead of only the last, and you can ask which layer the gate
+would actually prefer — the lower panel of Figure 7. The test uses 28 topics
+(two independent draws of 14 reference lists), 1,466 title-and-abstract records,
+five random seeds per topic, 25 draws each, scored exactly as step 3 scores
+candidates; AUC is the chance a same-topic paper outranks an off-topic one.
+
+| read out at | 0 (lookup) | 1 | 3 | 6 | 9 | 11 | 12 |
+|---|---|---|---|---|---|---|---|
+| AUC | 0.934 | 0.969 | **0.971** | 0.944 | 0.923 | 0.959 | 0.963 |
+| precision @ 50 | 0.640 | 0.695 | **0.698** | 0.636 | 0.591 | 0.663 | 0.674 |
+
+Everything the gate lives on is in place by **layer 3**, and the middle-late
+layers are *worse* than the early ones — the fall from layer 3 to layer 9
+(0.048) is larger than the whole model's gain over the raw lookup table
+(0.029). The curve is U-shaped: topical signal is built early, spent on work
+the gate does not use, then partly restored at the end.
+
+Deleting layers tells the same story from the other side. Skip any single layer
+and re-run the whole test: the paper's vector moves by at most **0.026** cosine
+(against a background where two *unrelated* papers already sit at 0.984), and the
+AUC moves by at most 0.013 — **six of the twelve deletions leave it slightly
+better**. Only removing layer 11 clearly hurts. No single layer is load-bearing
+here, which is what a stack of small additive corrections predicts.
+
+So the honest answer to "why twelve" is that this stage did not need twelve and
+did not pick twelve. Twelve is the shape of the model it borrowed, mean-pooling
+the last layer is the convention rather than a tuned choice, and the measurement
+says a layer-3 readout would be slightly better on this task — worth about 0.008
+AUC and two points of precision@50. That is a proxy, not the benchmark: topics
+defined by one paper's reference list are cleaner than a real expansion round,
+and nothing here has been through [the benchmark](benchmark.md). The two
+independent draws also agree on the shape of the curve but not on the size of the
+prize — the layer-3 advantage in precision@50 is 0.2 points in one and 4.6 in the
+other. It is a flagged possibility, not a change.
 
 **Averaging the tokens.** The gate needs *one* vector per paper, and what we have
 is one per token, so they are averaged — the simplest way to combine them, and the
@@ -361,10 +481,15 @@ gate's only job is topical filtering, and the co-occurrence network in stage 5 i
 undirected anyway. It would not be fine for extracting directed claims, and
 nothing downstream should be read as doing that.
 
+Averaging does one more thing, which only becomes visible in step 3: it
+**concentrates whatever every token has in common**. The parts of the tokens that
+differ partly cancel; the part they share does not. That is why the paper vectors
+end up crowded into a narrow cone — see *where the 0.99s come from*, below.
+
 The average is finally scaled to length 1 so only its *direction* matters.
 That is the whole of step 1:
 
-![Figure 7 — the whole of step 1, end to end](figures/07-tokens-to-vector.svg)
+![Figure 8 — the whole of step 1, end to end](figures/08-tokens-to-vector.svg)
 
 Now the formal version of exactly that picture. PubMedBERT emits a vector
 $\mathbf{h}_t$ per token, and bioleads averages the *real* tokens — skipping the
@@ -400,7 +525,7 @@ because it quietly measures how much the seeds agree. Averaging unit arrows that
 point the same way barely shortens them; averaging arrows that disagree produces
 something much shorter, pointing between them.
 
-![Figure 8 — seeds that agree give a long average; seeds that disagree give a short one](figures/08-seed-direction.svg)
+![Figure 9 — seeds that agree give a long average; seeds that disagree give a short one](figures/09-seed-direction.svg)
 
 This is the geometry behind the documented failure mode: a seed set covering two
 subjects averages to a direction in the gap between them, and can rank papers
@@ -437,7 +562,7 @@ signal.
 
 A candidate belongs if its arrow points nearly the same way as the topic arrow.
 
-![Figure 9 — candidates scored by the angle they make with the topic](figures/09-scoring-by-angle.svg)
+![Figure 10 — candidates scored by the angle they make with the topic](figures/10-scoring-by-angle.svg)
 
 $$s_c \;=\; \hat{\mathbf{e}}_c \cdot \mathbf{q}_0 \;=\; \cos\theta_c \;\in\; [-1, 1]$$
 
@@ -454,7 +579,7 @@ real candidate pool, every raw cosine falls between 0.985 and 0.991.
 It is worth seeing *why*, because it looks like a bug and is not. Of the 768
 numbers, **one is very nearly the same for every text there is**:
 
-![Figure 10 — one dimension holds about the same value for every text](figures/10-shared-direction.svg)
+![Figure 11 — one dimension holds about the same value for every text](figures/11-shared-direction.svg)
 
 Dimension 424 sits at roughly −0.96 for a TRPV1 paper, a wheat-fertiliser paper,
 a microglia paper, and the sentence "the cat sat on the mat" alike, and accounts
@@ -464,6 +589,26 @@ scores that never leave the high nineties. Language models are known to do this;
 the vectors occupy a narrow cone rather than spreading over the sphere. **The useful
 signal is the ranking**, which is why the cut in step 5 is a rank, not a
 threshold.
+
+**Where the 0.99s come from.** The cone is not something the biomedical
+vocabulary does, and it is worth being able to say what does it, because it is
+the one property of the representation that every score in this stage inherits.
+Traced back through the model, the lookup table turns out to be innocent and
+three later steps build it:
+
+| where | what happens to dimension 424 |
+|---|---|
+| the 30,522-row lookup table | nothing. Its rows are near-orthogonal — mean pairwise cosine **0.068** — and no dimension dominates: the largest carries 0.63% of a row's squared length, and 424 carries **0.19%** |
+| assembling the input | the moment word, position and segment vectors are added and rescaled, 424 carries the largest average value of any dimension (−4.1). The trained parameters single it out: that step's bias for it is **+1.62**, where no other dimension's exceeds 0.39 |
+| the twelve layers | they amplify it. A token's share of squared length at 424 rises from **15%** at the input to **76%** by layer 12 |
+| averaging the tokens | it concentrates further, because every token carries it and the informative parts partly cancel: the pooled paper vector sits at **92%** where its own tokens sit at 76% |
+
+So the crowding is an artefact of one hard-wired direction, amplified by depth
+and then by pooling — not a statement that all biomedical papers are alike. It is
+also entirely removable: centring the pool (below) takes dimension 424 from 91%
+of a vector's squared length to **0.2%**, and the mean cosine between papers from
+0.985 to **−0.002**. Whether that is worth doing is the next question, and the
+answer turns out to be "for the score you read, not the one that selects".
 
 That also makes the raw number useless to *report*. Every kept document carries a
 `relevance` score in its metadata, and a column of 0.98s tells a reader nothing.
@@ -494,7 +639,7 @@ papers use that vocabulary too. No amount of aiming at the topic separates them.
 So the gate also learns from its own worst matches. Take the lowest-scoring
 candidates, average them into a direction, and tilt the topic vector away from it:
 
-![Figure 11 — the negative term rotates the query vector away from the worst candidates](figures/11-negative-term.svg)
+![Figure 12 — the negative term rotates the query vector away from the worst candidates](figures/12-negative-term.svg)
 
 $$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
 
@@ -541,7 +686,7 @@ the corpus gets.
 
 Benchmarked, precision falls and recall rises as $K$ grows (12 reviews):
 
-![Figure 12 — precision falls and recall rises as K grows](figures/12-top-k-tradeoff.svg)
+![Figure 13 — precision falls and recall rises as K grows](figures/13-top-k-tradeoff.svg)
 
 The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
 recall of unfiltered snowballing, 0.3252, on 87% less material.** The recall gap
@@ -798,6 +943,11 @@ co-occurrence count (0 by construction).
 **What it does.** Embeds each ranked term with **PubMedBERT** (mean-pooled over
 the token embeddings), L2-normalizes, and runs **KMeans**. Each cluster is
 labeled by the member term closest to the centroid.
+
+This is the same readout the gate uses in stage 2 — the last layer, mean-pooled —
+and it carries the same caveat: that is the convention rather than a tuned choice
+(*Does the gate need all twelve?*, stage 2). Terms are also one to four tokens
+long, and short strings are where the most heads idle.
 
 **Why.** The ranked list fragments across surface variants — `nmda receptor`,
 `nmdar`, and `glutamate receptor` compete as separate rows when they're one

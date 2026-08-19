@@ -63,8 +63,11 @@ python3 tools/benchmark_expansion.py --reviews 25 --seeds 5 \
     --arms forward,backward,both,relevance --gammas 0,0.25,0.5 --out bench.csv
 ```
 
-Everything fetched is cached under `--cache` (default `.benchmark_cache`, git
--ignored), so re-runs and added arms cost nothing.
+Everything fetched is cached under `--cache`, which defaults to
+`~/.cache/bioleads-benchmark` — deliberately outside the repo, since it grows to
+hundreds of MB across ~145k files and should survive a clean checkout or a swept
+scratch directory. Re-runs, added arms and swept parameters then cost nothing:
+a full 12-review sweep off a warm cache makes zero network requests.
 
 ## Cost, and what it trades away
 

@@ -56,6 +56,11 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+# Outside the repo on purpose: this grows to hundreds of MB across ~145k files,
+# and it should survive a clean checkout, a re-clone, or a scratch directory
+# being swept.
+DEFAULT_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "bioleads-benchmark")
+
 DEFAULT_QUERY = (
     'systematic review[pt] AND "journal article"[pt] '
     'AND 2018:2022[dp] AND hasabstract'
@@ -491,7 +496,10 @@ def main(argv=None) -> int:
                         "titles (better fidelity, many more requests)")
     p.add_argument("--no-year-cutoff", action="store_true",
                    help="do not drop candidates published after the review")
-    p.add_argument("--cache", default=".benchmark_cache", help="cache directory")
+    p.add_argument("--cache", default=DEFAULT_CACHE,
+                   help=f"cache directory (default {DEFAULT_CACHE}); keeping it "
+                        "outside the repo means a re-clone or a clean checkout "
+                        "does not throw away ~145k fetched records")
     p.add_argument("--out", default="", help="write per-trial rows to this CSV")
     p.add_argument("--seed", type=int, default=0, help="RNG seed for sampling")
     p.add_argument("--email", default="", help="Entrez contact email")

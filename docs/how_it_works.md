@@ -95,7 +95,7 @@ can't seed this — there is nothing to follow.
 
 Every seed sits between two very different sets of papers.
 
-![The two citation directions, drawn to scale](figures/07-two-directions.svg)
+![Figure 1 — the two citation directions, drawn to scale](figures/01-two-directions.svg)
 
 Those counts are measured, not illustrative: across the systematic-review seed
 sets in [the benchmark](benchmark.md), one round backward yielded 2,342 papers
@@ -143,17 +143,40 @@ the text starts and ends:
 ```
 
 `trpv1` survives as one token because PubMedBERT was trained on biomedical text
-and has it in its vocabulary; a general-purpose model would shatter it into
-`tr ##pv ##1`. That is most of why a domain model is worth using here.
+and carries it in its vocabulary. A general-purpose model shatters the same word
+into four pieces — `tr`, `##p`, `##v`, `##1` — and has to reassemble the meaning
+from fragments. That is most of why a domain model is worth using here.
 
-PubMedBERT then turns **each token into 768 numbers**. Those numbers are not
-chosen by hand and no single one means anything on its own — they are what the
-model learned during training, and their only job is that similar meanings land
-in similar places. A paper's own vector is the **average across its tokens**, and
-that average is finally scaled to length 1 so only its *direction* matters:
+**How a token becomes a number.** The vocabulary is a fixed list of 30,522 word
+pieces, and a token's "number" is simply *its position in that list*:
 
-![A sentence becomes one vector: tokens, per-token numbers, averaging, and
-normalising](figures/01-tokens-to-vector.svg)
+| token | `[CLS]` | `trpv1` | `mediates` | `vasodilation` | `arterial` | `[SEP]` |
+|---|---|---|---|---|---|---|
+| row | 2 | 17501 | 10412 | 21742 | 6624 | 3 |
+
+Nothing is computed to get there — it is a dictionary lookup, and any word piece
+outside those 30,522 entries cannot be represented at all, which is exactly why
+rare words get split until the pieces are all in the list.
+
+That row number then indexes a second table of **30,522 × 768 numbers** learned
+during training: one row of 768 per vocabulary entry. So a token starts as *the
+768 numbers stored for it*. Those starting numbers know nothing about context —
+`muscle` begins identically in "smooth muscle" and "muscle of the argument" — so
+twelve transformer layers then rewrite each token's 768 numbers by mixing in the
+other tokens around it. What comes out is that word *in that sentence*.
+
+**Why 768?** It is not derived from the data or the vocabulary. It is the width
+the model was built with — the "base" size in the BERT family — and every token
+vector at every layer has exactly that many numbers. It is divisible the way the
+architecture needs: 12 attention heads × 64 numbers each = 768. Larger variants
+use 1024 or more and are correspondingly slower; smaller ones lose accuracy. For
+our purposes 768 is simply a fixed, inherited constant, and no individual one of
+those numbers means anything on its own — only the whole pattern does.
+
+A paper's own vector is then the **average across its tokens**, scaled to length 1
+so only its *direction* matters:
+
+![Figure 2 — a sentence becomes one vector](figures/02-tokens-to-vector.svg)
 
 Now the formal version of exactly that picture. PubMedBERT emits a vector
 $\mathbf{h}_t$ per token, and bioleads averages the *real* tokens — skipping the
@@ -189,7 +212,7 @@ because it quietly measures how much the seeds agree. Averaging unit arrows that
 point the same way barely shortens them; averaging arrows that disagree produces
 something much shorter, pointing between them.
 
-![Seeds that agree give a long average; seeds that disagree give a short one](figures/04-seed-direction.svg)
+![Figure 3 — seeds that agree give a long average; seeds that disagree give a short one](figures/03-seed-direction.svg)
 
 This is the geometry behind the documented failure mode: a seed set covering two
 subjects averages to a direction in the gap between them, and can rank papers
@@ -226,7 +249,7 @@ signal.
 
 A candidate belongs if its arrow points nearly the same way as the topic arrow.
 
-![Candidates scored by the angle they make with the topic direction](figures/02-scoring-by-angle.svg)
+![Figure 4 — candidates scored by the angle they make with the topic](figures/04-scoring-by-angle.svg)
 
 $$s_c \;=\; \hat{\mathbf{e}}_c \cdot \mathbf{q}_0 \;=\; \cos\theta_c \;\in\; [-1, 1]$$
 
@@ -243,8 +266,7 @@ real candidate pool, every raw cosine falls between 0.985 and 0.991.
 It is worth seeing *why*, because it looks like a bug and is not. Of the 768
 numbers, **one is very nearly the same for every text there is**:
 
-![One dimension holds about the same value for every text, whatever it is
-about](figures/03-shared-direction.svg)
+![Figure 5 — one dimension holds about the same value for every text](figures/05-shared-direction.svg)
 
 Dimension 424 sits at roughly −0.96 for a TRPV1 paper, a wheat-fertiliser paper,
 a microglia paper, and the sentence "the cat sat on the mat" alike, and accounts
@@ -284,7 +306,7 @@ papers use that vocabulary too. No amount of aiming at the topic separates them.
 So the gate also learns from its own worst matches. Take the lowest-scoring
 candidates, average them into a direction, and tilt the topic vector away from it:
 
-![The negative term rotates the query vector away from the worst candidates](figures/05-negative-term.svg)
+![Figure 6 — the negative term rotates the query vector away from the worst candidates](figures/06-negative-term.svg)
 
 $$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
 
@@ -331,7 +353,7 @@ the corpus gets.
 
 Benchmarked, precision falls and recall rises as $K$ grows (12 reviews):
 
-![Precision falls and recall rises as K grows](figures/06-top-k-tradeoff.svg)
+![Figure 7 — precision falls and recall rises as K grows](figures/07-top-k-tradeoff.svg)
 
 The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
 recall of unfiltered snowballing, 0.3252, on 87% less material.** The recall gap

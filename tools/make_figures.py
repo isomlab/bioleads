@@ -85,7 +85,7 @@ def write(name, content):
 # --------------------------------------------------------------------------- #
 # 1. A sentence becomes one vector
 # --------------------------------------------------------------------------- #
-def fig_tokens():
+def fig_tokens(n=1):
     """The beginner on-ramp: real tokens, real numbers, real mean pooling."""
     W, H = 880, 430
     toks = ["[CLS]", "trpv1", "mediates", "vasodilation", "in", "arterial",
@@ -96,25 +96,32 @@ def fig_tokens():
             ("vasodilation", "-0.09  -0.10  -0.09  -0.12  -0.17"),
             ("…", "…"),
             ("[SEP]", "-0.07  -0.21  -0.05  -0.19  -0.11")]
-    b = [text(24, 30, "1 · A sentence becomes one vector", 15, INK, weight="600")]
+    b = [text(24, 30, f"{n} · A sentence becomes one vector", 15, INK, weight="600")]
 
     b.append(text(24, 60, "“TRPV1 mediates vasodilation in arterial smooth muscle.”",
                   13, MUTED, style="italic"))
 
-    # token chips
+    # token chips, each with the vocabulary id underneath
+    ids = {"[CLS]": 2, "trpv1": 17501, "mediates": 10412, "vasodilation": 21742,
+           "in": 1922, "arterial": 6624, "smooth": 6689, "muscle": 3760,
+           ".": 18, "[SEP]": 3}
     x = 24
-    b.append(text(24, 92, "split into word pieces the model knows", 11, MUTED))
+    b.append(text(24, 90, "① split into word pieces from a fixed 30,522-word "
+                  "vocabulary", 11, MUTED))
     for t in toks:
         w = 9 + 7.3 * len(t)
         fill = "#e4ecf7" if t.startswith("[") else CARD
-        b.append(box(x, 102, w, 26, fill=fill))
-        b.append(text(x + w / 2, 119, t, 11, INK, "middle", mono=True))
+        b.append(box(x, 100, w, 24, fill=fill))
+        b.append(text(x + w / 2, 116, t, 11, INK, "middle", mono=True))
+        b.append(text(x + w / 2, 138, str(ids[t]), 10, BLUE, "middle", mono=True))
         x += w + 6
-    b.append(text(x + 4, 119, "10 tokens", 11, MUTED))
+    b.append(text(24, 156, "② each word piece is just its row number in that "
+                  "vocabulary", 11, MUTED))
 
     # per-token vectors
-    b.append(text(24, 162, "each token becomes 768 numbers", 11, MUTED))
-    y = 174
+    b.append(text(24, 182, "③ that row number looks up 768 numbers, which the model "
+                  "then rewrites using the surrounding words", 11, MUTED))
+    y = 194
     for name, vals in rows:
         b.append(text(150, y + 14, name, 11, INK, "end", mono=True))
         b.append(box(162, y, 300, 20, fill="#ffffff"))
@@ -123,37 +130,38 @@ def fig_tokens():
         y += 24
 
     # the averaging bracket
-    b.append(f"<path d='M486 176 q10 0 10 12 v40 q0 12 10 12 q-10 0 -10 12 v40 "
+    b.append(f"<path d='M486 196 q10 0 10 12 v36 q0 12 10 12 q-10 0 -10 12 v36 "
              f"q0 12 -10 12' fill='none' stroke='{GRID}' stroke-width='1.5'/>")
-    b.append(text(506, 258, "average", 12, INK, weight="600"))
-    b.append(text(506, 274, "over the real tokens", 10.5, MUTED))
-    b.append(arrow(586, 253, 626, 253, MUTED, 1.8))
+    b.append(text(506, 272, "④ average", 12, INK, weight="600"))
+    b.append(text(506, 288, "over the real tokens", 10.5, MUTED))
+    b.append(arrow(592, 267, 626, 267, MUTED, 1.8))
 
-    b.append(text(636, 200, "one vector for the whole sentence", 11, MUTED))
-    b.append(box(636, 210, 216, 22, fill="#ffffff"))
-    b.append(text(646, 225, "-0.02  -0.10  -0.01  -0.16  …", 10.5, INK, mono=True))
-    b.append(text(636, 254, "length 14.08", 11, MUTED, mono=True))
-    b.append(arrow(700, 262, 700, 288, MUTED, 1.8))
-    b.append(text(712, 280, "scale to length 1", 11, INK))
-    b.append(box(636, 296, 216, 22, fill="#e7f3ec", stroke="#b7dfc6"))
-    b.append(text(646, 311, "-0.0011  -0.0069  -0.0010  …", 10.5, GREEN, mono=True))
-    b.append(text(636, 338, "length 1.00 — only the direction is kept", 11, GREEN))
+    b.append(text(636, 214, "one vector for the whole sentence", 11, MUTED))
+    b.append(box(636, 224, 216, 22, fill="#ffffff"))
+    b.append(text(646, 239, "-0.02  -0.10  -0.01  -0.16  …", 10.5, INK, mono=True))
+    b.append(text(636, 268, "length 14.08", 11, MUTED, mono=True))
+    b.append(arrow(700, 276, 700, 300, MUTED, 1.8))
+    b.append(text(712, 294, "⑤ scale to length 1", 11, INK))
+    b.append(box(636, 308, 216, 22, fill="#e7f3ec", stroke="#b7dfc6"))
+    b.append(text(646, 323, "-0.0011  -0.0069  -0.0010  …", 10.5, GREEN, mono=True))
+    b.append(text(636, 350, "length 1.00 — only the direction is kept", 11, GREEN))
 
-    b.append(line(24, 366, W - 24, 366, GRID, 1))
-    b.append(text(24, 390, "Every paper in the corpus goes through exactly this, so "
-                  "each one ends up as a single arrow of length 1.", 12, INK))
-    b.append(text(24, 410, "Papers about similar things end up pointing in similar "
-                  "directions — that is the whole basis of the relevance gate.", 12, MUTED))
+    b.append(line(24, 372, W - 24, 372, GRID, 1))
+    b.append(text(24, 396, "768 is simply how wide this model is built — every token "
+                  "vector, at every layer, is 768 numbers.", 12, INK))
+    b.append(text(24, 416, "Papers about similar things end up pointing in similar "
+                  "directions, and that is the whole basis of the relevance gate.",
+                  12, MUTED))
     return svg(W, H, "".join(b), "A sentence becomes one vector")
 
 
 # --------------------------------------------------------------------------- #
 # 2. Scoring by angle, with real cosines
 # --------------------------------------------------------------------------- #
-def fig_angle():
+def fig_angle(n=1):
     W, H = 880, 400
     cx, cy, R = 236, 236, 152
-    b = [text(24, 30, "2 · Candidates are scored by the angle they make with the topic",
+    b = [text(24, 30, f"{n} · Candidates are scored by the angle they make with the topic",
               15, INK, weight="600")]
     b.append(text(24, 56, "Real PubMedBERT cosines — and note how little of the circle "
                   "any of this text actually uses.", 12, MUTED))
@@ -206,13 +214,13 @@ def fig_angle():
 # --------------------------------------------------------------------------- #
 # 3. The direction every paper shares
 # --------------------------------------------------------------------------- #
-def fig_shared():
+def fig_shared(n=1):
     W, H = 880, 350
     rows = [("TRPV1 mediates vasodilation in arterial smooth muscle.", -0.967),
             ("Wheat yield responses to nitrogen fertiliser in soils.", -0.965),
             ("Microglia mediate forgetting via synaptic elimination.", -0.973),
             ("The cat sat on the mat.", -0.954)]
-    b = [text(24, 30, "3 · Why every score comes out near 0.99", 15, INK, weight="600")]
+    b = [text(24, 30, f"{n} · Why every score comes out near 0.99", 15, INK, weight="600")]
     b.append(text(24, 56, "Of the 768 numbers, one is almost the same for every "
                   "text — whatever the text is about.", 12, MUTED))
 
@@ -239,9 +247,9 @@ def fig_shared():
 # --------------------------------------------------------------------------- #
 # 4. Seeds define a direction
 # --------------------------------------------------------------------------- #
-def fig_centroid():
+def fig_centroid(n=1):
     W, H = 880, 404
-    b = [text(24, 30, "4 · The seeds define the direction to score against", 15, INK,
+    b = [text(24, 30, f"{n} · The seeds define the direction to score against", 15, INK,
               weight="600")]
     b.append(text(24, 58, "Average the seed arrows. How long that average comes out "
                   "says whether the seeds agree.", 12, MUTED))
@@ -279,9 +287,9 @@ def fig_centroid():
 # --------------------------------------------------------------------------- #
 # 5. The negative term rotates the gate
 # --------------------------------------------------------------------------- #
-def fig_rocchio():
+def fig_rocchio(n=1):
     W, H = 880, 380
-    b = [text(24, 30, "5 · Learning what the topic is not", 15, INK, weight="600")]
+    b = [text(24, 30, f"{n} · Learning what the topic is not", 15, INK, weight="600")]
     b.append(text(24, 56, "A methods paper can sit at the same angle as a real match. "
                   "Tilting away from the worst candidates separates them.", 12, MUTED))
 
@@ -327,11 +335,11 @@ DATA = [(10, 0.1255, 0.0333), (25, 0.0941, 0.0903), (50, 0.0854, 0.1406),
 BFS = (0.0244, 0.3252)
 
 
-def fig_topk():
+def fig_topk(n=1):
     W, H = 880, 420
     L, Rr, T, B = 78, 560, 84, 320
     ymax = 0.34
-    b = [text(24, 30, "6 · What K trades", 15, INK, weight="600")]
+    b = [text(24, 30, f"{n} · What K trades", 15, INK, weight="600")]
     b.append(text(24, 56, "Benchmarked on 12 systematic reviews. Precision falls and "
                   "recall rises as K grows.", 12, MUTED))
 
@@ -392,12 +400,12 @@ def fig_topk():
 # --------------------------------------------------------------------------- #
 # 7. The two citation directions
 # --------------------------------------------------------------------------- #
-def fig_directions():
+def fig_directions(n=1):
     """Dot counts are proportional: one dot = 150 papers, so the 20x really shows."""
     W, H = 880, 380
     PER_DOT = 150
     back, fwd = 2342, 47000
-    b = [text(24, 30, "7 · The two directions are not the same size", 15, INK,
+    b = [text(24, 30, f"{n} · The two directions are not the same size", 15, INK,
               weight="600")]
     b.append(text(24, 56, f"Measured across the benchmark's seed sets, one round each "
                   f"way. One dot = {PER_DOT} papers.", 12, MUTED))
@@ -440,11 +448,24 @@ def fig_directions():
     return svg(W, H, "".join(b), "The two citation directions")
 
 
+# The order figures appear in docs/how_it_works.md. The number printed on each
+# figure comes from this list, so the two can never disagree — reorder here and
+# the captions follow.
+ORDER = [
+    ("two-directions", fig_directions),
+    ("tokens-to-vector", fig_tokens),
+    ("seed-direction", fig_centroid),
+    ("scoring-by-angle", fig_angle),
+    ("shared-direction", fig_shared),
+    ("negative-term", fig_rocchio),
+    ("top-k-tradeoff", fig_topk),
+]
+
+
+def main():
+    for i, (stem, build) in enumerate(ORDER, start=1):
+        write(f"{i:02d}-{stem}.svg", build(i))
+
+
 if __name__ == "__main__":
-    write("01-tokens-to-vector.svg", fig_tokens())
-    write("02-scoring-by-angle.svg", fig_angle())
-    write("03-shared-direction.svg", fig_shared())
-    write("04-seed-direction.svg", fig_centroid())
-    write("05-negative-term.svg", fig_rocchio())
-    write("06-top-k-tradeoff.svg", fig_topk())
-    write("07-two-directions.svg", fig_directions())
+    main()

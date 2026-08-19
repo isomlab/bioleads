@@ -45,7 +45,7 @@ beats chance.
    │
    ├─ 7. Cluster terms ─────────── PubMedBERT + KMeans (optional)
    │
-   ├─ 8. Map the citations ──────── paper→paper and author→author (optional)
+   ├─ 8. Map the citations ──────── paper→paper and lab→lab (optional)
    │
    └─ 9. Write outputs ─────────── CSVs + interactive HTML
 ```
@@ -982,10 +982,22 @@ internal structure. Papers are ranked two ways: **in-corpus citations**
 citations** (iCite's count across all of PubMed — how big it is generally). A
 paper high on the first and modest on the second is a specialty cornerstone.
 
-**Author → author.** Projected from those same links: when corpus paper P cites
-corpus paper Q, every author of P gets an edge to every author of Q, with shared
-authors dropped so self-citation doesn't inflate anyone. Edge weight is how many
-times that author cited that other author. Authors rank by weighted in-degree.
+**Senior author → senior author.** Projected from those same links, with **one**
+author standing for each paper: the last name in its byline. In biomedical
+convention that is the senior author — the lab the work came out of — and first
+and middle authors do not appear in the network at all. When corpus paper P cites
+corpus paper Q, P's senior author gets an edge to Q's; a shared senior author is
+a self-citation and is dropped. Edge weight is how many times that lab cited the
+other, so two papers from one lab citing the same lab make one edge of weight 2.
+Senior authors rank by weighted in-degree.
+
+Reading it as *labs citing labs* is the point. It also keeps the graph honest
+about size: representing every author would turn one paper→paper citation into
+the product of the two author lists — a single link between two five-author
+papers becoming twenty-five author edges. On a 289-paper corpus, senior authors
+only give **217 nodes and 673 edges** where all authors gave 1,792 and 43,298.
+The cost is that a first author who never runs a lab is invisible here, and that
+a paper with no author list in iCite cannot be placed at all.
 
 **Thinning them out.** Most corpora are sparse: a large share of the papers cite
 nothing else in your set and are cited by nothing in it either, and they arrive
@@ -997,16 +1009,15 @@ threshold. `0` keeps everything; `1` keeps only nodes with at least one link,
 which is usually the setting worth having; higher values leave the densely
 connected core.
 
-**The two graphs take separate numbers**, and it matters. The author graph is a
-projection: one paper→paper link becomes an edge between *every pair* of their
-authors, so a single citation between two five-author papers creates up to
-twenty-five author edges. Author degrees therefore run an order of magnitude
-above paper degrees, and one shared threshold cannot serve both — on a
-289-paper corpus, degree 5 cut the papers from 289 to 153 while removing 10% of
-the authors. Set the paper threshold from the picture you want of the papers,
-and the author threshold from the picture you want of the authors:
+**The two graphs take separate numbers.** Since each paper contributes one
+senior author, the two are now on comparable scales — on that 289-paper corpus,
+median degree 5 for papers against 4 for senior authors — so the same value is a
+sensible starting point for both, and degree 5 cuts 289 papers to 153 and 217
+senior authors to 102. They stay separate controls because they are still
+different objects: a node in one is a paper, in the other a lab, and a lab that
+contributed 21 of the corpus's papers inherits the links of all 21.
 
-| | thins papers | thins authors |
+| | thins papers | thins senior authors |
 |---|---|---|
 | `min_paper_degree` | ✓ | — |
 | `min_author_degree` | — | ✓ |
@@ -1034,15 +1045,16 @@ same 150.
 
 **Limits.** Only PMID-bearing documents can appear — PDFs and reference records
 without a PMID are skipped entirely, so a PDF-only corpus produces no citation
-network. Author matching is by name string, so name variants split and common
-names collide. Pair this with stage 2: expand first, then see what the enlarged
+network. Senior-author matching is by name string, so name variants split
+("Smith J" and "Smith JA" are two people) and common names collide. Pair this with stage 2: expand first, then see what the enlarged
 set is built on.
 
-**What it produces.** `citation_ranking.csv`, `author_ranking.csv`, and 2D + 3D
+**What it produces.** `citation_ranking.csv`, `author_ranking.csv` (one row per
+senior author, `papers` counting the corpus papers they led), and 2D + 3D
 networks for both, nodes sized by in-corpus citations.
 
 **Controls.** Citation network (iCite) · Min degree — papers
-(`min_paper_degree`, `--min-paper-degree`) · Min degree — authors
+(`min_paper_degree`, `--min-paper-degree`) · Min degree — senior authors
 (`min_author_degree`, `--min-author-degree`).
 
 ---

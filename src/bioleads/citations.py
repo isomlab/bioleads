@@ -169,10 +169,10 @@ def fetch_icite(
 def _prune_by_degree(g: nx.DiGraph, min_degree: int, noun: str, say) -> nx.DiGraph:
     """Drop nodes whose total degree is below ``min_degree``.
 
-    The paper and author graphs pass their own threshold here, because the two
-    are not on the same scale: the author graph is a projection, where one
-    paper→paper link becomes an edge between every pair of their authors, so
-    author degrees run an order of magnitude higher than paper degrees.
+    The paper and author graphs pass their own threshold here, because they are
+    not the same object: one node per paper against one node per lab, where a
+    productive lab absorbs many of the corpus's papers and inherits all of their
+    links. The two degree distributions differ, so one number cannot serve both.
 
     Degree is counted on the *whole* graph — citations received from corpus
     papers plus citations made to them — and unweighted, so an author who cites
@@ -287,17 +287,26 @@ def build_author_citation_graph(
     cancel=None,
     progress=None,
 ) -> nx.DiGraph:
-    """Build a directed *author* citation graph from the corpus papers.
+    """Build a directed *senior-author* citation graph from the corpus papers.
 
-    Authors are projected from the paper-citation links: when corpus paper P
-    cites corpus paper Q, every author of P gets a directed edge to every author
-    of Q (self-citations — shared authors — are dropped). Each citation is
-    counted once; an edge's ``weight`` is how many times that author cited that
-    other author across the corpus. Node attrs: ``author``, ``papers`` (corpus
-    papers they (co)authored), ``global_citations`` (summed iCite citation_count
-    of those papers), and ``in_corpus_citations`` (weighted in-degree — how often
-    the author is cited within the corpus), the metric the most-cited ranking and
+    Each paper is represented by **one** author: the last name in its byline,
+    which by biomedical convention is the senior author — the lab the work came
+    out of. Middle and first authors do not appear. That makes the graph a map
+    of labs citing labs rather than of everyone who ever appeared on a byline,
+    and it keeps one paper→paper citation worth exactly one author→author edge
+    instead of the product of the two author lists.
+
+    When corpus paper P cites corpus paper Q, P's senior author gets a directed
+    edge to Q's (a shared senior author is a self-citation and is dropped). An
+    edge's ``weight`` is how many times that lab cited the other across the
+    corpus. Node attrs: ``author``, ``papers`` (corpus papers they were senior
+    author on), ``global_citations`` (summed iCite citation_count of those
+    papers), and ``in_corpus_citations`` (weighted in-degree — how often the
+    author is cited within the corpus), the metric the most-cited ranking and
     node size use.
+
+    A record with no author list cannot be placed and is skipped. Matching is by
+    name string, so "Smith J" and "Smith JA" are two people.
 
     ``prefetched`` shares one iCite fetch with :func:`build_citation_graph`.
     """
@@ -310,39 +319,40 @@ def build_author_citation_graph(
     if not corpus:
         return nx.DiGraph()
 
-    # Authors and global-citation count per corpus paper.
-    paper_authors: dict[str, list[str]] = {}
+    # One author stands for each paper: the last in the byline, which in
+    # biomedical convention is the senior author whose lab the work came from.
+    # Papers with no author list at all cannot be placed and are skipped.
+    paper_senior: dict[str, str] = {}
     paper_global: dict[str, int] = {}
     for pmid in corpus:
         rec = records.get(pmid, {})
-        paper_authors[pmid] = _parse_authors(rec.get("authors"))
+        authors = _parse_authors(rec.get("authors"))
+        if authors:
+            paper_senior[pmid] = authors[-1]
         cc = rec.get("citation_count")
         paper_global[pmid] = int(cc) if cc is not None else 0
 
     g = nx.DiGraph()
-    for pmid, authors in paper_authors.items():
-        gc = paper_global.get(pmid, 0)
-        for a in authors:
-            if not g.has_node(a):
-                g.add_node(a, author=a, papers=0, global_citations=0,
-                           in_corpus_citations=0)
-            g.nodes[a]["papers"] += 1
-            g.nodes[a]["global_citations"] += gc
+    for pmid, senior in paper_senior.items():
+        if not g.has_node(senior):
+            g.add_node(senior, author=senior, papers=0, global_citations=0,
+                       in_corpus_citations=0)
+        g.nodes[senior]["papers"] += 1
+        g.nodes[senior]["global_citations"] += paper_global.get(pmid, 0)
 
-    # author → author edges from the (de-duplicated) paper citation links.
+    # senior author → senior author, one edge per (de-duplicated) paper link.
     edge_w: dict[tuple[str, str], int] = {}
     for citer_pmid, cited_pmid in _corpus_paper_edges(records, corpus):
-        for a in paper_authors.get(citer_pmid, []):
-            for b in paper_authors.get(cited_pmid, []):
-                if a != b:
-                    edge_w[(a, b)] = edge_w.get((a, b), 0) + 1
+        a, b = paper_senior.get(citer_pmid), paper_senior.get(cited_pmid)
+        if a and b and a != b:                      # a == b is a self-citation
+            edge_w[(a, b)] = edge_w.get((a, b), 0) + 1
     for (a, b), w in edge_w.items():
         g.add_edge(a, b, weight=w)
 
     for n in g.nodes:
         g.nodes[n]["in_corpus_citations"] = int(g.in_degree(n, weight="weight"))
 
-    say(f"  author network: {g.number_of_nodes()} author(s) / "
+    say(f"  senior-author network: {g.number_of_nodes()} author(s) / "
         f"{g.number_of_edges()} author-citation edge(s).")
 
     g = _prune_by_degree(g, cfg.min_author_degree, "author", say)
@@ -400,7 +410,7 @@ def to_dataframe(graph: nx.DiGraph):
 
 
 def authors_to_dataframe(graph: nx.DiGraph):
-    """Authors ranked by in-corpus citations, as a pandas DataFrame (for CSV)."""
+    """Senior authors ranked by in-corpus citations, as a DataFrame (for CSV)."""
     import pandas as pd
 
     rows = [
@@ -512,9 +522,9 @@ def _author_hover(n, d) -> str:
 
 
 def write_author_html(
-    g: nx.DiGraph, path: str, title: str = "bioleads author citation network"
+    g: nx.DiGraph, path: str, title: str = "bioleads senior-author citation network"
 ) -> str:
-    """Render the directed author citation network to standalone HTML (pyvis).
+    """Render the senior-author citation network to standalone HTML (pyvis).
 
     Nodes are authors, sized by in-corpus citations (most-cited authors are
     largest); an arrow A → B means an author A (co)authored a paper that cites a
@@ -552,9 +562,9 @@ def write_author_html(
 
 def write_author_html_3d(
     g: nx.DiGraph, path: str,
-    title: str = "bioleads author citation network (3D)", seed: int = 0,
+    title: str = "bioleads senior-author citation network (3D)", seed: int = 0,
 ) -> str | None:
-    """Render the author citation network as a rotatable 3D Plotly graph.
+    """Render the senior-author citation network as a rotatable 3D Plotly graph.
 
     Nodes are sized and colored by in-corpus citations (most-cited authors are
     largest / hottest). Returns None if Plotly isn't installed.

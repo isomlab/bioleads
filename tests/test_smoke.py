@@ -600,30 +600,60 @@ def test_write_citation_html(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 # Author citation network (projected from the paper citation links)
 # --------------------------------------------------------------------------- #
-def test_author_citation_graph_aggregation(monkeypatch):
+def test_author_graph_uses_only_the_senior_author(monkeypatch):
+    """One node per lab, not per byline: the last author stands for the paper."""
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
     g = build_author_citation_graph(_citation_docs(), Config())
 
-    # Four distinct authors; Alice (co)authored papers 1 and 2.
-    assert g.number_of_nodes() == 4
-    assert g.nodes["Alice A"]["papers"] == 2
-    assert g.nodes["Bob B"]["papers"] == 1
-    # global_citations sum across an author's corpus papers (500 + 50 for Alice).
-    assert g.nodes["Alice A"]["global_citations"] == 550
+    # Bob (last on paper 1), Alice (last on paper 2), Dan (sole author of 3).
+    # Carol is first author on paper 2 and nothing else — she does not appear.
+    assert set(g.nodes) == {"Bob B", "Alice A", "Dan D"}
+    assert "Carol C" not in g.nodes
 
-    # in_corpus_citations = weighted in-degree (how often the author is cited).
-    assert g.nodes["Alice A"]["in_corpus_citations"] == 3
-    assert g.nodes["Bob B"]["in_corpus_citations"] == 3
-    assert g.nodes["Carol C"]["in_corpus_citations"] == 1
+    # Alice is first author on paper 1 too; that byline does not earn her a node,
+    # so her one paper is the one she was senior on, with its citation count.
+    assert g.nodes["Alice A"]["papers"] == 1
+    assert g.nodes["Alice A"]["global_citations"] == 50
+    assert g.nodes["Bob B"]["global_citations"] == 500
+
+    # One paper→paper link is exactly one author→author edge.
+    assert set(g.edges) == {("Alice A", "Bob B"), ("Dan D", "Bob B"),
+                            ("Dan D", "Alice A")}
+    assert not any(u == v for u, v in g.edges)      # self-citations dropped
+
+    # in_corpus_citations = weighted in-degree (how often the lab is cited).
+    assert g.nodes["Bob B"]["in_corpus_citations"] == 2
+    assert g.nodes["Alice A"]["in_corpus_citations"] == 1
     assert g.nodes["Dan D"]["in_corpus_citations"] == 0
 
-    # Self-citations (shared authors on citing & cited paper) are dropped...
-    assert not g.has_edge("Alice A", "Alice A")
-    # ...and repeated author→author citations accumulate as edge weight.
-    assert g.edges["Dan D", "Alice A"]["weight"] == 2
+    assert [n for n, _ in most_cited(g)] == ["Bob B", "Alice A", "Dan D"]
 
-    ranked = most_cited(g)
-    assert [n for n, _ in ranked] == ["Alice A", "Bob B", "Carol C", "Dan D"]
+
+def test_senior_author_accumulates_papers_and_edge_weight(monkeypatch):
+    """A lab's papers sum into one node, and repeat citations into one edge."""
+    fake = {
+        "10": {"pmid": 10, "citation_count": 7, "authors": "Ann A, Lee L",
+               "references": ["12"], "cited_by": []},
+        "11": {"pmid": 11, "citation_count": 4, "authors": "Bea B, Lee L",
+               "references": ["12"], "cited_by": []},
+        "12": {"pmid": 12, "citation_count": 90, "authors": "Cy C, Mor M",
+               "references": [], "cited_by": ["10", "11"]},
+    }
+    docs = [Document(doc_id=f"PMID:{p}", text="x", source="pubmed",
+                     meta={"pmid": p}) for p in ("10", "11", "12")]
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
+    g = build_author_citation_graph(docs, Config())
+
+    assert set(g.nodes) == {"Lee L", "Mor M"}
+    assert g.nodes["Lee L"]["papers"] == 2
+    assert g.nodes["Lee L"]["global_citations"] == 11      # 7 + 4
+    assert g.edges["Lee L", "Mor M"]["weight"] == 2        # two papers, one edge
+    assert g.nodes["Mor M"]["in_corpus_citations"] == 2
+
+    # Degree is unweighted, so those two citations are one connection: a
+    # threshold of 2 empties the graph even though the edge weighs 2.
+    assert build_author_citation_graph(
+        docs, Config(min_author_degree=2)).number_of_nodes() == 0
 
 
 def test_min_paper_degree_drops_isolated_papers(monkeypatch):
@@ -688,12 +718,11 @@ def test_min_author_degree_drops_isolated_authors(monkeypatch):
     assert "Eve E" in build_author_citation_graph(docs, Config()).nodes
     g = build_author_citation_graph(docs, Config(min_author_degree=1))
     assert "Eve E" not in g.nodes
-    assert set(g.nodes) == {"Alice A", "Bob B", "Carol C", "Dan D"}
+    assert set(g.nodes) == {"Alice A", "Bob B", "Dan D"}
 
-    # Degree is unweighted: Dan cites Alice twice but that is one connection,
-    # so a threshold of 4 removes him while Alice (3 partners) also goes.
-    g4 = build_author_citation_graph(docs, Config(min_author_degree=4))
-    assert g4.number_of_nodes() == 0
+    # Nobody in this corpus has three connections, so a threshold of 3 empties it.
+    g3 = build_author_citation_graph(docs, Config(min_author_degree=3))
+    assert g3.number_of_nodes() == 0
 
 
 def test_degree_thresholds_reach_the_written_outputs(tmp_path, monkeypatch):
@@ -737,10 +766,10 @@ def test_degree_thresholds_are_independent(monkeypatch):
 
     cfg = Config(min_paper_degree=2, min_author_degree=0)
     assert build_citation_graph(docs, cfg).number_of_nodes() == 3   # 4 dropped
-    assert build_author_citation_graph(docs, cfg).number_of_nodes() == 5  # intact
+    assert build_author_citation_graph(docs, cfg).number_of_nodes() == 4  # intact
 
     # ...and the author threshold leaves the papers alone.
-    cfg = Config(min_paper_degree=0, min_author_degree=3)
+    cfg = Config(min_paper_degree=0, min_author_degree=1)
     assert build_citation_graph(docs, cfg).number_of_nodes() == 4
     assert "Eve E" not in build_author_citation_graph(docs, cfg).nodes
 
@@ -784,9 +813,12 @@ def test_author_graph_from_icite_dict_authors(monkeypatch):
     docs = [Document(doc_id=f"PMID:{i}", text="x", source="pubmed", meta={"pmid": str(i)})
             for i in (1, 2)]
     g = build_author_citation_graph(docs, Config())
-    assert g.number_of_nodes() == 3  # not zero!
-    assert g.nodes["Ding, Li"]["in_corpus_citations"] == 1  # cited by Smith via 2→1
-    assert g.has_edge("Smith, Jane", "Ding, Li")
+    assert g.number_of_nodes() == 2  # not zero!
+    # Getz is last on paper 1, so the lab node is his; Ding, first author, is
+    # not in the graph at all.
+    assert "Ding, Li" not in g.nodes
+    assert g.nodes["Getz, Gad"]["in_corpus_citations"] == 1  # cited by Smith via 2→1
+    assert g.has_edge("Smith, Jane", "Getz, Gad")
 
 
 def test_author_ranking_dataframe(monkeypatch):
@@ -795,8 +827,8 @@ def test_author_ranking_dataframe(monkeypatch):
     df = authors_df(g)
     assert list(df.columns) == ["author", "papers", "in_corpus_citations",
                                 "global_citations"]
-    assert df.iloc[0]["author"] == "Alice A"
-    assert df.iloc[0]["in_corpus_citations"] == 3
+    assert df.iloc[0]["author"] == "Bob B"          # senior author of paper 1
+    assert df.iloc[0]["in_corpus_citations"] == 2
 
 
 def test_pipeline_writes_author_outputs(tmp_path, monkeypatch):
@@ -805,10 +837,10 @@ def test_pipeline_writes_author_outputs(tmp_path, monkeypatch):
     cfg.do_citation_network = True
     res = run_pipeline(documents=_citation_docs(), cfg=cfg, out_dir=str(tmp_path))
     assert res.author_graph is not None
-    assert res.author_graph.number_of_nodes() == 4
+    assert res.author_graph.number_of_nodes() == 3   # one per senior author
     assert os.path.exists(res.outputs["author_ranking"])
     assert os.path.exists(res.outputs["author_network"])
-    assert "author net" in res.summary()
+    assert "senior-author net" in res.summary()
     import importlib.util
     if importlib.util.find_spec("plotly"):
         assert os.path.exists(res.outputs["author_network_3d"])

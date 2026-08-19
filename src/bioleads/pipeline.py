@@ -62,7 +62,7 @@ class PipelineResult:
                 f"{self.citation_graph.number_of_edges()} citations")
         if self.author_graph is not None:
             parts.append(
-                f"author net: {self.author_graph.number_of_nodes()} authors / "
+                f"senior-author net: {self.author_graph.number_of_nodes()} authors / "
                 f"{self.author_graph.number_of_edges()} author citations")
         return " | ".join(parts)
 
@@ -164,7 +164,7 @@ def run_pipeline(
         citation_graph = build_citation_graph(
             docs, cfg, prefetched=prefetched, cancel=cancel, progress=progress)
         _check_cancel(cancel)
-        say("Building author citation network…")
+        say("Building senior-author citation network…")
         author_graph = build_author_citation_graph(
             docs, cfg, prefetched=prefetched, cancel=cancel, progress=progress)
 
@@ -222,7 +222,7 @@ def run_pipeline(
             authors_df(author_graph).to_csv(arank_csv, index=False)
             result.outputs["author_ranking"] = arank_csv
 
-            say("Rendering author citation network…")
+            say("Rendering senior-author citation network…")
             auth_html = os.path.join(out_dir, "author_network.html")
             result.outputs["author_network"] = write_author_html(
                 author_graph, auth_html)

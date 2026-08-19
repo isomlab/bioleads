@@ -54,7 +54,7 @@ OUTPUT_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("3D", "citation_network_3d"),
         ("Ranking (CSV)", "citation_ranking"),
     ]),
-    ("Author citation network", [
+    ("Senior-author citation network", [
         ("2D", "author_network"),
         ("3D", "author_network_3d"),
         ("Ranking (CSV)", "author_ranking"),
@@ -185,39 +185,6 @@ class BioleadsGUI:
             "(intro/methods/results); articles that are not fall back to the "
             "abstract. Richer, and materially slower — one extra fetch per "
             "article.")
-        citations_chk = ttk.Checkbutton(opts, text="Citation network (iCite)",
-                                        variable=self.citations_var)
-        citations_chk.pack(side="left", padx=(0, 16))
-        self._add_tooltip(
-            citations_chk,
-            "Stage 8 · Map the citations. Builds the paper→paper AND "
-            "author→author citation networks from NIH iCite, ranking each by "
-            "in-corpus citations (how foundational within your set) and global "
-            "citations (across all of PubMed). Only PMID-bearing documents can "
-            "appear, so a PDF-only corpus produces neither.")
-        ttk.Label(opts, text="Min degree — papers:").pack(side="left")
-        mindeg_paper_spin = ttk.Spinbox(opts, from_=0, to=10000, width=4,
-                                        textvariable=self.mindeg_paper_var)
-        mindeg_paper_spin.pack(side="left", padx=(4, 6))
-        self._add_tooltip(
-            mindeg_paper_spin,
-            "Stage 8 · Map the citations. Keep only papers with at least this "
-            "many connections in the network — citations they receive from the "
-            "corpus plus citations they make to it. 0 keeps everything; 1 drops "
-            "the papers with no intra-corpus link at all, which in a sparse "
-            "corpus is most of them. Filters the ranking and the picture alike.")
-        ttk.Label(opts, text="authors:").pack(side="left")
-        mindeg_author_spin = ttk.Spinbox(opts, from_=0, to=10000, width=4,
-                                         textvariable=self.mindeg_author_var)
-        mindeg_author_spin.pack(side="left", padx=(4, 16))
-        self._add_tooltip(
-            mindeg_author_spin,
-            "Stage 8 · Map the citations. The same threshold for the author "
-            "network, counted in distinct authors cited or citing. It is a "
-            "separate number because the author graph is a projection — one "
-            "paper→paper link becomes an edge between every pair of their "
-            "authors — so author degrees run an order of magnitude higher, and "
-            "a value that thins the papers barely touches the authors.")
         ttk.Label(opts, text="Max records:").pack(side="left")
         retmax_spin = ttk.Spinbox(opts, from_=1, to=100000, width=8,
                                   textvariable=self.retmax_var)
@@ -307,6 +274,57 @@ class BioleadsGUI:
             "of bfs's reach at 2–3x its precision — prefer that range when you "
             "want ABC hypotheses, which need the linking concepts present at "
             "all. Max records still caps the total.")
+
+        # Stage 8 sits on its own row: the options row above is already full,
+        # and the senior-author note has to be readable without hovering.
+        cit = ttk.Frame(frm)
+        cit.grid(row=r + 3, column=0, columnspan=3, sticky="ew", padx=6,
+                 pady=(0, 6))
+        citations_chk = ttk.Checkbutton(cit, text="Citation network (iCite)",
+                                        variable=self.citations_var)
+        citations_chk.pack(side="left", padx=(0, 16))
+        self._add_tooltip(
+            citations_chk,
+            "Stage 8 · Map the citations. Builds the paper→paper AND "
+            "senior-author→senior-author citation networks from NIH iCite, "
+            "ranking each by in-corpus citations (how foundational within your "
+            "set) and global citations (across all of PubMed). Each paper is "
+            "represented by its LAST author — the senior author, i.e. the lab "
+            "the work came from; first and middle authors do not appear. Only "
+            "PMID-bearing documents can appear, so a PDF-only corpus produces "
+            "neither.")
+        ttk.Label(cit, text="Min degree — papers:").pack(side="left")
+        mindeg_paper_spin = ttk.Spinbox(cit, from_=0, to=10000, width=4,
+                                        textvariable=self.mindeg_paper_var)
+        mindeg_paper_spin.pack(side="left", padx=(4, 6))
+        self._add_tooltip(
+            mindeg_paper_spin,
+            "Stage 8 · Map the citations. Keep only papers with at least this "
+            "many connections in the network — citations they receive from the "
+            "corpus plus citations they make to it. 0 keeps everything; 1 drops "
+            "the papers with no intra-corpus link at all, which in a sparse "
+            "corpus is most of them. Filters the ranking and the picture alike.")
+        ttk.Label(cit, text="senior authors:").pack(side="left")
+        mindeg_author_spin = ttk.Spinbox(cit, from_=0, to=10000, width=4,
+                                         textvariable=self.mindeg_author_var)
+        mindeg_author_spin.pack(side="left", padx=(4, 16))
+        self._add_tooltip(
+            mindeg_author_spin,
+            "Stage 8 · Map the citations. The same threshold for the "
+            "senior-author network, counted in distinct senior authors cited or "
+            "citing. It is a separate number because that graph is not the "
+            "paper graph: each node is one lab, and a productive lab absorbs "
+            "several of the corpus's papers along with all of their links, so "
+            "the two degree distributions differ.")
+        note = ttk.Label(cit, foreground="#6b7280",
+                         text="authors = each paper's last (senior) author")
+        note.pack(side="left")
+        self._add_tooltip(
+            note,
+            "Stage 8 · Map the citations. One node per lab, not per byline: "
+            "first and middle authors are not in the author network, and "
+            "author_ranking.csv counts the corpus papers each senior author "
+            "led.")
 
     def _row_entry(self, parent, row, label, var, button=None, hint=None) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=6, pady=3)

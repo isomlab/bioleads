@@ -178,39 +178,46 @@ records in your corpus (an edge A→B means "A cites B"), using NIH
   cites. A rotatable 3D version is written alongside as
   `citation_network_3d.html` (Plotly; nodes colored/sized by in-corpus citations).
 
-`--citations` also builds a companion **author→author** network, projected from
-the same paper-citation links: when corpus paper P cites corpus paper Q, every
-author of P gets a directed edge to every author of Q (shared-author
-self-citations dropped; repeated citations accumulate as edge weight). It writes:
+`--citations` also builds a companion **senior-author→senior-author** network
+from the same paper-citation links, with **one** author standing for each paper:
+the **last** name in its byline, which by biomedical convention is the senior
+author — the lab the work came from. First and middle authors do not appear. When
+corpus paper P cites corpus paper Q, P's senior author gets a directed edge to
+Q's (a shared senior author is a self-citation and is dropped; repeated citations
+accumulate as edge weight, so two papers from one lab citing the same lab make
+one edge of weight 2). Read it as labs citing labs. It writes:
 
-- **`author_ranking.csv`** — every author ranked by `in_corpus_citations`
-  (weighted in-degree — how often the author is cited within your corpus), with
-  `papers` (corpus papers they (co)authored) and `global_citations` (summed iCite
-  count across those papers).
+- **`author_ranking.csv`** — every senior author ranked by `in_corpus_citations`
+  (weighted in-degree — how often the lab is cited within your corpus), with
+  `papers` (corpus papers they were senior author on) and `global_citations`
+  (summed iCite count across those papers).
 - **`author_network.html`** (+ **`author_network_3d.html`**) — the interactive
-  2D / rotatable 3D graph, nodes labeled by author and sized by in-corpus
-  citations, so the most-cited authors are the largest, hottest nodes.
+  2D / rotatable 3D graph, nodes labeled by senior author and sized by in-corpus
+  citations, so the most-cited labs are the largest, hottest nodes.
 
 Only PMID-bearing documents can appear in either network; local PDFs or reference
-records without a PMID are skipped. Pair it with `--expand` to first grow the
-corpus, then see which papers — and authors — are most foundational.
+records without a PMID are skipped, as are records iCite has no author list for.
+Names are matched as strings, so "Smith J" and "Smith JA" are two people. Pair it
+with `--expand` to first grow the corpus, then see which papers — and which labs
+— are most foundational.
 
 **`--min-paper-degree N`** and **`--min-author-degree N`** thin the two networks
 to their connected part. A node is kept when its total connections — citations
-received from corpus papers plus citations made to them (for an author, distinct
-authors cited or citing) — reach `N`. The default `0` keeps everything; `1` drops
-the nodes with no intra-corpus link at all, which in a sparse corpus is most of
-them. The rankings are filtered alongside the pictures, so the CSV and the graph
-always agree.
+received from corpus papers plus citations made to them (for a senior author,
+distinct labs cited or citing) — reach `N`. The default `0` keeps everything; `1`
+drops the nodes with no intra-corpus link at all, which in a sparse corpus is
+most of them. The rankings are filtered alongside the pictures, so the CSV and
+the graph always agree.
 
-They are two numbers rather than one because the author network is a projection —
-one paper→paper link becomes an edge between every pair of their authors — so
-author degrees run an order of magnitude higher, and a value that meaningfully
-thins the papers barely touches the authors:
+They are two numbers because the two graphs are different objects — a node is a
+paper in one and a lab in the other, and a lab inherits the links of every corpus
+paper it led — though since each paper contributes one senior author, the two
+degree distributions are similar enough that the same value is a fair starting
+point for both:
 
 ```bash
 bioleads --pmids @seeds.txt --citations \
-         --min-paper-degree 1 --min-author-degree 10 --out ./results
+         --min-paper-degree 2 --min-author-degree 2 --out ./results
 ```
 
 ### What gets processed
@@ -329,7 +336,7 @@ the run didn't produce stay listed but greyed, so it's visible what's missing
 and why — a `*_3d.html` row is empty when Plotly isn't installed, for example.
 
 Tick **Citation network (iCite)** before running to also build the paper→paper
-citation graph *and* the author→author citation graph; `citation_ranking.csv`
+citation graph *and* the senior-author→senior-author citation graph; `citation_ranking.csv`
 and `author_ranking.csv` land in the output folder alongside the graph files.
 Every network is written as both a 2D pyvis layout and a rotatable 3D Plotly
 view, listed side by side in the Outputs tab.

@@ -206,3 +206,49 @@ def test_tooltips_cite_stages_that_exist_in_the_docs(app, monkeypatch):
     assert cited, "no tooltip references a pipeline stage"
     assert cited <= documented, (
         f"tooltips cite stages missing from how_it_works.md: {sorted(cited - documented)}")
+
+
+def test_a_failing_handler_does_not_kill_the_event_pump(app, monkeypatch):
+    """The whole UI is driven by _poll_queue. If a handler raises and the poll is
+    never rescheduled, the log freezes and the buttons stay stuck with nothing
+    shown — which is indistinguishable from the app hanging."""
+    from tkinter import messagebox
+
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: None)
+
+    boom = RuntimeError("handler blew up")
+
+    def explode(*_a, **_k):
+        raise boom
+
+    monkeypatch.setattr(app, "_on_clusters_done", explode)
+
+    scheduled: list = []
+    real_after = app.root.after
+    monkeypatch.setattr(app.root, "after",
+                        lambda ms, fn=None, *a: (scheduled.append(fn), 0)[1]
+                        if fn is not None else real_after(ms))
+
+    app._queue.put(("clusters", [], None))
+    app._poll_queue()
+
+    assert scheduled and scheduled[-1] == app._poll_queue, \
+        "the poll must reschedule itself even when a handler raises"
+    log = app.log.get("1.0", "end")
+    assert "handler blew up" in log, f"the failure must be surfaced: {log[-300:]}"
+    assert str(app.run_btn["state"]) == "normal", "the UI must not stay stuck running"
+
+
+def test_the_pump_keeps_draining_after_one_bad_message(app, monkeypatch):
+    from tkinter import messagebox
+
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: None)
+    monkeypatch.setattr(app, "_on_clusters_done",
+                        lambda *a, **k: (_ for _ in ()).throw(ValueError("bad")))
+    monkeypatch.setattr(app.root, "after", lambda *a, **k: 0)
+
+    app._queue.put(("clusters", [], None))     # this one fails
+    app._queue.put(("log", "still alive"))     # this one must still be handled
+    app._poll_queue()
+
+    assert "still alive" in app.log.get("1.0", "end")

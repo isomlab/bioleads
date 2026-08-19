@@ -725,22 +725,38 @@ class BioleadsGUI:
 
     # ----------------------------------------------------------- queue poll --
     def _poll_queue(self) -> None:
+        """Drain the worker queue onto the Tk thread, then reschedule.
+
+        Rescheduling is in a `finally` on purpose. An exception escaping here
+        would stop the poll being queued again, and the whole UI is driven by
+        this loop: the log would stop updating and the buttons would stay stuck
+        in their running state, with no error shown anywhere. A failure in one
+        handler has to surface as an error and leave the window alive.
+        """
         try:
             while True:
-                kind, *payload = self._queue.get_nowait()
-                if kind == "done":
-                    self._on_done(*payload)
-                elif kind == "clusters":
-                    self._on_clusters_done(*payload)
-                elif kind == "log":
-                    self._on_progress(*payload)
-                elif kind == "cancelled":
-                    self._on_cancelled()
-                elif kind == "error":
-                    self._on_error(*payload)
-        except queue.Empty:
-            pass
-        self.root.after(120, self._poll_queue)
+                try:
+                    kind, *payload = self._queue.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    if kind == "done":
+                        self._on_done(*payload)
+                    elif kind == "clusters":
+                        self._on_clusters_done(*payload)
+                    elif kind == "log":
+                        self._on_progress(*payload)
+                    elif kind == "cancelled":
+                        self._on_cancelled()
+                    elif kind == "error":
+                        self._on_error(*payload)
+                except Exception as exc:  # noqa: BLE001 - never kill the poll
+                    try:
+                        self._on_error(exc, traceback.format_exc())
+                    except Exception:  # noqa: BLE001 - reporting must not either
+                        traceback.print_exc()
+        finally:
+            self.root.after(120, self._poll_queue)
 
     def _on_done(self, result: PipelineResult, out_dir: str) -> None:
         self._result = result

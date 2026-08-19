@@ -1021,11 +1021,16 @@ def test_reported_relevance_is_centred_but_selection_is_not(monkeypatch):
     kept = _top_k_relevant(profile, cands, cfg)
     raw = _embedding_scores(profile, cands, cfg)
 
-    # Selection matches what the raw scores would pick, in the same order.
+    # WHICH documents survive is decided by the raw scores...
     picked = [d.doc_id for d, _ in kept]
-    assert picked == [d.doc_id for d, _ in
-                      sorted(zip(cands, raw), key=lambda t: t[1], reverse=True)[:2]]
-    assert picked == ["c0", "c1"]
+    assert set(picked) == {d.doc_id for d, _ in
+                           sorted(zip(cands, raw), key=lambda t: t[1],
+                                  reverse=True)[:2]}
+    assert set(picked) == {"c0", "c1"}
+    # ...but the ORDER they come back in is by the reported score.
+    reported_seq = [score for _, score in kept]
+    assert reported_seq == sorted(reported_seq, reverse=True), \
+        f"output should be ordered by the reported score: {reported_seq}"
 
     # Raw cosines are crushed together near 1 — the reason for reporting
     # something else at all.
@@ -1060,3 +1065,37 @@ def test_term_space_reports_its_own_scores(monkeypatch):
     sel, rep = _term_overlap_scores([doc("s")], [doc("a"), doc("b")],
                                     Config(rocchio_gamma=0.0), with_reported=True)
     assert sel == rep
+
+
+def test_output_order_follows_the_reported_score_not_the_raw_one(monkeypatch):
+    """The two orderings genuinely differ, so this pins which one is returned."""
+    np = pytest.importorskip("numpy")
+    import bioleads.embeddings as emb_mod
+    from bioleads.expansion import _top_k_relevant, _embedding_scores
+
+    shared = np.array([10.0, 0.0, 0.0])
+    # Chosen so centring reorders the survivors relative to the raw cosine.
+    vecs = {
+        "seed": shared + np.array([0.0, 1.0, 0.20]),
+        "c0":   shared + np.array([0.0, 1.0, 0.00]),
+        "c1":   shared + np.array([0.0, 0.9, 0.45]),
+        "c2":   shared + np.array([0.0, 0.5, 0.10]),
+        "c3":   shared + np.array([0.0, 0.0, 1.00]),
+    }
+    monkeypatch.setattr(emb_mod, "embed_texts",
+                        lambda texts, cfg=None: np.vstack([vecs[t] for t in texts]))
+
+    def doc(k):
+        return Document(doc_id=k, text=k, source="pubmed", meta={"pmid": k})
+
+    profile, cands = [doc("seed")], [doc(f"c{i}") for i in range(4)]
+    cfg = Config(rocchio_gamma=0.0, expand_top_k=3)
+
+    kept = _top_k_relevant(profile, cands, cfg)
+    raw = _embedding_scores(profile, cands, cfg)
+    raw_order = [d.doc_id for d, _ in
+                 sorted(zip(cands, raw), key=lambda t: t[1], reverse=True)[:3]]
+
+    scores = [sc for _, sc in kept]
+    assert scores == sorted(scores, reverse=True), "not sorted by reported score"
+    assert set(d.doc_id for d, _ in kept) == set(raw_order), "selection changed"

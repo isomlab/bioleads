@@ -116,11 +116,12 @@ def relevance_guided_expand(
 def _top_k_relevant(profile_docs, cand_docs, cfg, *, say=None):
     """Return [(doc, reported_score)] for the top K candidates.
 
-    Selection and reporting deliberately use different numbers. Ranking uses the
-    raw cosine, because that is what was benchmarked and centring was measured
-    not to improve it. The score attached to each kept document is the *centred*
-    one, because the raw cosines all sit around 0.99 and are useless to read —
-    see :func:`_embedding_scores`. Both come from one pass over the embeddings.
+    Selection and reporting deliberately use different numbers. *Which* documents
+    are kept is decided by the raw cosine, because that is what was benchmarked
+    and centring was measured not to improve it. The score attached to each one —
+    and the order they are returned in — is the *centred* value, because the raw
+    cosines all sit around 0.99 and are useless to read or sort by; see
+    :func:`_embedding_scores`. Both come from one pass over the embeddings.
     """
     if not cand_docs:
         return []
@@ -130,6 +131,10 @@ def _top_k_relevant(profile_docs, cand_docs, cfg, *, say=None):
                     key=lambda t: t[1], reverse=True)
     k = cfg.expand_top_k
     top = ranked[:k] if k and k > 0 else ranked
+    # *Which* documents survive is decided by the selection score above; the
+    # order they come back in is by the reported score, so the sequence a caller
+    # sees matches the number attached to each one.
+    top = sorted(top, key=lambda t: t[2], reverse=True)
     return [(doc, rep) for doc, _sel, rep in top]
 
 

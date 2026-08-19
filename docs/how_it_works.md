@@ -265,9 +265,9 @@ selection stays on the raw cosine that was benchmarked. Centring was measured no
 to improve retrieval (Spearman ρ ≈ 0.89 between the two orderings, 5/5 top-5
 overlap), so it is applied to the reported value only.
 
-One consequence worth knowing: kept documents are listed in *selection* order, so
-the reported scores are not monotonic down the list. Sort by `relevance`
-explicitly if you want them ordered by it.
+So the two numbers do different jobs: the raw cosine decides *which* documents
+survive, and the centred one is what you read — and what the kept list is
+ordered by, highest first.
 
 ### Step 4 · The gate learns what the topic is not
 

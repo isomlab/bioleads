@@ -260,7 +260,8 @@ positive-only centroid). Every kept record is tagged with its direction
 candidate pool's mean is removed before it is written — because raw cosines
 between biomedical abstracts all land near 0.99 and cannot be read. Selection
 still uses the raw cosine; centring was measured not to change which papers are
-kept, so it applies to the reported number only.
+kept, so it applies to the reported number only. Kept records come back sorted by
+that score, most relevant first.
 
 `--expand-top-k` is the control that matters: it sets corpus size and
 cleanliness together. Swept against systematic reviews (12 reviews, full table

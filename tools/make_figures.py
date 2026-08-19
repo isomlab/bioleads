@@ -284,24 +284,25 @@ def fig_layer(n=1):
     b.append(text(28, ytop + 46, "length 15.9", 10.5, MUTED, mono=True))
 
     # attention half
-    b.append(box(140, ytop - 16, 190, 108, fill="#e8eefb", stroke="#c3d3f2"))
+    b.append(box(140, ytop - 16, 190, 120, fill="#e8eefb", stroke="#c3d3f2"))
     b.append(text(235, ytop + 4, "ATTENTION", 11.5, BLUE, "middle", weight="600"))
     b.append(text(235, ytop + 22, "the twelve heads", 10.5, MUTED, "middle"))
-    b.append(text(235, ytop + 38, "looks at the other", 10.5, INK, "middle"))
-    b.append(text(235, ytop + 54, "tokens in the sentence", 10.5, INK, "middle"))
-    b.append(text(235, ytop + 76, "→ a correction, 29% as big", 10, BLUE, "middle"))
+    b.append(text(235, ytop + 38, "blends in the other", 10.5, INK, "middle"))
+    b.append(text(235, ytop + 54, "tokens, in proportions", 10.5, INK, "middle"))
+    b.append(text(235, ytop + 68, "it works out per pair", 10.5, INK, "middle"))
+    b.append(text(235, ytop + 88, "→ a correction, 29% as big", 10, BLUE, "middle"))
 
     b.append(text(352, ytop + 30, "⊕", 20, INK, "middle"))
     b.append(text(352, ytop + 50, "add", 10, MUTED, "middle"))
     b.append(text(352, ytop + 64, "+ rescale", 10, MUTED, "middle"))
 
     # feed-forward half
-    b.append(box(384, ytop - 16, 210, 108, fill="#eef7f1", stroke="#b7dfc6"))
+    b.append(box(384, ytop - 16, 210, 120, fill="#eef7f1", stroke="#b7dfc6"))
     b.append(text(489, ytop + 4, "FEED-FORWARD", 11.5, GREEN, "middle", weight="600"))
     b.append(text(489, ytop + 22, "768 → 3072 → 768", 10.5, MUTED, "middle", mono=True))
     b.append(text(489, ytop + 38, "this token only —", 10.5, INK, "middle"))
     b.append(text(489, ytop + 54, "no other token is read", 10.5, INK, "middle"))
-    b.append(text(489, ytop + 76, "→ a correction, 23% of it", 10, GREEN, "middle"))
+    b.append(text(489, ytop + 88, "→ a correction, 23% of it", 10, GREEN, "middle"))
 
     b.append(text(616, ytop + 30, "⊕", 20, INK, "middle"))
     b.append(text(616, ytop + 50, "add", 10, MUTED, "middle"))
@@ -328,7 +329,7 @@ def fig_layer(n=1):
 
     b.append(line(24, 344, W - 24, 344, GRID, 1))
     b.append(text(24, 366, "The two halves do different jobs. Attention is the only "
-                  "place tokens see each other; the feed-forward looks at one token "
+                  "place one token's numbers can reach another; the feed-forward takes one token "
                   "in", 12, INK))
     b.append(text(24, 384, "isolation and is where most of the model’s parameters "
                   "live — it is four times wider inside than the vector it "
@@ -437,9 +438,9 @@ def fig_context(n=1):
     # the layers
     b.append(box(296, 86, 150, 92, fill="#e8eefb", stroke="#c3d3f2"))
     b.append(text(371, 112, "12 layers", 12.5, BLUE, "middle", weight="600"))
-    b.append(text(371, 132, "each token looks at", 10.5, MUTED, "middle"))
-    b.append(text(371, 148, "every other token", 10.5, MUTED, "middle"))
-    b.append(text(371, 168, "and is rewritten", 10.5, MUTED, "middle"))
+    b.append(text(371, 132, "each token blends in", 10.5, MUTED, "middle"))
+    b.append(text(371, 146, "the others, in proportion", 10.5, MUTED, "middle"))
+    b.append(text(371, 160, "to how well they match", 10.5, MUTED, "middle"))
     b.append(text(371, 200, "the sentence enters here", 11, MUTED, "middle"))
 
     b.append(arrow(452, 131, 504, 131, MUTED, 2))

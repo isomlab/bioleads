@@ -192,8 +192,28 @@ during training: one row of 768 per vocabulary entry. So a token *starts* as the
 
 Those stored numbers know nothing about the sentence — `muscle` starts identically
 in "arterial smooth muscle" and "he lost muscle mass". That is the problem the
-twelve transformer layers exist to solve. In each layer, every token looks at
-every other token and is rewritten in light of them, twelve times over.
+twelve transformer layers exist to solve.
+
+**What "a token takes in the others" actually means.** No token inspects another
+in any perceptual sense. Three short vectors are derived from each token, *from
+its own numbers alone*:
+
+| | the jargon | what it is for |
+|---|---|---|
+| a **request** | query | what this word would like to find |
+| an **offer** | key | what this word advertises about itself |
+| a **contribution** | value | what this word hands over if chosen |
+
+For one token, its request is multiplied against every token's offer. Each such
+multiplication collapses to **one number** — a match score, nothing more. Those
+scores are then squashed so they sum to 1, and *that* is the whole of the
+"looking": the numbers become **proportions**. The token's correction is those
+proportions applied to the other tokens' contributions — a weighted blend.
+
+So "every token takes in the others" unpacks to: *compute one number per pair,
+turn those numbers into proportions, and mix the other words together in exactly
+those amounts.* A word that gets a proportion of 0.999 is being copied almost
+whole; one that gets 0.0005 is, for that round, ignored.
 
 ![Figure 3 — the stored numbers are only a starting point](figures/03-token-in-context.svg)
 
@@ -221,9 +241,9 @@ use 1024 or more and are correspondingly slower; smaller ones lose accuracy. For
 our purposes 768 is simply a fixed, inherited constant, and no individual one of
 those numbers means anything on its own — only the whole pattern does.
 
-**What a layer and a head actually are.** A **layer** has two halves. In the
-first, every token looks at every other token in the sentence — that is
-attention, and it is the *only* place tokens see each other. In the second, a
+**What a layer and a head actually are.** A **layer** has two halves. The first
+is that blending step — **attention** — and it is the *only* place one token's
+numbers can reach another. In the second, a
 small network called a **feed-forward** transforms each token entirely on its
 own, reading nothing else; it is four times wider inside than the vector it
 works on (768 → 3072 → 768) and holds most of the model's parameters.

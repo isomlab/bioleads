@@ -626,6 +626,136 @@ def test_author_citation_graph_aggregation(monkeypatch):
     assert [n for n, _ in ranked] == ["Alice A", "Bob B", "Carol C", "Dan D"]
 
 
+def test_min_paper_degree_drops_isolated_papers(monkeypatch):
+    """A paper with no intra-corpus link either way is what degree 1 removes."""
+    fake = dict(_ICITE_FAKE)
+    fake["4"] = {"pmid": 4, "title": "Unconnected", "year": 2021,
+                 "journal": "PLoS One", "citation_count": 3, "authors": "Eve E",
+                 "references": [], "cited_by": []}
+    docs = _citation_docs() + [
+        Document(doc_id="PMID:4", text="unrelated", title="Unconnected",
+                 source="pubmed", meta={"pmid": "4"})]
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
+
+    kept_all = build_citation_graph(docs, Config())
+    assert kept_all.number_of_nodes() == 4              # 0 = keep everything
+
+    g = build_citation_graph(docs, Config(min_paper_degree=1))
+    assert "PMID:4" not in g.nodes
+    assert g.number_of_nodes() == 3
+    # Surviving nodes keep the counts they were built with — they describe the
+    # node's place in the corpus, not in the pruned picture.
+    assert g.nodes["PMID:1"]["in_corpus_citations"] == 2
+
+
+def test_min_paper_degree_counts_citations_given_and_received(monkeypatch):
+    """Paper 3 cites two papers and is cited by none: degree 2, not 0."""
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    g = build_citation_graph(_citation_docs(), Config(min_paper_degree=2))
+    assert g.nodes["PMID:3"]["in_corpus_citations"] == 0   # never cited...
+    assert "PMID:3" in g.nodes                             # ...but not isolated
+
+
+def test_min_paper_degree_prunes_once_not_as_a_k_core(monkeypatch):
+    """5 → 6 → 7: only 6 clears degree 2, and it survives its neighbours' loss."""
+    fake = {
+        "5": {"pmid": 5, "title": "A", "authors": "Ann A",
+              "references": ["6"], "cited_by": []},
+        "6": {"pmid": 6, "title": "B", "authors": "Ben B",
+              "references": ["7"], "cited_by": ["5"]},
+        "7": {"pmid": 7, "title": "C", "authors": "Cal C",
+              "references": [], "cited_by": ["6"]},
+    }
+    docs = [Document(doc_id=f"PMID:{p}", text="t", title=p, source="pubmed",
+                     meta={"pmid": p}) for p in ("5", "6", "7")]
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
+
+    g = build_citation_graph(docs, Config(min_paper_degree=2))
+    assert set(g.nodes) == {"PMID:6"}       # iterating would have emptied it
+
+
+def test_min_author_degree_drops_isolated_authors(monkeypatch):
+    """The author graph takes the same threshold, on distinct partners."""
+    fake = dict(_ICITE_FAKE)
+    fake["4"] = {"pmid": 4, "title": "Unconnected", "year": 2021,
+                 "journal": "PLoS One", "citation_count": 3, "authors": "Eve E",
+                 "references": [], "cited_by": []}
+    docs = _citation_docs() + [
+        Document(doc_id="PMID:4", text="unrelated", title="Unconnected",
+                 source="pubmed", meta={"pmid": "4"})]
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
+
+    assert "Eve E" in build_author_citation_graph(docs, Config()).nodes
+    g = build_author_citation_graph(docs, Config(min_author_degree=1))
+    assert "Eve E" not in g.nodes
+    assert set(g.nodes) == {"Alice A", "Bob B", "Carol C", "Dan D"}
+
+    # Degree is unweighted: Dan cites Alice twice but that is one connection,
+    # so a threshold of 4 removes him while Alice (3 partners) also goes.
+    g4 = build_author_citation_graph(docs, Config(min_author_degree=4))
+    assert g4.number_of_nodes() == 0
+
+
+def test_degree_thresholds_reach_the_written_outputs(tmp_path, monkeypatch):
+    """The rankings are filtered too, not just the HTML views."""
+    import pandas as pd
+
+    fake = dict(_ICITE_FAKE)
+    fake["4"] = {"pmid": 4, "title": "Unconnected", "year": 2021,
+                 "journal": "PLoS One", "citation_count": 3, "authors": "Eve E",
+                 "references": [], "cited_by": []}
+    docs = _citation_docs() + [
+        Document(doc_id="PMID:4", text="unrelated", title="Unconnected",
+                 source="pubmed", meta={"pmid": "4"})]
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
+
+    res = run_pipeline(documents=docs,
+                       cfg=Config(do_citation_network=True,
+                                  min_paper_degree=1, min_author_degree=1),
+                       out_dir=str(tmp_path))
+    papers = pd.read_csv(res.outputs["citation_ranking"])
+    authors = pd.read_csv(res.outputs["author_ranking"])
+    assert 4 not in set(papers["pmid"])
+    assert "Eve E" not in set(authors["author"])
+
+
+def test_degree_thresholds_are_independent(monkeypatch):
+    """The reason they are two controls: one number does not fit both graphs.
+
+    The author graph is a projection, so a threshold that thins the papers is
+    barely felt by the authors — here degree 2 removes a third of the papers and
+    no authors at all.
+    """
+    fake = dict(_ICITE_FAKE)
+    fake["4"] = {"pmid": 4, "title": "Unconnected", "year": 2021,
+                 "journal": "PLoS One", "citation_count": 3, "authors": "Eve E",
+                 "references": [], "cited_by": []}
+    docs = _citation_docs() + [
+        Document(doc_id="PMID:4", text="unrelated", title="Unconnected",
+                 source="pubmed", meta={"pmid": "4"})]
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
+
+    cfg = Config(min_paper_degree=2, min_author_degree=0)
+    assert build_citation_graph(docs, cfg).number_of_nodes() == 3   # 4 dropped
+    assert build_author_citation_graph(docs, cfg).number_of_nodes() == 5  # intact
+
+    # ...and the author threshold leaves the papers alone.
+    cfg = Config(min_paper_degree=0, min_author_degree=3)
+    assert build_citation_graph(docs, cfg).number_of_nodes() == 4
+    assert "Eve E" not in build_author_citation_graph(docs, cfg).nodes
+
+
+def test_degree_threshold_flags(monkeypatch):
+    from bioleads.cli import build_parser
+
+    base = ["--pmids", "1"]
+    args = build_parser().parse_args(base)
+    assert (args.min_paper_degree, args.min_author_degree) == (0, 0)
+    args = build_parser().parse_args(
+        base + ["--min-paper-degree", "3", "--min-author-degree", "12"])
+    assert (args.min_paper_degree, args.min_author_degree) == (3, 12)
+
+
 def test_parse_authors_formats():
     from bioleads.citations import _parse_authors
     # Live iCite returns a list of {"fullName": ...} dicts.

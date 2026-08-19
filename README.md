@@ -195,6 +195,24 @@ Only PMID-bearing documents can appear in either network; local PDFs or referenc
 records without a PMID are skipped. Pair it with `--expand` to first grow the
 corpus, then see which papers — and authors — are most foundational.
 
+**`--min-paper-degree N`** and **`--min-author-degree N`** thin the two networks
+to their connected part. A node is kept when its total connections — citations
+received from corpus papers plus citations made to them (for an author, distinct
+authors cited or citing) — reach `N`. The default `0` keeps everything; `1` drops
+the nodes with no intra-corpus link at all, which in a sparse corpus is most of
+them. The rankings are filtered alongside the pictures, so the CSV and the graph
+always agree.
+
+They are two numbers rather than one because the author network is a projection —
+one paper→paper link becomes an edge between every pair of their authors — so
+author degrees run an order of magnitude higher, and a value that meaningfully
+thins the papers barely touches the authors:
+
+```bash
+bioleads --pmids @seeds.txt --citations \
+         --min-paper-degree 1 --min-author-degree 10 --out ./results
+```
+
 ### What gets processed
 
 PubMed inputs (`--pubmed` / `--pmids`) fetch the **title + abstract** of each

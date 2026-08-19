@@ -987,6 +987,51 @@ corpus paper Q, every author of P gets an edge to every author of Q, with shared
 authors dropped so self-citation doesn't inflate anyone. Edge weight is how many
 times that author cited that other author. Authors rank by weighted in-degree.
 
+**Thinning them out.** Most corpora are sparse: a large share of the papers cite
+nothing else in your set and are cited by nothing in it either, and they arrive
+as unconnected dots that carry no information and crowd out the structure that
+does. **Min degree** drops them. A node survives when its **total** connections —
+citations it receives from corpus papers *plus* citations it makes to them, and
+for an author the number of distinct authors it cites or is cited by — reach the
+threshold. `0` keeps everything; `1` keeps only nodes with at least one link,
+which is usually the setting worth having; higher values leave the densely
+connected core.
+
+**The two graphs take separate numbers**, and it matters. The author graph is a
+projection: one paper→paper link becomes an edge between *every pair* of their
+authors, so a single citation between two five-author papers creates up to
+twenty-five author edges. Author degrees therefore run an order of magnitude
+above paper degrees, and one shared threshold cannot serve both — on a
+289-paper corpus, degree 5 cut the papers from 289 to 153 while removing 10% of
+the authors. Set the paper threshold from the picture you want of the papers,
+and the author threshold from the picture you want of the authors:
+
+| | thins papers | thins authors |
+|---|---|---|
+| `min_paper_degree` | ✓ | — |
+| `min_author_degree` | — | ✓ |
+
+Three properties are worth knowing before you turn either up:
+
+- **It is one pass, not a k-core.** Removing a node lowers its neighbours'
+  degree, and bioleads does *not* then re-check them. A node that clears the
+  threshold on the full graph is kept even if the neighbours that got it there
+  are gone. Iterating instead would cascade a threshold of 2 into an
+  unpredictably small graph.
+- **Degree is unweighted.** An author who cites one colleague forty times has one
+  connection, not forty. Edge weights still size the picture; they do not decide
+  who is in it.
+- **The counts you read are the corpus's, not the survivors'.** `in_corpus_citations`
+  is computed before the pruning, so a paper that shows "cited by 6" in a
+  filtered graph really is cited six times in your corpus, even if some of those
+  six are no longer drawn.
+
+Each filter runs before the display cap (`max_graph_nodes`), and applies to that
+graph's ranking as well as its picture, so every stage-8 output describes the
+same set. With a corpus larger than the cap, the threshold changes *which* nodes
+survive rather than how many: raising it trades breadth for density inside the
+same 150.
+
 **Limits.** Only PMID-bearing documents can appear — PDFs and reference records
 without a PMID are skipped entirely, so a PDF-only corpus produces no citation
 network. Author matching is by name string, so name variants split and common
@@ -996,7 +1041,9 @@ set is built on.
 **What it produces.** `citation_ranking.csv`, `author_ranking.csv`, and 2D + 3D
 networks for both, nodes sized by in-corpus citations.
 
-**Controls.** Citation network (iCite).
+**Controls.** Citation network (iCite) · Min degree — papers
+(`min_paper_degree`, `--min-paper-degree`) · Min degree — authors
+(`min_author_degree`, `--min-author-degree`).
 
 ---
 

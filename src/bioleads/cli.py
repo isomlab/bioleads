@@ -97,6 +97,18 @@ def build_parser() -> argparse.ArgumentParser:
                         "in-corpus + global citation count: writes "
                         "citation_ranking.csv / citation_network.html and "
                         "author_ranking.csv / author_network.html (+ _3d.html)")
+    p.add_argument("--min-paper-degree", type=int,
+                   default=Config.min_paper_degree, metavar="N",
+                   help="keep only papers with at least N connections in the "
+                        "citation network (citations given + received; 0 = keep "
+                        "everything, 1 = drop the isolated papers). Applies to "
+                        "the rankings as well as the HTML views")
+    p.add_argument("--min-author-degree", type=int,
+                   default=Config.min_author_degree, metavar="N",
+                   help="the same threshold for the author network, counted in "
+                        "distinct authors cited or citing. Separate because the "
+                        "author graph is a projection, so its degrees run an "
+                        "order of magnitude higher than the paper graph's")
     p.add_argument("--cluster", action="store_true",
                    help="cluster ranked terms with PubMedBERT: writes "
                         "term_clusters.csv and colors the graph by cluster "
@@ -132,6 +144,8 @@ def main(argv=None) -> int:
         pubmed_fulltext=args.fulltext,
         do_clustering=args.cluster,
         do_citation_network=args.citations,
+        min_paper_degree=args.min_paper_degree,
+        min_author_degree=args.min_author_degree,
         n_clusters=args.n_clusters,
         expand_rounds=args.expand,
         expand_link=args.expand_link,

@@ -131,6 +131,21 @@ class Config:
     # cited — both within the corpus (in-degree) and globally (iCite
     # citation_count). On by default; needs a network round-trip to iCite.
     do_citation_network: bool = True
+    # Drop weakly-connected nodes from the stage-8 graphs before anything is
+    # written. A node is kept when its total degree — citations received from
+    # corpus papers plus citations it makes to them (for authors, the number of
+    # distinct authors it cites or is cited by) — is at least this. 0 keeps
+    # everything; 1 drops the isolated nodes, which are usually the bulk of a
+    # sparse corpus. Applied before max_graph_nodes, and to the rankings as
+    # well as the pictures, so every stage-8 output shows the same set.
+    #
+    # The two graphs get their own threshold because they are not on the same
+    # scale: the author graph is a projection, in which one paper→paper link
+    # becomes an edge between every pair of their authors, so author degrees run
+    # an order of magnitude higher. A number that meaningfully thins papers
+    # barely touches authors.
+    min_paper_degree: int = 0
+    min_author_degree: int = 0
 
     # --- Misc ---
     background_path: str | None = None  # path to background term-freq json

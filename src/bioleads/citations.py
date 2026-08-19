@@ -166,6 +166,35 @@ def fetch_icite(
     return out
 
 
+def _prune_by_degree(g: nx.DiGraph, min_degree: int, noun: str, say) -> nx.DiGraph:
+    """Drop nodes whose total degree is below ``min_degree``.
+
+    The paper and author graphs pass their own threshold here, because the two
+    are not on the same scale: the author graph is a projection, where one
+    paper→paper link becomes an edge between every pair of their authors, so
+    author degrees run an order of magnitude higher than paper degrees.
+
+    Degree is counted on the *whole* graph — citations received from corpus
+    papers plus citations made to them — and unweighted, so an author who cites
+    one colleague forty times counts as one connection, not forty. Survivors
+    keep the attributes they were built with, in_corpus_citations included: those
+    describe the node's place in the corpus, not in the pruned picture.
+
+    One pass, not a k-core: removing a node lowers its neighbours' degree, and
+    iterating would cascade a threshold of 2 into an unpredictably small graph.
+    """
+    if min_degree <= 0 or not g.number_of_nodes():
+        return g
+    keep = [n for n, d in g.degree() if d >= min_degree]
+    if len(keep) == g.number_of_nodes():
+        return g
+    dropped = g.number_of_nodes() - len(keep)
+    g = g.subgraph(keep).copy()
+    say(f"  dropped {dropped} {noun}(s) below degree {min_degree}; "
+        f"{g.number_of_nodes()} left.")
+    return g
+
+
 def build_citation_graph(
     docs: list[Document],
     cfg: Config | None = None,
@@ -232,6 +261,8 @@ def build_citation_graph(
 
     say(f"  citation network: {g.number_of_nodes()} paper(s) / "
         f"{g.number_of_edges()} intra-corpus citation edge(s).")
+
+    g = _prune_by_degree(g, cfg.min_paper_degree, "paper", say)
 
     # Trim to the most-cited papers for visualization sanity (keep the induced
     # subgraph so edges among the survivors are preserved).
@@ -313,6 +344,8 @@ def build_author_citation_graph(
 
     say(f"  author network: {g.number_of_nodes()} author(s) / "
         f"{g.number_of_edges()} author-citation edge(s).")
+
+    g = _prune_by_degree(g, cfg.min_author_degree, "author", say)
 
     if g.number_of_nodes() > cfg.max_graph_nodes:
         ranked = sorted(

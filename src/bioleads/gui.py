@@ -104,6 +104,8 @@ class BioleadsGUI:
         self.method_var = tk.StringVar(value="log_odds")
         self.fulltext_var = tk.BooleanVar(value=False)
         self.citations_var = tk.BooleanVar(value=Config.do_citation_network)
+        self.mindeg_paper_var = tk.IntVar(value=Config.min_paper_degree)
+        self.mindeg_author_var = tk.IntVar(value=Config.min_author_degree)
         self.nclusters_var = tk.IntVar(value=Config.n_clusters)
         self.expand_var = tk.IntVar(value=Config.expand_rounds)
         self.expand_link_var = tk.StringVar(value=Config.expand_link)
@@ -193,6 +195,29 @@ class BioleadsGUI:
             "in-corpus citations (how foundational within your set) and global "
             "citations (across all of PubMed). Only PMID-bearing documents can "
             "appear, so a PDF-only corpus produces neither.")
+        ttk.Label(opts, text="Min degree — papers:").pack(side="left")
+        mindeg_paper_spin = ttk.Spinbox(opts, from_=0, to=10000, width=4,
+                                        textvariable=self.mindeg_paper_var)
+        mindeg_paper_spin.pack(side="left", padx=(4, 6))
+        self._add_tooltip(
+            mindeg_paper_spin,
+            "Stage 8 · Map the citations. Keep only papers with at least this "
+            "many connections in the network — citations they receive from the "
+            "corpus plus citations they make to it. 0 keeps everything; 1 drops "
+            "the papers with no intra-corpus link at all, which in a sparse "
+            "corpus is most of them. Filters the ranking and the picture alike.")
+        ttk.Label(opts, text="authors:").pack(side="left")
+        mindeg_author_spin = ttk.Spinbox(opts, from_=0, to=10000, width=4,
+                                         textvariable=self.mindeg_author_var)
+        mindeg_author_spin.pack(side="left", padx=(4, 16))
+        self._add_tooltip(
+            mindeg_author_spin,
+            "Stage 8 · Map the citations. The same threshold for the author "
+            "network, counted in distinct authors cited or citing. It is a "
+            "separate number because the author graph is a projection — one "
+            "paper→paper link becomes an edge between every pair of their "
+            "authors — so author degrees run an order of magnitude higher, and "
+            "a value that thins the papers barely touches the authors.")
         ttk.Label(opts, text="Max records:").pack(side="left")
         retmax_spin = ttk.Spinbox(opts, from_=1, to=100000, width=8,
                                   textvariable=self.retmax_var)
@@ -587,6 +612,8 @@ class BioleadsGUI:
             pubmed_retmax=int(self.retmax_var.get()),
             pubmed_fulltext=self.fulltext_var.get(),
             do_citation_network=self.citations_var.get(),
+            min_paper_degree=int(self.mindeg_paper_var.get()),
+            min_author_degree=int(self.mindeg_author_var.get()),
             expand_rounds=int(self.expand_var.get()),
             expand_link=self.expand_link_var.get(),
             expand_source=self.expand_source_var.get(),

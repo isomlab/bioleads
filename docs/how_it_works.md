@@ -193,6 +193,40 @@ use 1024 or more and are correspondingly slower; smaller ones lose accuracy. For
 our purposes 768 is simply a fixed, inherited constant, and no individual one of
 those numbers means anything on its own — only the whole pattern does.
 
+**What a layer and a head actually are.** A **layer** is one round of the same
+operation: every token looks at every other token in the sentence and rewrites
+itself in light of what it sees. Twelve layers means twelve rounds — and because
+each round starts from the last one's output, a token can end up influenced by a
+word it never looked at directly, reached through whatever the layer below
+already folded in.
+
+"Looks at" has a precise meaning. Each token distributes one unit of **attention**
+across the sentence, and the resulting weights decide how much of each other
+token gets mixed in. A token that spends 0.99 of its attention on one word is,
+for that round, essentially copying it.
+
+A **head** is one independent way of doing that. Rather than compute a single set
+of attention weights, the layer computes twelve in parallel, each working on its
+own 64-number slice of the 768; their results are joined back together at the end.
+That is the whole of the arithmetic behind "12 heads × 64 = 768".
+
+![Figure 4 — inside a layer: twelve heads, each reading the sentence
+differently](figures/04-layers-and-heads.svg)
+
+Heads do specialise, and some are strikingly literal. Layer 1 head 8 gives 0.999
+of `muscle`'s attention to `smooth`, the word immediately before it — and it does
+the same thing on an unrelated sentence, averaging 0.99 on the preceding token
+throughout. Layer 3 head 3 instead reaches across the sentence, linking `arterial`
+to `vasodilation` at 0.61.
+
+But it would be misleading to suggest all 144 have tidy jobs. **56 of them send
+over 70% of their attention to punctuation and the sentence markers**, a known
+idling behaviour — a head with nothing to contribute parks its attention
+somewhere harmless. Only 16 mostly read the actual words. The useful mental model
+is not twelve experts with twelve labelled specialities, but a large pool of
+cheap, partly-redundant pattern detectors of which a minority matter for any given
+sentence.
+
 **Averaging the tokens.** The gate needs *one* vector per paper, and what we have
 is one per token, so they are averaged — the simplest way to combine them, and the
 one bioleads uses. "Real tokens" in the equation below means the actual words:
@@ -254,7 +288,7 @@ because it quietly measures how much the seeds agree. Averaging unit arrows that
 point the same way barely shortens them; averaging arrows that disagree produces
 something much shorter, pointing between them.
 
-![Figure 4 — seeds that agree give a long average; seeds that disagree give a short one](figures/04-seed-direction.svg)
+![Figure 5 — seeds that agree give a long average; seeds that disagree give a short one](figures/05-seed-direction.svg)
 
 This is the geometry behind the documented failure mode: a seed set covering two
 subjects averages to a direction in the gap between them, and can rank papers
@@ -291,7 +325,7 @@ signal.
 
 A candidate belongs if its arrow points nearly the same way as the topic arrow.
 
-![Figure 5 — candidates scored by the angle they make with the topic](figures/05-scoring-by-angle.svg)
+![Figure 6 — candidates scored by the angle they make with the topic](figures/06-scoring-by-angle.svg)
 
 $$s_c \;=\; \hat{\mathbf{e}}_c \cdot \mathbf{q}_0 \;=\; \cos\theta_c \;\in\; [-1, 1]$$
 
@@ -308,7 +342,7 @@ real candidate pool, every raw cosine falls between 0.985 and 0.991.
 It is worth seeing *why*, because it looks like a bug and is not. Of the 768
 numbers, **one is very nearly the same for every text there is**:
 
-![Figure 6 — one dimension holds about the same value for every text](figures/06-shared-direction.svg)
+![Figure 7 — one dimension holds about the same value for every text](figures/07-shared-direction.svg)
 
 Dimension 424 sits at roughly −0.96 for a TRPV1 paper, a wheat-fertiliser paper,
 a microglia paper, and the sentence "the cat sat on the mat" alike, and accounts
@@ -348,7 +382,7 @@ papers use that vocabulary too. No amount of aiming at the topic separates them.
 So the gate also learns from its own worst matches. Take the lowest-scoring
 candidates, average them into a direction, and tilt the topic vector away from it:
 
-![Figure 7 — the negative term rotates the query vector away from the worst candidates](figures/07-negative-term.svg)
+![Figure 8 — the negative term rotates the query vector away from the worst candidates](figures/08-negative-term.svg)
 
 $$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
 
@@ -395,7 +429,7 @@ the corpus gets.
 
 Benchmarked, precision falls and recall rises as $K$ grows (12 reviews):
 
-![Figure 8 — precision falls and recall rises as K grows](figures/08-top-k-tradeoff.svg)
+![Figure 9 — precision falls and recall rises as K grows](figures/09-top-k-tradeoff.svg)
 
 The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
 recall of unfiltered snowballing, 0.3252, on 87% less material.** The recall gap

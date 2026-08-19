@@ -91,14 +91,9 @@ PMC full text · Max records (caps how many hits a query fetches, default 500).
 the citation graph outward, and appends what it finds. Local PDFs without a PMID
 can't seed this — there is nothing to follow.
 
-This is the one stage where bioleads does something more than plumbing, so it is
-documented mechanism-first: what the two directions are, what the strategy does
-with them, the exact arithmetic, then what measurement had to say about all of
-it.
+### The problem
 
-### 2.1 The two directions
-
-Every seed sits in the middle of two very different sets of papers.
+Every seed sits between two very different sets of papers.
 
 ```
          PAST                      SEEDS                       FUTURE
@@ -112,129 +107,174 @@ Every seed sits in the middle of two very different sets of papers.
       ~2,300 papers                                    ~47,000 papers
 ```
 
-Those two counts are measured, not illustrative: across the 12 systematic-review
-seed sets used in [the benchmark](benchmark.md), one round backward yielded
-2,342 papers and one round forward yielded roughly 47,000. **Forward is ~20×
-larger.** That size difference drives most of what follows.
+Those counts are measured, not illustrative: across the systematic-review seed
+sets in [the benchmark](benchmark.md), one round backward yielded 2,342 papers
+and one round forward roughly 47,000. **Forward is ~20× larger**, and that size
+difference drives everything that follows.
 
-The directions also differ in kind:
+The two directions also differ in kind. A reference list is everything the
+authors needed — the method, the reagent, the statistical tool, the mouse line,
+background from an adjacent field, a courtesy citation — so it is a union of
+topics. Citing papers usually engage with what a seed showed, but a widely-used
+method or reagent paper is cited by every field that uses it.
 
-- **Backward — what a seed cites.** A reference list is everything the authors
-  needed: the method, the reagent, the statistical tool, the mouse line,
-  background from an adjacent field, a courtesy citation. A union of topics.
-- **Forward — what cites a seed.** To cite a paper you generally engage with what
-  it showed — but a widely-used method or reagent paper is cited by every field
-  that uses it.
+Taking either wholesale is what makes plain snowballing drift: one round drags
+in every field the seed touched, and the next round expands from *those*. Yet
+backward is also where the foundational literature lives, which is exactly what
+ABC discovery (stage 6) needs. So the goal is not to skip a direction but to
+**filter both**.
 
-Plain snowballing (`bfs`) takes both wholesale, which is why it drifts: one round
-backward drags in every field the seed touched, and the next round expands from
-*those*. But backward is also where the foundational and older literature lives —
-exactly what ABC discovery (stage 6) needs to find a link nobody has stated. The
-goal is therefore not to skip a direction but to **filter** both.
+The question this stage answers is therefore: *how do you keep the useful
+citation neighbours without letting the corpus explode or drift?*
 
-### 2.2 What the strategy does
-
-`relevance` trusts neither direction. It trusts only the seeds — the one set of
-papers known to be on topic, because you chose them — and filters everything
-else against them.
+bioleads' answer is to treat **the seed papers as the definition of the topic** —
+they are the only papers known to be on topic, because you chose them — and to
+make every candidate earn its place against them.
 
 ```
-                        ┌──────────────────┐
-                        │   seed docs  S   │  PMID-bearing, chosen by you
-                        └───┬──────────┬───┘
-              ┌─────────────┘          └─────────────┐
-              ▼                                      ▼
-   ┌─────────────────────┐              ┌──────────────────────────┐
-   │ PROFILE             │              │ CANDIDATES               │
-   │  embed S            │              │  F = cited_by(S)         │
-   │  average            │              │  B = references(S)       │
-   │  normalise          │              │  fetch text, embed       │
-   │            →  q₀    │              │            →  ê_c        │
-   └──────────┬──────────┘              └────────────┬─────────────┘
-              │                                      │
-              └──────────────┬───────────────────────┘
-                             ▼
-                 ┌───────────────────────┐
-                 │  score   s_c = ê_c·q₀ │   cosine similarity
-                 └───────────┬───────────┘
-                             ▼
-                 ┌───────────────────────────────────┐
-                 │  negative term        (if γ > 0)  │
-                 │   worst-scoring fraction  →  n̂    │
-                 │   q = normalise(q₀ − γ·n̂)         │
-                 │   re-score against q              │
-                 └───────────┬───────────────────────┘
-                             ▼
-                 ┌───────────────────────┐
-                 │  keep top K           │   applied to F and to B
-                 └───────────┬───────────┘   separately
-                             ▼
-                      added to the corpus
+   seeds ──▶ embed ──▶ topic ──▶ score ──▶ learn what ──▶ keep
+             papers    vector    candidates   isn't on      top K
+                                              topic
+             step 1    step 2     step 3       step 4      step 5
 ```
 
-Both directions run through the same gate, independently, each keeping its own
-top K. Nothing passes through unfiltered.
+What follows is one continuous geometric story. Papers become arrows; the seeds
+define a direction; candidates are ranked by the angle they make with it; and a
+correction can rotate that direction away from the kinds of paper that keep
+scoring well without belonging.
 
-### 2.3 The math
+### Step 1 · Every paper becomes a vector
 
-Five steps. Everything below is what the code actually computes; the symbols are
-used consistently.
+Picture each paper as an arrow on a very high-dimensional map of the literature.
+Papers about similar things point in similar directions. The whole gate is built
+on that one idea.
 
-| symbol | meaning |
-|---|---|
-| $S$ | the seed documents |
-| $F$, $B$ | forward (`cited_by`) and backward (`references`) candidate sets |
-| $\mathbf{e}_d$ | the embedding of document $d$ |
-| $\hat{\mathbf{e}}_d$ | that embedding, scaled to unit length |
-| $\mathbf{q}_0$, $\mathbf{q}$ | the profile vector, before and after the negative term |
-| $\gamma$ | `rocchio_gamma`, the weight of the negative term |
-| $K$ | `expand_top_k`, how many papers survive per direction |
-
-**Step 1 — embed a document.** PubMedBERT reads the title and abstract and emits
-one vector per token. Those are averaged over the real (non-padding) tokens —
-"mean pooling" — to get one vector for the document:
+PubMedBERT reads a title and abstract and emits a vector $\mathbf{h}_t$ for every
+token. bioleads averages the *real* tokens — skipping the padding that makes a
+batch rectangular — to get one arrow per document:
 
 $$\mathbf{e}_d \;=\; \frac{\sum_{t} m_t \, \mathbf{h}_t}{\sum_{t} m_t}$$
 
-where $\mathbf{h}_t$ is the model's output for token $t$ and $m_t$ is 1 for a
-real token and 0 for padding. Text is truncated at 256 tokens. Every vector is
-then scaled to unit length,
+with $m_t = 1$ for a real token and $0$ for padding. *A paper's arrow is the
+average of its meaningful token arrows.* Text is truncated at 256 tokens, so this
+is the title and abstract, not a full article.
+
+That arrow is then scaled to length 1:
 
 $$\hat{\mathbf{e}}_d \;=\; \frac{\mathbf{e}_d}{\lVert \mathbf{e}_d \rVert}$$
 
-which is what makes the dot products further down equal cosines.
+*Keep the direction, discard the length.*
 
-**Step 2 — build the profile.** Average the seed vectors and re-normalise:
+Normalising is what makes the rest of the section work. It places every document
+on the unit hypersphere, which removes magnitude — roughly, how much text there
+was — from every later comparison, and it makes a dot product equal a cosine.
+From here on, **direction carries all the meaning**.
 
-$$\mathbf{q}_0 \;=\; \frac{\bar{\mathbf{e}}_S}{\lVert \bar{\mathbf{e}}_S \rVert}, \qquad \bar{\mathbf{e}}_S = \frac{1}{|S|}\sum_{d \in S} \hat{\mathbf{e}}_d$$
+### Step 2 · The seeds define a direction
 
-The average of several unit vectors points "between" them, so $\mathbf{q}_0$ is a
-single direction standing for the topic the seeds share. Re-normalising matters
-because averaging shortens the vector — seeds that disagree shorten it more —
-and only the *direction* should carry meaning.
+Average the seed arrows and you get one arrow standing for what they share.
 
-**Step 3 — score a candidate.** Because both vectors are unit length, the dot
-product *is* the cosine of the angle between them:
+$$\mathbf{q}_0 \;=\; \frac{\bar{\mathbf{e}}_S}{\lVert \bar{\mathbf{e}}_S \rVert}, \qquad \bar{\mathbf{e}}_S \;=\; \frac{1}{|S|}\sum_{d \in S} \hat{\mathbf{e}}_d$$
+
+*Average the trusted papers, then put the result back on the unit sphere.*
+
+The intermediate length $\lVert \bar{\mathbf{e}}_S \rVert$ is worth a moment,
+because it quietly measures how much the seeds agree. Averaging unit arrows that
+point the same way barely shortens them; averaging arrows that disagree produces
+something much shorter, pointing between them.
+
+```
+   seeds that agree                      seeds that disagree
+   ─────────────────                     ───────────────────
+
+       ŝ₁ ↗                                  ŝ₁ ↗
+       ŝ₂ ↗   nearly parallel                ŝ₂ →   pulling apart
+       ŝ₃ ↗                                  ŝ₃ ↘
+
+       ●━━━━━━━━━━━━━━━▶ q̄                   ●━━━▶ q̄
+       │◀───── ‖q̄‖ ≈ 1 ─────▶│               │◀ ‖q̄‖ ≪ 1
+
+   q₀ points where the                   q₀ points into the gap between
+   seeds actually are                    topics that no seed occupies
+```
+
+This is the geometry behind the documented failure mode: a seed set covering two
+subjects averages to a direction in the gap between them, and can rank papers
+from *neither* highly. bioleads does not currently report
+$\lVert \bar{\mathbf{e}}_S \rVert$ — it is an explanation here, not an output —
+but it is the natural diagnostic if you ever wonder whether a seed set is
+coherent.
+
+### Step 3 · Candidates are ranked by angle
+
+A candidate belongs if its arrow points nearly the same way as the topic arrow.
+
+```
+                          ● A            small angle  →  high score
+                        ╱
+                      ╱  θ_A
+       ──────────────●━━━━━━━━━━━━━━━━▶  q₀
+                      ╲  θ_B
+                        ╲
+                          ● B            wide angle   →  low score
+```
 
 $$s_c \;=\; \hat{\mathbf{e}}_c \cdot \mathbf{q}_0 \;=\; \cos\theta_c \;\in\; [-1, 1]$$
 
-1 means "points the same way as the topic", 0 means unrelated. In practice
-biomedical abstracts all point broadly similarly, so the useful signal is in the
-*ranking*, not the absolute value.
+*Score a candidate by the cosine of the angle between it and the topic.*
 
-**Step 4 — the negative term.** Pointing the gate *toward* the topic is not the
-same as pointing it *away from* what the topic isn't. A methods paper that shares
-the seeds' technique vocabulary can sit exactly as close to $\mathbf{q}_0$ as a
-genuinely on-topic paper, because the seed papers use that vocabulary too. The
-fix is Rocchio's negative term: take the worst-scoring candidates as a stand-in
-for "off topic", average them, and subtract.
+The dot product *is* the cosine here only because step 1 normalised both arrows:
+the usual $\lVert\mathbf{a}\rVert\lVert\mathbf{b}\rVert$ denominator is 1, so it
+disappears. A score of 1 means identical direction, 0 means unrelated.
+
+In practice biomedical abstracts all occupy broadly similar semantic space, so
+absolute values cluster high and mean little on their own. **The useful signal is
+the ranking**, which is why the cut in step 5 is a rank, not a threshold.
+
+### Step 4 · The gate learns what the topic is not
+
+Pointing at the topic is not the same as pointing away from what resembles it.
+A methods paper that shares the seeds' technical vocabulary can sit at exactly
+the same angle to $\mathbf{q}_0$ as a genuinely on-topic paper — because the seed
+papers use that vocabulary too. No amount of aiming at the topic separates them.
+
+So the gate also learns from its own worst matches. Take the lowest-scoring
+candidates, average them into a direction, and tilt the topic vector away from it:
+
+```
+   before                                     after
+
+          X ●                                        X ●
+             ╲                                          ╲   θ′ < θ
+              ╲ θ                                        ╲
+   ────────────●━━━━━━━━━▶ q₀           ────────────●━━━━━━━━━▶ q
+              ╱ θ                                        ╱
+             ╱                                          ╱   θ″ > θ
+          M ●                                        M ●
+             ╲                                          ╲
+              ● n̂                                        ● n̂
+
+   X and M make equal angles with        q tilts away from n̂. M lies on
+   q₀, so they score identically         n̂'s side, so it falls further
+```
 
 $$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
 
-where $N$ is the lowest-scoring fraction of the candidate pool. Candidates are
-then re-scored against $\mathbf{q}$ instead of $\mathbf{q}_0$. Geometrically the
-query vector rotates away from the off-topic cloud, which spreads apart
-candidates the positive centroid alone had tied:
+*New topic direction = seed direction − γ × off-topic direction.*
+
+Candidates are then re-scored against $\mathbf{q}$. This is **pseudo-relevance
+feedback** in Rocchio's classical form, with one bioleads-specific choice: the
+negatives are the candidate pool's own low-scoring tail, $N$.
+
+That choice is what makes them useful. Random papers would be easy negatives, and
+the gate would learn "this topic versus all of biomedicine". The tail instead
+holds papers that were citation-adjacent and plausible enough to enter the pool
+yet still scored badly — which is precisely the distinction the gate has to make.
+They also cost nothing: candidates are embedded once, scored to find the tail,
+then re-scored, so the second pass is a dot product rather than another model
+call.
+
+From the regression test, with real numbers:
 
 ```
    similarity →  0.0        0.2        0.4        0.6        0.8
@@ -247,108 +287,31 @@ candidates the positive centroid alone had tied:
         X = on-topic paper    M = methods paper    tail = off-topic candidates
 ```
 
-Those are real numbers from the regression test: the positive centroid scores X
-and M identically at 0.7071, and the negative term moves them to 0.7566 and
-0.6136 while pushing the tail from 0.3693 to ~0.14.
+X and M start tied at 0.7071. The negative term moves them to 0.7566 and 0.6136
+while pushing the tail from 0.3693 to about 0.14.
 
-**Why the negatives are free.** The gate exists because a candidate pool is
-mostly off topic — so the pool's own low-scoring tail *is* a supply of negatives,
-and better ones than random papers would be: they are citation-adjacent and
-plausible, which is the distinction the gate actually has to make. Candidates are
-scored twice but embedded once, so this costs a dot product, not a second model
-pass.
+Three guards keep the correction from firing when it would be meaningless:
+$\gamma \le 0$ disables it entirely and recovers the plain centroid; a pool
+smaller than `rocchio_min_candidates` (8) has no tail worth trusting; and the
+tail is clamped so it can never reach into the top $K$ about to be kept, since a
+paper should not be evidence of what the topic *isn't* while also being kept as
+on-topic. (Re-scoring can reorder, so that last guard acts on the first-pass
+ranking.)
 
-The selection has three guards, all in `_pseudo_negative_idx`:
+### Step 5 · Keep the top K
 
-- $\gamma \le 0$ disables it entirely, recovering the plain positive centroid.
-- A pool smaller than `rocchio_min_candidates` (8) has no meaningful tail.
-- The tail is clamped so it can never reach into the top $K$ about to be kept —
-  a document should not be evidence of what the topic *isn't* while also being
-  kept as on-topic. (Re-scoring can reorder, so this is enforced on the
-  first-pass ranking.)
+Sort by score, keep the best $K$, discard the rest before they ever reach the
+corpus.
 
-**Step 5 — the cut.** Sort by score, keep the $K$ highest, discard the rest
-before they ever reach the corpus. Applied to $F$ and $B$ separately, so the
-strategy returns at most $2K$ new documents per round.
+Forward and backward candidates pass through the same gate **independently**,
+each keeping its own $K$, so one round adds at most $2K$ documents.
 
-**Without the `embed` extra.** The same five steps run in term space instead of
-embedding space. The profile is a vector over NER terms weighted by how many
-profile documents contain each,
+$K$ is a **rank cutoff, not a similarity threshold**. If a pool is weak, the top
+$K$ still contains weak papers; if hundreds are strong, $K$ is still the ceiling.
+That is exactly why it — and not $\gamma$ — is the main control over how broad
+the corpus gets.
 
-$$p_t \;=\; \bigl|\{\, d \in S : t \in \text{terms}(d) \,\}\bigr|$$
-
-a candidate is the 0/1 indicator vector of its own term set $C$, and the score is
-the same cosine:
-
-$$s_C \;=\; \frac{\sum_{t \in C} q_t}{\lVert \mathbf{q} \rVert \cdot \sqrt{|C|}}$$
-
-with $\sqrt{|C|}$ being the length of a binary vector with $|C|$ ones. The
-negative term works identically, subtracting a term vector built from the tail.
-The upgrade to PubMedBERT is automatic when the extra is installed, and a failure
-in the embedding path falls back here rather than sinking the run.
-
-### 2.4 The parameters
-
-| control | symbol | default | what it changes |
-|---|---|---|---|
-| `expand_top_k` | $K$ | 50 | papers kept **per direction**. The main control over corpus size and cleanliness. |
-| `rocchio_gamma` | $\gamma$ | 0.25 | weight of the negative term. Measured to change almost nothing — see 2.5. |
-| `rocchio_neg_frac` | | 0.25 | fraction of the pool taken as the negative tail. |
-| `rocchio_min_candidates` | | 8 | pools smaller than this skip the negative term. |
-| `expand_fwd_rounds` / `expand_back_rounds` | | 1 / 1 | depth in each direction. Not exposed in the GUI. |
-| `expand_max` | | 1000 | hard cap on total PMIDs. |
-| `expand_source` | | `all` | NCBI ELink, NIH iCite, or the union. |
-
-Two things about the GUI controls are easy to get wrong: choosing `relevance`
-**runs expansion even with "Citation expansion rounds" set to 0** (that spinbox
-drives `bfs` only), and **`Follow` is ignored** by `relevance`, which always does
-both directions.
-
-### 2.5 What the measurements said
-
-This design replaced an earlier one **on evidence**, and the evidence is worth
-keeping visible because it contradicts the intuition the original was built on.
-Method and full tables: [docs/benchmark.md](benchmark.md). Ground truth is a
-systematic review's reference list; seeds are sampled from it; the arms try to
-recover the rest.
-
-**The original design.** Profile built from the seeds *plus* their forward
-citers, with every citer added ungated and only backward references filtered —
-on the theory that citing papers converge on a seed's topic while reference lists
-sprawl.
-
-**Finding 1 — the asymmetry runs the other way.** Over 40 reviews, backward was
-*more* precise than forward in **33 of 40**: forward P 0.0152 / R 0.1154 against
-backward P 0.0530 / R 0.1667. Comparable true hits (403 vs 397) but forward drags
-2.88× the volume. The direction the design treated as reliable is the noisy one.
-
-**Finding 2 — the gate governed 5% of the output.** Backward references were
-2,342 of the ~49,700 documents the strategy returned; the other ~95% were
-ungated forward citers. The profile, the negative term and $K$ were all tuning
-one twentieth of the result — and the cleaner twentieth. This is also why
-$\gamma$ looked inert: $\gamma = 0 \to 0.25$ moved the total from 172 hits to
-**173**, one document across ~48,000 retrieved. Re-running with full abstracts
-instead of titles changed nothing (172 / 173 / 172), refuting the obvious
-"scoring fidelity" explanation.
-
-**Finding 3 — gating the other way is much better.** Two arms, 12 reviews:
-
-| arm | median P | median R | median F1 | retrieved | pooled P |
-|---|---|---|---|---|---|
-| `relevance` (original) | 0.0247 | 0.2659 | 0.0434 | 47,974 | 0.36% |
-| `both` (= bfs) | 0.0244 | 0.3252 | 0.0442 | 49,683 | 0.41% |
-| `relevance_fwd` | 0.0520 | 0.1760 | 0.0718 | 2,712 | 4.46% |
-| **`relevance_seeds`** | **0.0854** | 0.1406 | **0.0927** | **975** | **10.56%** |
-
-`relevance_fwd` inverts the design (profile on backward, gate forward);
-`relevance_seeds` is the control — profile on the **seeds alone**, gate both —
-and it wins: better F1 in 10 of 12 reviews, better precision in 11 of 12, and
-better than `relevance_fwd` in 11 of 12. Because the arm *least* exposed to the
-circularity worry (the ground truth is itself a reference list, which could
-flatter an arm that profiles on references) is the strongest, the result is not
-an artefact. **`relevance_seeds` is what stage 2 now implements.**
-
-**Finding 4 — $K$ is the knob, not $\gamma$.** Swept on `relevance_seeds`:
+Benchmarked, precision falls and recall rises as $K$ grows (12 reviews):
 
 ```
      K   median precision             median recall                   corpus
@@ -365,46 +328,117 @@ an artefact. **`relevance_seeds` is what stage 2 now implements.**
 ```
 
 The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
-same recall as `bfs`, 0.3252, on 87% less material.** The recall gap at smaller
-$K$ is the cutoff choosing, not the gate losing — so there is no breadth argument
-for unfiltered snowballing.
+recall of unfiltered snowballing, 0.3252, on 87% less material.** The recall gap
+at smaller $K$ is the cutoff choosing, not the gate failing — so there is no
+breadth argument for taking everything.
 
-Choose $K$ by what stage 6 needs rather than by F1:
+Pick $K$ by what stage 6 needs rather than by F1:
 
-- **$K \approx 10\text{–}25$** — sharpest (F1 peaks at 25), for reading a tight
-  corpus yourself.
+- **$K \approx 10\text{–}25$** — sharpest (F1 peaks at 25); a tight corpus to read yourself.
 - **$K = 50$** (default) — best paired record of any $K$: better F1 than `bfs` in
   11 of 12 reviews, than raw `backward` in 10 of 12, and best of any $K$ in 7 of 12.
 - **$K \approx 100\text{–}200$** — for ABC discovery, which can only find an A–C
-  pair if some B is in the corpus: 76–92% of `bfs`'s recall at 2.1–2.6× its
-  median precision (13–18× by pooled precision), on 93–96% less material.
+  pair if some B is in the corpus: 76–92% of `bfs`'s recall at 2.1–2.6× its median
+  precision (13–18× by pooled precision), on 93–96% less material.
+
+### The same five steps without PubMedBERT
+
+With the `embed` extra absent, the identical geometry runs in term space instead.
+A document's "arrow" is the 0/1 indicator of the NER terms it contains; the
+profile is a term vector weighted by how many seed documents use each term,
+
+$$p_t \;=\; \bigl|\{\, d \in S : t \in \text{terms}(d) \,\}\bigr|$$
+
+and the score is the same cosine, with $\sqrt{|C|}$ standing in as the length of
+a binary vector with $|C|$ ones:
+
+$$s_C \;=\; \frac{\sum_{t \in C} q_t}{\lVert \mathbf{q} \rVert \cdot \sqrt{|C|}}$$
+
+The negative term works identically, subtracting a term vector built from the
+tail. The upgrade to PubMedBERT is automatic when the extra is installed, and a
+failure in the embedding path falls back here rather than sinking the run.
+
+### The parameters
+
+| control | symbol | default | what it changes |
+|---|---|---|---|
+| `expand_top_k` | $K$ | 50 | papers kept **per direction**; the main control over corpus size and cleanliness |
+| `rocchio_gamma` | $\gamma$ | 0.25 | weight of the negative term — measured to change almost nothing |
+| `rocchio_neg_frac` | | 0.25 | fraction of the pool taken as the negative tail |
+| `rocchio_min_candidates` | | 8 | pools smaller than this skip the negative term |
+| `expand_fwd_rounds` / `expand_back_rounds` | | 1 / 1 | depth in each direction; not exposed in the GUI |
+| `expand_max` | | 1000 | hard cap on total PMIDs |
+| `expand_source` | | `all` | NCBI ELink, NIH iCite, or the union |
+
+Two GUI behaviours are easy to get wrong: choosing `relevance` **runs expansion
+even with "Citation expansion rounds" set to 0** (that spinbox drives `bfs`
+only), and **`Follow` is ignored** by `relevance`, which always does both
+directions.
+
+### What the measurements showed
+
+This design replaced an earlier one **on evidence**, and the evidence is kept
+visible because it contradicts the intuition the original was built on. Method
+and full tables: [docs/benchmark.md](benchmark.md). Ground truth is a systematic
+review's reference list; seeds are sampled from it; each arm tries to recover the
+rest.
+
+**The original design** profiled on the seeds *plus* their forward citers, added
+every citer ungated, and filtered only backward references — on the theory that
+citing papers converge on a seed's topic while reference lists sprawl.
+
+**The asymmetry runs the other way.** Over 40 reviews, backward was *more*
+precise than forward in **33 of 40**: forward P 0.0152 / R 0.1154 against backward
+P 0.0530 / R 0.1667. Comparable true hits (403 vs 397), but forward drags 2.88×
+the volume.
+
+**The gate governed 5% of the output.** Backward references were 2,342 of the
+~49,700 documents returned; the other ~95% were ungated forward citers. The
+profile, the negative term and $K$ were all tuning one twentieth of the result —
+and the cleaner twentieth. That is also why $\gamma$ looked inert: $\gamma = 0
+\to 0.25$ moved the total from 172 hits to **173**, one document across ~48,000
+retrieved. Re-running on full abstracts instead of titles changed nothing
+(172 / 173 / 172), refuting the obvious "scoring fidelity" explanation.
+
+**Gating the other way is much better** (12 reviews):
+
+| arm | median P | median R | median F1 | retrieved | pooled P |
+|---|---|---|---|---|---|
+| `relevance` (original) | 0.0247 | 0.2659 | 0.0434 | 47,974 | 0.36% |
+| `both` (= bfs) | 0.0244 | 0.3252 | 0.0442 | 49,683 | 0.41% |
+| `relevance_fwd` | 0.0520 | 0.1760 | 0.0718 | 2,712 | 4.46% |
+| **`relevance_seeds`** | **0.0854** | 0.1406 | **0.0927** | **975** | **10.56%** |
+
+`relevance_fwd` inverts the original (profile on backward, gate forward);
+`relevance_seeds` profiles on the **seeds alone** and gates both. The latter wins:
+better F1 in 10 of 12 reviews, better precision in 11 of 12, and better than
+`relevance_fwd` in 11 of 12. Because the arm *least* exposed to the circularity
+worry — the ground truth is itself a reference list, which could flatter an arm
+that profiles on references — is the strongest, this is not an artefact.
+**`relevance_seeds` is what stage 2 now implements.**
 
 **Caveats.** 12 reviews for the gate comparisons, 40 for the asymmetry. Scoring
 used iCite titles, though the abstract re-run agreed. Ground truth is a reference
-list, which may favour backward-ish arms generally — a topic-labelled benchmark
+list, which may favour backward-ish arms in general; a topic-labelled benchmark
 would be the independent check.
 
-### 2.6 When it breaks
+### When it breaks
 
-- **Seeds that don't share a topic.** The profile is one centroid, so a two-topic
-  seed set averages to the space *between* them and can rank papers from neither
-  highly. Run them as separate corpora.
-- **Very few seeds.** One seed makes $\mathbf{q}_0$ that paper's own vector, and
-  the gate becomes "papers similar to this one" rather than "papers about this
-  topic".
-- **$K$ is a count, not a threshold.** Exactly $K$ papers are kept per direction
-  even when none of them are close, and equally $K$ is a ceiling when hundreds
-  are.
+- **Seeds that don't share a topic.** One centroid, so a two-subject seed set
+  averages into the gap between them (step 2). Run them as separate corpora.
+- **Very few seeds.** With one seed, $\mathbf{q}_0$ is that paper's own arrow and
+  the gate becomes "papers like this one" rather than "papers about this topic".
+- **A weak pool.** $K$ is a rank, so exactly $K$ papers are kept even when none
+  are close.
 - **No PMIDs, no expansion.** PDF-only corpora cannot seed this at all.
 
-### 2.7 The other strategy: `bfs`
+### The other strategy: `bfs`
 
 Plain snowball, no gating. Each round takes the current frontier, adds everything
 linked to it, and chases those next, up to the record cap. Direction is yours:
-`references` (backward), `cited_by` (forward), or `both`. Use it when you want
-exhaustive coverage of a small, tight seed set and intend to do the filtering
-yourself — noting that on the benchmark, `relevance` reaches the same recall more
-cleanly at large $K$.
+`references`, `cited_by`, or `both`. Use it when you want exhaustive coverage of
+a small, tight seed set and intend to filter yourself — noting that on the
+benchmark `relevance` reaches the same recall more cleanly at large $K$.
 
 ### Controls
 

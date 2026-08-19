@@ -101,6 +101,22 @@ The middle band is the language model. bioleads does not touch it: it is used
 as-is and only ever asked for one thing, a vector per paper. Every decision this
 stage makes happens in the bottom band.
 
+Two phrases in that band are worth unpacking, because both are easy to read
+wrongly.
+
+**"A 64-wide slice"** does not mean the head sees 64 of the token's numbers. Each
+head reads the token *whole*, all 768 of them. What is cut into twelve is the
+**matrix**: the layer holds 768 × 768 weights, head 4 owns 64 of those columns,
+and putting 768 numbers through 64 columns gives 64 numbers out. Twelve heads,
+twelve such slices, and their outputs laid end to end come back to 768.
+
+**"Rewritten twelve times over"** means the token's vector is replaced at every
+layer, each version built from the one before. No single step changes it much —
+consecutive versions stay above 0.79 cosine, and mostly above 0.95 — but the
+changes compound. By the final layer the vector retains a cosine of **0.403** to
+the one that entered layer 1. It never stops being `muscle`; it stops being
+`muscle` in general and becomes `muscle` in this sentence.
+
 ### The problem
 
 Every seed sits between two very different sets of papers.

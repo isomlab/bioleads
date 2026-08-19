@@ -136,7 +136,7 @@ def run_pipeline(
     say(f"  {sum(len(v) for v in entities.values())} entity mention(s) extracted.")
     _check_cancel(cancel)
     say("Ranking distinctive terms vs. background…")
-    ranked = rank_terms(entities, cfg, background=background)
+    ranked = rank_terms(entities, cfg, background=background, progress=progress)
     say(f"  {len(ranked)} ranked term(s).")
     keep = {r.term for r in ranked}
     say("Building co-occurrence network…")

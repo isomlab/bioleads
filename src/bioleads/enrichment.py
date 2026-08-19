@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import json
 import math
+import warnings
 from collections import Counter
 from dataclasses import dataclass
 
 from .config import Config
+from .sources import _sayer
 
 
 @dataclass
@@ -60,9 +62,17 @@ def rank_terms(
     entities: dict[str, list[str]],
     cfg: Config | None = None,
     background: Counter | None = None,
+    *,
+    progress=None,
 ) -> list[TermScore]:
-    """Score and rank terms. Returns a list sorted by descending score."""
+    """Score and rank terms. Returns a list sorted by descending score.
+
+    Pass `progress` (a callable taking one str) to receive the fallback notice
+    below in the caller's own log — without it a GUI run silently reports
+    TF-IDF weights under a log_odds label.
+    """
     cfg = cfg or Config()
+    say = _sayer(progress)
     total, docfreq = _corpus_counts(entities)
 
     # frequency floor
@@ -77,7 +87,17 @@ def rank_terms(
     if method == "tfidf" or background is None:
         scores = _tfidf(entities, terms)
         if background is None and method != "tfidf":
-            print("[bioleads] no background corpus -> falling back to TF-IDF.")
+            # A silent switch of scoring method changes what the numbers *are*
+            # (TF-IDF weights, not z-scores or p-values), so say so on every
+            # channel the caller might be watching: the progress log a GUI
+            # shows, and a warning for CLI and API callers.
+            msg = (f"enrichment_method={method!r} needs a background corpus and "
+                   "none was given — ranking fell back to TF-IDF. The scores "
+                   "are TF-IDF weights, not "
+                   + ("log-odds z-scores." if method == "log_odds"
+                      else "hypergeometric p-values."))
+            say(f"  NOTE: {msg}")
+            warnings.warn(msg, stacklevel=2)
     elif method == "log_odds":
         scores = _log_odds(total, background, terms, cfg.log_odds_prior)
     elif method == "hypergeometric":

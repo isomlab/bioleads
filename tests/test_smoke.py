@@ -12,6 +12,7 @@ import pytest
 
 from bioleads.config import Config
 from bioleads.cooccurrence import write_graph_html
+from bioleads.enrichment import rank_terms
 from bioleads.embeddings import (
     TermCluster,
     term_to_cluster,
@@ -892,3 +893,36 @@ def test_embedder_is_loaded_once_and_reused(monkeypatch):
         assert loads["tok"] == 2
     finally:
         emb._load_embedder.cache_clear()
+
+
+def test_tfidf_fallback_is_announced_on_the_progress_log(recwarn):
+    """A silent method switch changes what the scores mean, so it must reach the
+    GUI's log — not just stdout, which the launcher discards."""
+    entities = {"d1": ["trpv1", "artery"], "d2": ["trpv1", "artery"]}
+    msgs: list[str] = []
+
+    ranked = rank_terms(entities, Config(enrichment_method="log_odds"),
+                        background=None, progress=msgs.append)
+
+    assert ranked, "should still produce a ranking"
+    blob = " ".join(msgs).lower()
+    assert "tf-idf" in blob, f"fallback not announced: {msgs}"
+    assert "log_odds" in blob, "the notice should name the method that was asked for"
+    # and API/CLI callers, who pass no progress, still get a warning
+    assert any("TF-IDF" in str(w.message) for w in recwarn), "no warning raised"
+
+
+def test_no_fallback_notice_when_a_background_is_given():
+    entities = {"d1": ["trpv1", "artery"], "d2": ["trpv1", "artery"]}
+    msgs: list[str] = []
+    rank_terms(entities, Config(enrichment_method="log_odds"),
+               background=Counter({"trpv1": 3, "artery": 900}), progress=msgs.append)
+    assert not any("tf-idf" in m.lower() for m in msgs), msgs
+
+
+def test_no_fallback_notice_when_tfidf_was_actually_requested():
+    entities = {"d1": ["trpv1", "artery"], "d2": ["trpv1", "artery"]}
+    msgs: list[str] = []
+    rank_terms(entities, Config(enrichment_method="tfidf"), background=None,
+               progress=msgs.append)
+    assert not any("fell back" in m.lower() for m in msgs), msgs

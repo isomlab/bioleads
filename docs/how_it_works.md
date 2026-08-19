@@ -200,10 +200,34 @@ something much shorter, pointing between them.
 
 This is the geometry behind the documented failure mode: a seed set covering two
 subjects averages to a direction in the gap between them, and can rank papers
-from *neither* highly. bioleads does not currently report
-$\lVert \bar{\mathbf{e}}_S \rVert$ — it is an explanation here, not an output —
-but it is the natural diagnostic if you ever wonder whether a seed set is
-coherent.
+from *neither* highly.
+
+It is tempting to read $\lVert \bar{\mathbf{e}}_S \rVert$ back out as a
+"seed coherence" diagnostic. **That was tried and it does not work**, for a
+reason worth knowing about the embedding space itself. Mean-pooled PubMedBERT
+vectors are strongly *anisotropic*: they occupy a narrow cone rather than
+spreading over the sphere. Measured on five deliberately unrelated papers — gut
+microbiome, HIV virology, urban blight, microglia, cervical cancer screening —
+
+| quantity | value |
+|---|---|
+| pairwise cosine between unrelated papers | 0.986 (range 0.983–0.991) |
+| $\lVert \bar{\mathbf{e}}_S \rVert$ for those five | **0.9945** |
+| the same, after removing the shared direction | −0.25 mean pairwise |
+
+About **99.5% of every unit document vector is one direction common to all
+biomedical text**, leaving roughly 10% that is about the paper. So the centroid
+norm reads ~0.99 whether the seeds share a topic or not, and cannot distinguish
+the two. Centring fixes the geometry — unrelated papers become correctly
+dissimilar — but centring a set on its own mean makes the mean pairwise cosine
+exactly $-1/(k-1)$, a function of $k$ alone, so a self-referential version
+carries no information either. A usable diagnostic would have to centre on an
+external background, and would need validating against seed sets of known
+coherence.
+
+The gate itself is unaffected, because it never uses absolute magnitudes — it
+ranks. But it is the reason step 3 insists the ranking, not the score, is the
+signal.
 
 ### Step 3 · Candidates are ranked by angle
 
@@ -417,10 +441,28 @@ worry — the ground truth is itself a reference list, which could flatter an ar
 that profiles on references — is the strongest, this is not an artefact.
 **`relevance_seeds` is what stage 2 now implements.**
 
-**Caveats.** 12 reviews for the gate comparisons, 40 for the asymmetry. Scoring
-used iCite titles, though the abstract re-run agreed. Ground truth is a reference
-list, which may favour backward-ish arms in general; a topic-labelled benchmark
-would be the independent check.
+**Confirmed at 40 reviews.** The gate comparisons above are 12 reviews; re-run
+on the 40-review set they hold and strengthen:
+
+| arm | median P | median R | median F1 | pooled P | beats `bfs` |
+|---|---|---|---|---|---|
+| `both` (= bfs) | 0.0218 | 0.2735 | 0.0393 | 0.83% | — |
+| `backward` | 0.0530 | 0.1667 | 0.0777 | 5.54% | — |
+| `relevance_seeds` K=50 | 0.0822 | 0.1139 | 0.0958 | **9.55%** | 35/40 |
+| `relevance_seeds` K=100 | 0.0665 | 0.2025 | **0.0971** | 7.18% | **38/40** |
+
+At K=100 the gate finds 455 of `bfs`'s 718 hits from 6,336 documents rather than
+86,155 — 63% of the findings on 7% of the material.
+
+K=50 and K=100 are effectively tied on quality and the two summary statistics
+disagree about which leads: K=100 has the better median F1 (0.0971 vs 0.0958)
+while K=50 wins the paired comparison (22 of 40 against 17). Read that as a
+precision/recall preference rather than a quality difference — K=100 wins recall
+in 36 of 40, K=50 wins precision in 33 of 40.
+
+**Caveats.** Scoring used iCite titles, though the abstract re-run agreed. Ground
+truth is a reference list, which may favour backward-ish arms in general; a
+topic-labelled benchmark would be the independent check.
 
 ### When it breaks
 

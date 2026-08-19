@@ -252,8 +252,22 @@ the usual $\lVert\mathbf{a}\rVert\lVert\mathbf{b}\rVert$ denominator is 1, so it
 disappears. A score of 1 means identical direction, 0 means unrelated.
 
 In practice biomedical abstracts all occupy broadly similar semantic space, so
-absolute values cluster high and mean little on their own. **The useful signal is
-the ranking**, which is why the cut in step 5 is a rank, not a threshold.
+absolute values cluster high and mean little on their own — measured across a
+real candidate pool, every raw cosine falls between 0.985 and 0.991. **The useful
+signal is the ranking**, which is why the cut in step 5 is a rank, not a
+threshold.
+
+That also makes the raw number useless to *report*. Every kept document carries a
+`relevance` score in its metadata, and a column of 0.98s tells a reader nothing.
+So the score written out is the **centred** one — the candidate pool's mean
+removed, which widens the spread about 30× into a readable range — while
+selection stays on the raw cosine that was benchmarked. Centring was measured not
+to improve retrieval (Spearman ρ ≈ 0.89 between the two orderings, 5/5 top-5
+overlap), so it is applied to the reported value only.
+
+One consequence worth knowing: kept documents are listed in *selection* order, so
+the reported scores are not monotonic down the list. Sort by `relevance`
+explicitly if you want them ordered by it.
 
 ### Step 4 · The gate learns what the topic is not
 

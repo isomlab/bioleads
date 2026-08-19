@@ -990,3 +990,73 @@ def test_centring_is_off_by_default_and_a_no_op_without_it(monkeypatch):
     a = _embedding_scores(profile, cands, Config(rocchio_gamma=0.0))
     b = _embedding_scores(profile, cands, Config(rocchio_gamma=0.0))
     assert a == b
+
+
+def test_reported_relevance_is_centred_but_selection_is_not(monkeypatch):
+    """Centring was measured not to improve retrieval, so it must not touch which
+    documents are kept — only the score written onto them, which is otherwise
+    ~0.99 for everything and unreadable."""
+    np = pytest.importorskip("numpy")
+    import bioleads.embeddings as emb_mod
+    from bioleads.expansion import _top_k_relevant, _embedding_scores
+
+    shared = np.array([10.0, 0.0, 0.0])
+    vecs = {
+        "seed": shared + np.array([0.0, 1.0, 0.0]),
+        "c0":   shared + np.array([0.0, 1.0, 0.0]),      # best match
+        "c1":   shared + np.array([0.0, 0.6, 0.4]),
+        "c2":   shared + np.array([0.0, 0.2, 0.8]),
+        "c3":   shared + np.array([0.0, 0.0, 1.0]),      # worst
+    }
+    monkeypatch.setattr(emb_mod, "embed_texts",
+                        lambda texts, cfg=None: np.vstack([vecs[t] for t in texts]))
+
+    def doc(k):
+        return Document(doc_id=k, text=k, source="pubmed", meta={"pmid": k})
+
+    profile = [doc("seed")]
+    cands = [doc(f"c{i}") for i in range(4)]
+    cfg = Config(rocchio_gamma=0.0, expand_top_k=2)
+
+    kept = _top_k_relevant(profile, cands, cfg)
+    raw = _embedding_scores(profile, cands, cfg)
+
+    # Selection matches what the raw scores would pick, in the same order.
+    picked = [d.doc_id for d, _ in kept]
+    assert picked == [d.doc_id for d, _ in
+                      sorted(zip(cands, raw), key=lambda t: t[1], reverse=True)[:2]]
+    assert picked == ["c0", "c1"]
+
+    # Raw cosines are crushed together near 1 — the reason for reporting
+    # something else at all.
+    assert min(raw) > 0.99, f"setup should produce saturated raw scores: {raw}"
+
+    # The reported score for each kept doc is exactly what centred scoring gives
+    # it, not its raw cosine.
+    centred = _embedding_scores(profile, cands,
+                                Config(rocchio_gamma=0.0, expand_top_k=2,
+                                       relevance_center=True))
+    by_id = {d.doc_id: c for d, c in zip(cands, centred)}
+    for doc_obj, score in kept:
+        assert score == pytest.approx(by_id[doc_obj.doc_id]), \
+            f"{doc_obj.doc_id}: reported {score} is not the centred score"
+    raw_by_id = {d.doc_id: r for d, r in zip(cands, raw)}
+    assert any(score != pytest.approx(raw_by_id[d.doc_id]) for d, score in kept), \
+        "reported scores are indistinguishable from the raw ones"
+
+
+def test_term_space_reports_its_own_scores(monkeypatch):
+    """The term fallback is not anisotropic, so there is nothing to centre."""
+    import bioleads.ner as ner_mod
+    from bioleads.expansion import _term_overlap_scores
+
+    ents = {"s": ["trpv1", "artery"], "a": ["trpv1", "artery"], "b": ["mitochondria"]}
+    monkeypatch.setattr(ner_mod, "extract_entities",
+                        lambda docs, cfg=None, **kw: {d.doc_id: ents[d.doc_id] for d in docs})
+
+    def doc(k):
+        return Document(doc_id=k, text=k, source="pubmed", meta={"pmid": k})
+
+    sel, rep = _term_overlap_scores([doc("s")], [doc("a"), doc("b")],
+                                    Config(rocchio_gamma=0.0), with_reported=True)
+    assert sel == rep

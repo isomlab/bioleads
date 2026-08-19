@@ -256,7 +256,11 @@ cosine** when the `embed` extra is installed. The profile is a **Rocchio query
 vector**: the centroid of the seed documents minus `rocchio_gamma` times the
 centroid of the worst-scoring candidates (set `rocchio_gamma=0` for a
 positive-only centroid). Every kept record is tagged with its direction
-(`forward`/`backward`) and its `relevance` score.
+(`forward`/`backward`) and its `relevance` score. That score is *centred* — the
+candidate pool's mean is removed before it is written — because raw cosines
+between biomedical abstracts all land near 0.99 and cannot be read. Selection
+still uses the raw cosine; centring was measured not to change which papers are
+kept, so it applies to the reported number only.
 
 `--expand-top-k` is the control that matters: it sets corpus size and
 cleanliness together. Swept against systematic reviews (12 reviews, full table

@@ -357,8 +357,11 @@ def test_harness_cutoff_matches_the_librarys_top_k(bench, monkeypatch):
     from bioleads.sources import Document
 
     scores = [0.1, 0.9, 0.5, 0.7]
-    monkeypatch.setattr(exp_mod, "_relevance_scores",
-                        lambda p, c, cfg, **kw: list(scores))
+    # _top_k_relevant asks for both selection and reporting scores in one call.
+    monkeypatch.setattr(
+        exp_mod, "_relevance_scores",
+        lambda p, c, cfg, **kw: ((list(scores), list(scores))
+                                 if kw.get("with_reported") else list(scores)))
 
     cands = [Document(doc_id=f"PMID:{i}", text="x", title="t", source="pubmed",
                       meta={"pmid": str(i)}) for i in (10, 11, 12, 13)]

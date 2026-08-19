@@ -114,24 +114,39 @@ def relevance_guided_expand(
 
 
 def _top_k_relevant(profile_docs, cand_docs, cfg, *, say=None):
-    """Score candidates against the profile, return [(doc, score)] for the top K."""
+    """Return [(doc, reported_score)] for the top K candidates.
+
+    Selection and reporting deliberately use different numbers. Ranking uses the
+    raw cosine, because that is what was benchmarked and centring was measured
+    not to improve it. The score attached to each kept document is the *centred*
+    one, because the raw cosines all sit around 0.99 and are useless to read —
+    see :func:`_embedding_scores`. Both come from one pass over the embeddings.
+    """
     if not cand_docs:
         return []
-    scores = _relevance_scores(profile_docs, cand_docs, cfg, say=say)
-    ranked = sorted(zip(cand_docs, scores), key=lambda ds: ds[1], reverse=True)
+    scores, reported = _relevance_scores(profile_docs, cand_docs, cfg, say=say,
+                                         with_reported=True)
+    ranked = sorted(zip(cand_docs, scores, reported),
+                    key=lambda t: t[1], reverse=True)
     k = cfg.expand_top_k
-    return ranked[:k] if k and k > 0 else ranked
+    top = ranked[:k] if k and k > 0 else ranked
+    return [(doc, rep) for doc, _sel, rep in top]
 
 
-def _relevance_scores(profile_docs, cand_docs, cfg, *, say=None) -> list[float]:
-    """Cosine of each candidate to the profile. Embeddings if available, else terms."""
+def _relevance_scores(profile_docs, cand_docs, cfg, *, say=None, with_reported=False):
+    """Cosine of each candidate to the profile. Embeddings if available, else terms.
+
+    With `with_reported`, returns ``(selection_scores, reported_scores)``; the
+    second is the centred, human-readable version of the first.
+    """
+    kw = {"say": say, "with_reported": with_reported}
     try:
-        return _embedding_scores(profile_docs, cand_docs, cfg, say=say)
+        return _embedding_scores(profile_docs, cand_docs, cfg, **kw)
     except ImportError:
-        return _term_overlap_scores(profile_docs, cand_docs, cfg, say=say)
+        return _term_overlap_scores(profile_docs, cand_docs, cfg, **kw)
     except Exception as exc:  # noqa: BLE001 - never let scoring sink the run
         warnings.warn(f"embedding relevance failed ({exc}); falling back to term overlap")
-        return _term_overlap_scores(profile_docs, cand_docs, cfg, say=say)
+        return _term_overlap_scores(profile_docs, cand_docs, cfg, **kw)
 
 
 def _pseudo_negative_idx(scores, cfg, *, top_k: int) -> list[int]:
@@ -157,8 +172,17 @@ def _pseudo_negative_idx(scores, cfg, *, top_k: int) -> list[int]:
     return sorted(range(n), key=lambda i: scores[i])[:n_neg]
 
 
-def _embedding_scores(profile_docs, cand_docs, cfg, *, say=None) -> list[float]:
-    """PubMedBERT cosine to the Rocchio query vector. ImportError if no embed extra."""
+def _embedding_scores(profile_docs, cand_docs, cfg, *, say=None, with_reported=False):
+    """PubMedBERT cosine to the Rocchio query vector. ImportError if no embed extra.
+
+    Raw cosines between biomedical abstracts are near-useless to read: ~99.5% of
+    every unit document vector is a direction shared by all such text, so every
+    score lands around 0.99 and a reader cannot tell a strong match from a weak
+    one. Removing the candidate pool's mean widens the spread ~60x without
+    meaningfully changing the ranking (Spearman rho ~0.89), which is why
+    centring is measured not to improve retrieval but is exactly what a reported
+    score should be. With `with_reported`, both are returned.
+    """
     import numpy as np
 
     from .embeddings import embed_texts  # ImportError here triggers the term fallback
@@ -183,22 +207,34 @@ def _embedding_scores(profile_docs, cand_docs, cfg, *, say=None) -> list[float]:
             say(f"  relevance: centred on the candidate-pool mean "
                 f"(‖mu‖={float(np.linalg.norm(mu)):.3f})")
 
-    q = _unit(P.mean(axis=0))
-    scores = C @ q
+    def _score(prof, cands):
+        """Profile centroid, Rocchio-corrected, applied to a candidate matrix."""
+        q = _unit(prof.mean(axis=0))
+        out = cands @ q
+        neg = _pseudo_negative_idx(out.tolist(), cfg, top_k=cfg.expand_top_k)
+        if neg:
+            q = _unit(q - cfg.rocchio_gamma * _unit(cands[neg].mean(axis=0)))
+            out = cands @ q
+        return out, neg
 
-    # Rocchio negative term. The candidates are embedded once and reused, so the
-    # second pass costs a matrix multiply, not another model call.
-    neg = _pseudo_negative_idx(scores.tolist(), cfg, top_k=cfg.expand_top_k)
-    if neg:
-        q = _unit(q - cfg.rocchio_gamma * _unit(C[neg].mean(axis=0)))
-        scores = C @ q
-        if say:
-            say(f"  relevance: subtracted a negative centroid from "
-                f"{len(neg)} low-scoring candidate(s) (gamma={cfg.rocchio_gamma})")
+    scores, neg = _score(P, C)
+    reported = scores
+    if with_reported and not cfg.relevance_center and len(C):
+        # Selection stays on the raw cosines that were benchmarked; the score
+        # written onto each kept document is centred so it can be read. Reuses
+        # the embeddings already computed, so this is two matrix multiplies.
+        mu = C.mean(axis=0)
+        reported, _ = _score(_unit_rows(P - mu), _unit_rows(C - mu))
+
+    if neg and say:
+        say(f"  relevance: subtracted a negative centroid from "
+            f"{len(neg)} low-scoring candidate(s) (gamma={cfg.rocchio_gamma})")
+    if with_reported:
+        return [float(x) for x in scores], [float(x) for x in reported]
     return [float(x) for x in scores]
 
 
-def _term_overlap_scores(profile_docs, cand_docs, cfg, *, say=None) -> list[float]:
+def _term_overlap_scores(profile_docs, cand_docs, cfg, *, say=None, with_reported=False):
     """Cosine between the Rocchio term vector and each candidate's term set."""
     from .ner import extract_entities
 
@@ -237,4 +273,6 @@ def _term_overlap_scores(profile_docs, cand_docs, cfg, *, say=None) -> list[floa
         if say:
             say(f"  relevance: subtracted a negative centroid from "
                 f"{len(neg)} low-scoring candidate(s) (gamma={cfg.rocchio_gamma})")
-    return scores
+    # Term-space cosines already span a usable range, so there is nothing to
+    # correct: the reported score is the selection score.
+    return (scores, list(scores)) if with_reported else scores

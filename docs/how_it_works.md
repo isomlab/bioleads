@@ -259,9 +259,16 @@ That also makes the raw number useless to *report*. Every kept document carries 
 `relevance` score in its metadata, and a column of 0.98s tells a reader nothing.
 So the score written out is the **centred** one — the candidate pool's mean
 removed, which widens the spread about 30× into a readable range — while
-selection stays on the raw cosine that was benchmarked. Centring was measured not
-to improve retrieval (Spearman ρ ≈ 0.89 between the two orderings, 5/5 top-5
-overlap), so it is applied to the reported value only.
+selection stays on the raw cosine that was benchmarked.
+
+Centring was tested for selection too, and does not help. Over 40 reviews it
+loses on median F1 at both cutoffs (K=50: 0.0958 → 0.0891; K=100: 0.0971 →
+0.0868) and on the paired comparison (23–16 at K=50, 19–18 at K=100), while
+finding the same number of true papers — 308 either way at K=50. The reason is
+mechanical: centring changes the *spread* of the scores about 30× but barely
+their *order* (Spearman ρ ≈ 0.89, 5/5 overlap in the top 5), and a rank cutoff
+only reads order. So it is applied to the reported value only, where a readable
+range is exactly what is wanted.
 
 So the two numbers do different jobs: the raw cosine decides *which* documents
 survive, and the centred one is what you read — and what the kept list is

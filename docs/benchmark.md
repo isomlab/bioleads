@@ -139,6 +139,31 @@ Reading it:
   precision, retrieving 93–96% less.
 - Pick K by what stage 6 needs, not by F1.
 
+## Centring the embeddings
+
+~99.5% of every mean-pooled PubMedBERT vector is a direction shared by all
+biomedical text, so the gate ranks on the ~10% that remains. `cfg.relevance_center`
+removes the candidate pool's mean before scoring; the `..._centred` arms measure
+whether that helps.
+
+It does not. Over 40 reviews:
+
+| arm | median P | median R | median F1 | retrieved | hits | pooled P |
+|---|---|---|---|---|---|---|
+| `relevance_seeds` K=50 | 0.0822 | 0.1139 | **0.0958** | 3,225 | 308 | 9.55% |
+| `relevance_seeds_centred` K=50 | 0.0777 | 0.1306 | 0.0891 | 3,308 | 308 | 9.31% |
+| `relevance_seeds` K=100 | 0.0665 | 0.2025 | **0.0971** | 6,336 | 455 | 7.18% |
+| `relevance_seeds_centred` K=100 | 0.0670 | 0.2014 | 0.0868 | 6,512 | 471 | 7.23% |
+
+Plain wins the paired F1 comparison 23–16 at K=50 and 19–18 at K=100, and finds
+the identical number of true papers at K=50. The mechanism is that centring
+widens the score spread ~30× while barely reordering (Spearman ρ ≈ 0.89, 5/5
+top-5 overlap), and a top-K cutoff reads only order.
+
+So `relevance_center` stays off for selection. Centring *is* used for the
+`relevance` score written onto each kept document, where raw cosines all land
+near 0.99 and cannot be read.
+
 If you re-run and get a different answer, the parameters that matter most are
 `--seeds` (fewer seeds means a narrower profile), `--min-refs`, and whether the
 year cutoff is on — check those before concluding the earlier run was wrong.

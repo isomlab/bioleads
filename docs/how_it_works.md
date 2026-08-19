@@ -221,12 +221,12 @@ use 1024 or more and are correspondingly slower; smaller ones lose accuracy. For
 our purposes 768 is simply a fixed, inherited constant, and no individual one of
 those numbers means anything on its own — only the whole pattern does.
 
-**What a layer and a head actually are.** A **layer** is one round of the same
-operation: every token looks at every other token in the sentence and rewrites
-itself in light of what it sees. Twelve layers means twelve rounds — and because
-each round starts from the last one's output, a token can end up influenced by a
-word it never looked at directly, reached through whatever the layer below
-already folded in.
+**What a layer and a head actually are.** A **layer** has two halves. In the
+first, every token looks at every other token in the sentence — that is
+attention, and it is the *only* place tokens see each other. In the second, a
+small network called a **feed-forward** transforms each token entirely on its
+own, reading nothing else; it is four times wider inside than the vector it
+works on (768 → 3072 → 768) and holds most of the model's parameters.
 
 "Looks at" has a precise meaning. Each token distributes one unit of **attention**
 across the sentence, and the resulting weights decide how much of each other
@@ -293,6 +293,24 @@ is not twelve experts with twelve labelled specialities, but a large pool of
 cheap, partly-redundant pattern detectors of which a minority matter for any given
 sentence.
 
+**And "rewritten" means added to, not replaced.** Neither half overwrites the
+vector. Each computes a *correction* and adds it to what was already there — a
+residual connection — with a rescaling step (LayerNorm) after each addition to
+keep the numbers in a workable range.
+
+![Figure 6 — what "rewritten" actually means](figures/06-one-layer.svg)
+
+Measured on `muscle` at layer 3: the vector arrives with length 15.9, attention
+contributes a correction 29% that size, the feed-forward then contributes another
+23%, and the vector leaves at a cosine of **0.941** to the one that entered. One
+layer nudges; it does not replace. Twelve layers means **twenty-four** such
+corrections in sequence, which is how the token can travel from 1.00 to 0.403
+against its starting point without any single step discarding what was there.
+
+That also settles what a token can be influenced by: because each round starts
+from the last one's output, a word can affect a token it never directly attended
+to, reached through whatever the layer below folded in.
+
 **Averaging the tokens.** The gate needs *one* vector per paper, and what we have
 is one per token, so they are averaged — the simplest way to combine them, and the
 one bioleads uses. "Real tokens" in the equation below means the actual words:
@@ -319,7 +337,7 @@ nothing downstream should be read as doing that.
 The average is finally scaled to length 1 so only its *direction* matters.
 That is the whole of step 1:
 
-![Figure 6 — the whole of step 1, end to end](figures/06-tokens-to-vector.svg)
+![Figure 7 — the whole of step 1, end to end](figures/07-tokens-to-vector.svg)
 
 Now the formal version of exactly that picture. PubMedBERT emits a vector
 $\mathbf{h}_t$ per token, and bioleads averages the *real* tokens — skipping the
@@ -355,7 +373,7 @@ because it quietly measures how much the seeds agree. Averaging unit arrows that
 point the same way barely shortens them; averaging arrows that disagree produces
 something much shorter, pointing between them.
 
-![Figure 7 — seeds that agree give a long average; seeds that disagree give a short one](figures/07-seed-direction.svg)
+![Figure 8 — seeds that agree give a long average; seeds that disagree give a short one](figures/08-seed-direction.svg)
 
 This is the geometry behind the documented failure mode: a seed set covering two
 subjects averages to a direction in the gap between them, and can rank papers
@@ -392,7 +410,7 @@ signal.
 
 A candidate belongs if its arrow points nearly the same way as the topic arrow.
 
-![Figure 8 — candidates scored by the angle they make with the topic](figures/08-scoring-by-angle.svg)
+![Figure 9 — candidates scored by the angle they make with the topic](figures/09-scoring-by-angle.svg)
 
 $$s_c \;=\; \hat{\mathbf{e}}_c \cdot \mathbf{q}_0 \;=\; \cos\theta_c \;\in\; [-1, 1]$$
 
@@ -409,7 +427,7 @@ real candidate pool, every raw cosine falls between 0.985 and 0.991.
 It is worth seeing *why*, because it looks like a bug and is not. Of the 768
 numbers, **one is very nearly the same for every text there is**:
 
-![Figure 9 — one dimension holds about the same value for every text](figures/09-shared-direction.svg)
+![Figure 10 — one dimension holds about the same value for every text](figures/10-shared-direction.svg)
 
 Dimension 424 sits at roughly −0.96 for a TRPV1 paper, a wheat-fertiliser paper,
 a microglia paper, and the sentence "the cat sat on the mat" alike, and accounts
@@ -449,7 +467,7 @@ papers use that vocabulary too. No amount of aiming at the topic separates them.
 So the gate also learns from its own worst matches. Take the lowest-scoring
 candidates, average them into a direction, and tilt the topic vector away from it:
 
-![Figure 10 — the negative term rotates the query vector away from the worst candidates](figures/10-negative-term.svg)
+![Figure 11 — the negative term rotates the query vector away from the worst candidates](figures/11-negative-term.svg)
 
 $$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
 
@@ -496,7 +514,7 @@ the corpus gets.
 
 Benchmarked, precision falls and recall rises as $K$ grows (12 reviews):
 
-![Figure 11 — precision falls and recall rises as K grows](figures/11-top-k-tradeoff.svg)
+![Figure 12 — precision falls and recall rises as K grows](figures/12-top-k-tradeoff.svg)
 
 The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
 recall of unfiltered snowballing, 0.3252, on 87% less material.** The recall gap

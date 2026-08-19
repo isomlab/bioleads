@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import os
+import pathlib
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "docs", "figures")
 
@@ -259,6 +260,84 @@ def fig_map(n=1):
                   "whose arrows", 12, INK))
     b.append(text(24, 1008, "point most nearly the same way.", 12, INK))
     return svg(W, H, "".join(b), "The pieces and how they fit together")
+
+
+# --------------------------------------------------------------------------- #
+# 5b. What one layer does to a vector
+# --------------------------------------------------------------------------- #
+def fig_layer(n=1):
+    """“Rewritten” means a correction is computed and added — twice per layer."""
+    W, H = 880, 470
+    b = [text(24, 30, f"{n} · What “rewritten” actually means", 15, INK, weight="600")]
+    b.append(text(24, 56, "One layer, one token. Nothing is replaced: each half "
+                  "works out a correction and adds it to what came in.", 12, MUTED))
+
+    ytop = 96
+    def vec(x, y, k, col, op=0.75, w=6):
+        return "".join(f"<rect x='{x + i * (w + 1.5)}' y='{y}' width='{w}' "
+                       f"height='18' rx='1' fill='{col}' opacity='{op}'/>"
+                       for i in range(k))
+
+    # in
+    b.append(text(28, ytop, "the token", 11.5, INK, weight="600"))
+    b.append(vec(28, ytop + 10, 10, GREEN))
+    b.append(text(28, ytop + 46, "length 15.9", 10.5, MUTED, mono=True))
+
+    # attention half
+    b.append(box(140, ytop - 16, 190, 108, fill="#e8eefb", stroke="#c3d3f2"))
+    b.append(text(235, ytop + 4, "ATTENTION", 11.5, BLUE, "middle", weight="600"))
+    b.append(text(235, ytop + 22, "the twelve heads", 10.5, MUTED, "middle"))
+    b.append(text(235, ytop + 38, "looks at the other", 10.5, INK, "middle"))
+    b.append(text(235, ytop + 54, "tokens in the sentence", 10.5, INK, "middle"))
+    b.append(text(235, ytop + 76, "→ a correction, 29% as big", 10, BLUE, "middle"))
+
+    b.append(text(352, ytop + 30, "⊕", 20, INK, "middle"))
+    b.append(text(352, ytop + 50, "add", 10, MUTED, "middle"))
+    b.append(text(352, ytop + 64, "+ rescale", 10, MUTED, "middle"))
+
+    # feed-forward half
+    b.append(box(384, ytop - 16, 210, 108, fill="#eef7f1", stroke="#b7dfc6"))
+    b.append(text(489, ytop + 4, "FEED-FORWARD", 11.5, GREEN, "middle", weight="600"))
+    b.append(text(489, ytop + 22, "768 → 3072 → 768", 10.5, MUTED, "middle", mono=True))
+    b.append(text(489, ytop + 38, "this token only —", 10.5, INK, "middle"))
+    b.append(text(489, ytop + 54, "no other token is read", 10.5, INK, "middle"))
+    b.append(text(489, ytop + 76, "→ a correction, 23% of it", 10, GREEN, "middle"))
+
+    b.append(text(616, ytop + 30, "⊕", 20, INK, "middle"))
+    b.append(text(616, ytop + 50, "add", 10, MUTED, "middle"))
+    b.append(text(616, ytop + 64, "+ rescale", 10, MUTED, "middle"))
+
+    # out
+    b.append(text(652, ytop, "the same token,", 11.5, INK, weight="600"))
+    b.append(text(652, ytop + 16, "nudged", 11.5, INK, weight="600"))
+    b.append(vec(652, ytop + 26, 10, GREEN, 0.95))
+    b.append(text(652, ytop + 62, "cosine 0.941 to what came in", 10.5, MUTED))
+
+    for x1, x2 in ((116, 138), (332, 346), (360, 382), (598, 612), (626, 648)):
+        b.append(arrow(x1, ytop + 30, x2, ytop + 30, MUTED, 1.6))
+
+    b.append(box(24, 228, W - 48, 92, fill="#fff6e5", stroke="#f0d9a8"))
+    b.append(text(40, 252, "“Rewritten” means added to, not replaced.", 12.5, INK,
+                  weight="600"))
+    b.append(text(40, 274, "Each half computes a correction and adds it to the vector "
+                  "already there — which is why one layer only moves it from", 12, MUTED))
+    b.append(text(40, 292, "1.00 to 0.94, and why twelve of them can move it a long "
+                  "way without ever discarding what was there.", 12, MUTED))
+    b.append(text(40, 310, "Twelve layers means twenty-four of these corrections in "
+                  "sequence.", 12, MUTED))
+
+    b.append(line(24, 344, W - 24, 344, GRID, 1))
+    b.append(text(24, 366, "The two halves do different jobs. Attention is the only "
+                  "place tokens see each other; the feed-forward looks at one token "
+                  "in", 12, INK))
+    b.append(text(24, 384, "isolation and is where most of the model’s parameters "
+                  "live — it is four times wider inside than the vector it "
+                  "transforms.", 12, MUTED))
+    b.append(text(24, 414, "Both halves end with a rescale (LayerNorm) that keeps the "
+                  "numbers in a workable range, which is why its length stays near 16 "
+                  "rather than", 12, MUTED))
+    b.append(text(24, 432, "growing at every step.", 12, MUTED))
+    return svg(W, H, "".join(b), "What rewritten actually means")
 
 
 # --------------------------------------------------------------------------- #
@@ -854,6 +933,7 @@ ORDER = [
     ("token-in-context", fig_context),
     ("head-mechanics", fig_head_mechanics),   # what a head is…
     ("layers-and-heads", fig_heads),          # …then what all 144 of them do
+    ("one-layer", fig_layer),                 # …then the layer around them
     ("tokens-to-vector", fig_tokens),   # the recap, after all five steps are told
     ("seed-direction", fig_centroid),
     ("scoring-by-angle", fig_angle),
@@ -864,8 +944,18 @@ ORDER = [
 
 
 def main():
+    """Regenerate every figure, and delete any that ORDER no longer names.
+
+    Renumbering leaves the previous filenames behind, which then sit in the repo
+    unreferenced; sweeping here means the directory always matches ORDER exactly.
+    """
+    wanted = {f"{i:02d}-{stem}.svg" for i, (stem, _) in enumerate(ORDER, start=1)}
     for i, (stem, build) in enumerate(ORDER, start=1):
         write(f"{i:02d}-{stem}.svg", build(i))
+    for path in sorted(pathlib.Path(OUT).glob("*.svg")):
+        if path.name not in wanted:
+            path.unlink()
+            print(f"removed stale {path.name}")
 
 
 if __name__ == "__main__":

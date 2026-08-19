@@ -91,11 +91,21 @@ PMC full text · Max records (caps how many hits a query fetches, default 500).
 the citation graph outward, and appends what it finds. Local PDFs without a PMID
 can't seed this — there is nothing to follow.
 
+Before any of the mechanism, a map of the vocabulary. Everything in this stage is
+one idea — a list of numbers — used at four sizes, and every term below names a
+different size of it.
+
+![Figure 1 — the pieces, and how they fit together](figures/01-map.svg)
+
+The middle band is the language model. bioleads does not touch it: it is used
+as-is and only ever asked for one thing, a vector per paper. Every decision this
+stage makes happens in the bottom band.
+
 ### The problem
 
 Every seed sits between two very different sets of papers.
 
-![Figure 1 — the two citation directions, drawn to scale](figures/01-two-directions.svg)
+![Figure 2 — the two citation directions, drawn to scale](figures/02-two-directions.svg)
 
 Those counts are measured, not illustrative: across the systematic-review seed
 sets in [the benchmark](benchmark.md), one round backward yielded 2,342 papers
@@ -167,7 +177,7 @@ in "arterial smooth muscle" and "he lost muscle mass". That is the problem the
 twelve transformer layers exist to solve. In each layer, every token looks at
 every other token and is rewritten in light of them, twelve times over.
 
-![Figure 2 — the stored numbers are only a starting point](figures/02-token-in-context.svg)
+![Figure 3 — the stored numbers are only a starting point](figures/03-token-in-context.svg)
 
 It is worth seeing how violent that rewrite is. Following the single token
 `muscle` through the model:
@@ -225,7 +235,7 @@ to keep the numbers in a range where the next step behaves, and softmaxes the
 results into weights that sum to 1. Its answer is then the weighted sum of the
 *values* — 64 numbers.
 
-![Figure 3 — what one head actually computes](figures/03-head-mechanics.svg)
+![Figure 4 — what one head actually computes](figures/04-head-mechanics.svg)
 
 For `muscle` in layer 1 head 8, the key for `smooth` scores **23.95** against that
 query and the next best scores 16.31. After the softmax that gap of 7.6 becomes
@@ -242,7 +252,7 @@ slice performs. Nothing more concrete than that exists to point at. (The account
 above is not a paraphrase: recomputing this head by hand from the raw weight
 matrices reproduces the model's own attention to 3 × 10⁻⁷.)
 
-![Figure 4 — inside a layer: twelve heads, each reading the sentence differently](figures/04-layers-and-heads.svg)
+![Figure 5 — inside a layer: twelve heads, each reading the sentence differently](figures/05-layers-and-heads.svg)
 
 Heads do specialise, and some are strikingly literal. Layer 1 head 8 gives 0.999
 of `muscle`'s attention to `smooth`, the word immediately before it — and it does
@@ -291,7 +301,7 @@ nothing downstream should be read as doing that.
 The average is finally scaled to length 1 so only its *direction* matters.
 That is the whole of step 1:
 
-![Figure 5 — the whole of step 1, end to end](figures/05-tokens-to-vector.svg)
+![Figure 6 — the whole of step 1, end to end](figures/06-tokens-to-vector.svg)
 
 Now the formal version of exactly that picture. PubMedBERT emits a vector
 $\mathbf{h}_t$ per token, and bioleads averages the *real* tokens — skipping the
@@ -327,7 +337,7 @@ because it quietly measures how much the seeds agree. Averaging unit arrows that
 point the same way barely shortens them; averaging arrows that disagree produces
 something much shorter, pointing between them.
 
-![Figure 6 — seeds that agree give a long average; seeds that disagree give a short one](figures/06-seed-direction.svg)
+![Figure 7 — seeds that agree give a long average; seeds that disagree give a short one](figures/07-seed-direction.svg)
 
 This is the geometry behind the documented failure mode: a seed set covering two
 subjects averages to a direction in the gap between them, and can rank papers
@@ -364,7 +374,7 @@ signal.
 
 A candidate belongs if its arrow points nearly the same way as the topic arrow.
 
-![Figure 7 — candidates scored by the angle they make with the topic](figures/07-scoring-by-angle.svg)
+![Figure 8 — candidates scored by the angle they make with the topic](figures/08-scoring-by-angle.svg)
 
 $$s_c \;=\; \hat{\mathbf{e}}_c \cdot \mathbf{q}_0 \;=\; \cos\theta_c \;\in\; [-1, 1]$$
 
@@ -381,7 +391,7 @@ real candidate pool, every raw cosine falls between 0.985 and 0.991.
 It is worth seeing *why*, because it looks like a bug and is not. Of the 768
 numbers, **one is very nearly the same for every text there is**:
 
-![Figure 8 — one dimension holds about the same value for every text](figures/08-shared-direction.svg)
+![Figure 9 — one dimension holds about the same value for every text](figures/09-shared-direction.svg)
 
 Dimension 424 sits at roughly −0.96 for a TRPV1 paper, a wheat-fertiliser paper,
 a microglia paper, and the sentence "the cat sat on the mat" alike, and accounts
@@ -421,7 +431,7 @@ papers use that vocabulary too. No amount of aiming at the topic separates them.
 So the gate also learns from its own worst matches. Take the lowest-scoring
 candidates, average them into a direction, and tilt the topic vector away from it:
 
-![Figure 9 — the negative term rotates the query vector away from the worst candidates](figures/09-negative-term.svg)
+![Figure 10 — the negative term rotates the query vector away from the worst candidates](figures/10-negative-term.svg)
 
 $$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
 
@@ -468,7 +478,7 @@ the corpus gets.
 
 Benchmarked, precision falls and recall rises as $K$ grows (12 reviews):
 
-![Figure 10 — precision falls and recall rises as K grows](figures/10-top-k-tradeoff.svg)
+![Figure 11 — precision falls and recall rises as K grows](figures/11-top-k-tradeoff.svg)
 
 The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
 recall of unfiltered snowballing, 0.3252, on 87% less material.** The recall gap

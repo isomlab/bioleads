@@ -83,6 +83,124 @@ def write(name, content):
 
 
 # --------------------------------------------------------------------------- #
+# 0. The map: how the pieces nest
+# --------------------------------------------------------------------------- #
+def fig_map(n=1):
+    """Orientation figure — every term in this section, and how they compose."""
+    W, H = 880, 700
+    b = [text(24, 30, f"{n} · The pieces, and how they fit together", 15, INK,
+              weight="600")]
+    b.append(text(24, 56, "Everything in this stage is built from one idea — a list "
+                  "of numbers — repeated at four sizes.", 12, MUTED))
+
+    # ---- band 1: the atom ---------------------------------------------------
+    b.append(text(24, 92, "THE ATOM", 10.5, MUTED, weight="600"))
+    b.append(box(24, 102, 520, 76, fill="#ffffff"))
+    b.append(text(40, 124, "a vector", 13, BLUE, weight="600"))
+    b.append(text(110, 124, "— a fixed-length list of numbers", 12, INK))
+    for i in range(24):
+        v = 0.25 + 0.75 * abs(math.sin(i * 1.7))
+        b.append(f"<rect x='{40 + i * 13}' y='{136}' width='11' height='16' rx='2' "
+                 f"fill='{BLUE}' opacity='{v:.2f}'/>")
+    b.append(text(360, 149, "… 768 of them", 11, MUTED, mono=True))
+    b.append(text(40, 170, "Its *direction* carries the meaning; its length is thrown "
+                  "away.", 11, MUTED))
+    b.append(text(560, 124, "Two vectors are compared by the", 11.5, MUTED))
+    b.append(text(560, 141, "angle between them — that single", 11.5, MUTED))
+    b.append(text(560, 158, "number is the whole relevance gate.", 11.5, MUTED))
+
+    # ---- band 2: inside the model -------------------------------------------
+    b.append(text(24, 214, "WHERE VECTORS COME FROM — inside PubMedBERT", 10.5, MUTED,
+                  weight="600"))
+    b.append(box(24, 224, W - 48, 176, fill="#ffffff"))
+
+    b.append(text(44, 250, "word piece", 11.5, INK, weight="600"))
+    b.append(box(44, 258, 96, 24, fill=CARD))
+    b.append(text(92, 274, "muscle", 11, INK, "middle", mono=True))
+    b.append(text(44, 300, "row 3760 of a", 10.5, MUTED))
+    b.append(text(44, 314, "30,522-word list", 10.5, MUTED))
+    b.append(arrow(148, 270, 186, 270, MUTED, 1.8))
+
+    b.append(text(196, 250, "its stored vector", 11.5, INK, weight="600"))
+    for i in range(12):
+        b.append(f"<rect x='{196 + i * 9}' y='258' width='7' height='24' rx='1.5' "
+                 f"fill='{MUTED}' opacity='0.45'/>")
+    b.append(text(196, 300, "the same in every", 10.5, MUTED))
+    b.append(text(196, 314, "sentence ever written", 10.5, MUTED))
+    b.append(arrow(316, 270, 354, 270, MUTED, 1.8))
+
+    # the nesting: head -> layer -> model
+    b.append(box(364, 240, 300, 132, fill="#f4f7fd", stroke="#c3d3f2"))
+    b.append(text(374, 258, "the model — 12 layers, stacked", 11.5, BLUE,
+                  weight="600"))
+    b.append(box(374, 266, 280, 96, fill="#e8eefb", stroke="#c3d3f2"))
+    b.append(text(384, 284, "one layer — 12 heads, side by side", 11, BLUE))
+    for i in range(12):
+        w = 20
+        b.append(f"<rect x='{384 + i * 22}' y='294' width='{w}' height='40' rx='3' "
+                 f"fill='{BLUE}' opacity='{0.5 if i != 3 else 0.95}'/>")
+    b.append(text(384, 350, "one head — a 64-wide slice; 12 × 64 = 768", 10.5, MUTED))
+    b.append(arrow(672, 300, 706, 300, MUTED, 1.8))
+
+    b.append(text(716, 250, "the token, in", 11.5, INK, weight="600"))
+    b.append(text(716, 266, "this sentence", 11.5, INK, weight="600"))
+    for i in range(12):
+        v = 0.3 + 0.7 * abs(math.sin(i * 2.3))
+        b.append(f"<rect x='{716 + i * 9}' y='276' width='7' height='24' rx='1.5' "
+                 f"fill='{GREEN}' opacity='{v:.2f}'/>")
+    b.append(text(716, 318, "rewritten twelve", 10.5, MUTED))
+    b.append(text(716, 332, "times over", 10.5, MUTED))
+
+    # ---- band 3: what bioleads does -----------------------------------------
+    b.append(text(24, 436, "WHAT bioleads DOES WITH THEM", 10.5, MUTED, weight="600"))
+    b.append(box(24, 446, W - 48, 174, fill="#ffffff"))
+
+    def stack(x, y, k, col, lab, sub):
+        out = []
+        for r in range(k):
+            for i in range(10):
+                v = 0.25 + 0.7 * abs(math.sin((i + r * 3) * 1.9))
+                out.append(f"<rect x='{x + i * 8}' y='{y + r * 11}' width='6.5' "
+                           f"height='8' rx='1' fill='{col}' opacity='{v:.2f}'/>")
+        out.append(text(x, y + k * 11 + 16, lab, 11.5, INK, weight="600"))
+        out.append(text(x, y + k * 11 + 32, sub, 10.5, MUTED))
+        return "".join(out)
+
+    b.append(text(48, 466, "↑ the vectors the model just produced", 10, GREEN))
+    b.append(stack(48, 472, 4, GREEN, "every token", "in one paper"))
+    b.append(arrow(148, 496, 186, 496, MUTED, 1.8))
+    b.append(text(196, 480, "average", 11, INK, weight="600"))
+    b.append(stack(196, 492, 1, GREEN, "one paper", "= one vector, length 1"))
+    b.append(arrow(300, 496, 338, 496, MUTED, 1.8))
+    b.append(text(319, 476, "repeat for", 9.5, MUTED, "middle"))
+    b.append(text(319, 487, "every paper", 9.5, MUTED, "middle"))
+
+    b.append(stack(348, 472, 4, BLUE, "your seed papers", "the ones you chose"))
+    b.append(arrow(448, 496, 486, 496, MUTED, 1.8))
+    b.append(text(496, 480, "average", 11, INK, weight="600"))
+    b.append(stack(496, 492, 1, BLUE, "the topic", "one direction to aim at"))
+    b.append(arrow(600, 496, 638, 496, MUTED, 1.8))
+
+    b.append(box(648, 466, 208, 92, fill="#eaf1fb", stroke="#c3d3f2"))
+    b.append(text(662, 488, "the angle between", 11.5, INK, weight="600"))
+    b.append(text(662, 506, "a candidate and the topic", 11.5, INK))
+    b.append(text(662, 528, "→ rank all candidates", 11, GREEN))
+    b.append(text(662, 546, "→ keep the top K", 11, GREEN, weight="600"))
+
+    b.append(text(48, 580, "Steps 1–5 below walk this left to right. Everything "
+                  "after — the seed profile, the negative correction, the cut — "
+                  "happens in the third band,", 12, MUTED))
+    b.append(text(48, 598, "and never touches the machinery in the second.", 12, MUTED))
+
+    b.append(line(24, 640, W - 24, 640, GRID, 1))
+    b.append(text(24, 662, "One sentence for the whole stage: turn every paper into "
+                  "one arrow, point an arrow at your topic, and keep the papers "
+                  "whose arrows", 12, INK))
+    b.append(text(24, 682, "point most nearly the same way.", 12, INK))
+    return svg(W, H, "".join(b), "The pieces and how they fit together")
+
+
+# --------------------------------------------------------------------------- #
 # 1. A sentence becomes one vector
 # --------------------------------------------------------------------------- #
 def fig_tokens(n=1):
@@ -670,6 +788,7 @@ def fig_directions(n=1):
 # figure comes from this list, so the two can never disagree — reorder here and
 # the captions follow.
 ORDER = [
+    ("map", fig_map),
     ("two-directions", fig_directions),
     ("token-in-context", fig_context),
     ("head-mechanics", fig_head_mechanics),   # what a head is…

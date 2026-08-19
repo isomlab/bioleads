@@ -221,28 +221,28 @@ TOKENS = ["[CLS]", "trpv1", "mediates", "vasodilation", "in", "arterial",
 MUSCLE_L1H8 = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.999, 0.0, 0.0, 0.0]
 ARTERIAL_L3H3 = [0.011, 0.002, 0.002, 0.615, 0.01, 0.2, 0.126, 0.013, 0.014, 0.008]
 DELIM_FRAC = [
-    [.26,.43,.43,.41,.35,.46,.46,.34,.30,.59,.35,.50],
-    [.67,.75,.74,.52,.49,.84,.73,.68,.29,.52,.92,.57],
-    [.68,.67,.63,.80,.69,.64,.50,.67,.80,.66,.61,.61],
-    [.61,.67,.46,.40,.57,.63,.79,.57,.82,.45,.73,.46],
-    [.78,.61,.50,.67,.53,.59,.79,.73,.49,.66,.69,.72],
-    [.32,.56,.66,.74,.82,.34,.59,.46,.33,.28,.57,.57],
-    [.36,.39,.58,.19,.57,.38,.55,.50,.55,.36,.50,.26],
-    [.85,.77,.85,.53,.66,.41,.77,.94,.64,.83,.59,.70],
-    [.73,.63,.94,.63,.75,.70,.82,.63,.64,.92,.91,.58],
-    [.95,.70,.80,.88,.68,.78,.70,.91,.68,.89,.80,.69],
-    [.93,.96,.81,.66,.92,.88,.84,.74,.77,.78,.80,.98],
-    [.73,.79,.73,.69,.60,.72,.70,.55,.73,.77,.72,.52],
+    [0.27,0.46,0.41,0.24,0.37,0.46,0.30,0.28,0.21,0.50,0.24,0.46],
+    [0.61,0.75,0.76,0.42,0.36,0.85,0.71,0.70,0.15,0.45,0.91,0.52],
+    [0.61,0.65,0.57,0.82,0.67,0.62,0.38,0.69,0.77,0.61,0.52,0.52],
+    [0.57,0.73,0.44,0.26,0.59,0.58,0.73,0.49,0.86,0.42,0.74,0.36],
+    [0.77,0.58,0.55,0.70,0.47,0.49,0.80,0.74,0.46,0.64,0.63,0.72],
+    [0.27,0.59,0.64,0.81,0.85,0.23,0.58,0.45,0.24,0.14,0.56,0.54],
+    [0.15,0.14,0.53,0.14,0.48,0.32,0.52,0.43,0.63,0.31,0.53,0.27],
+    [0.80,0.73,0.85,0.45,0.61,0.20,0.77,0.94,0.59,0.81,0.45,0.70],
+    [0.68,0.58,0.94,0.53,0.67,0.67,0.80,0.51,0.61,0.91,0.91,0.43],
+    [0.94,0.66,0.75,0.85,0.67,0.71,0.65,0.88,0.57,0.87,0.76,0.74],
+    [0.93,0.95,0.77,0.58,0.89,0.88,0.85,0.74,0.74,0.76,0.82,0.99],
+    [0.85,0.83,0.80,0.75,0.70,0.80,0.70,0.51,0.80,0.81,0.72,0.56],
 ]
 
 
 def fig_heads(n=1):
-    """One layer, twelve heads: what they actually attend to."""
-    W, H = 880, 470
-    b = [text(24, 30, f"{n} · Inside a layer: twelve heads, each reading the "
+    """Twelve heads per layer, twelve layers: what they actually attend to."""
+    W, H = 880, 556
+    b = [text(24, 30, f"{n} · Every layer has twelve heads, each reading the "
               f"sentence differently", 15, INK, weight="600")]
-    b.append(text(24, 56, "Real attention weights for the sentence above. Each row "
-                  "sums to 1 — a head spreads one unit of attention.", 12, MUTED))
+    b.append(text(24, 56, "Left: two single heads, and how one word divides its "
+                  "attention across the sentence — those bars sum to 1.", 12, MUTED))
 
     def panel(x0, y0, weights, focus, title, sub, col):
         out = [text(x0, y0, title, 12.5, INK, weight="600"),
@@ -265,33 +265,44 @@ def fig_heads(n=1):
                    "reaches across the sentence to a related word", GREEN))
 
     # the 12x12 grid
-    gx, gy, c = 692, 132, 12.5
-    b.append(text(gx, 92, "all 144 heads", 12.5, INK, weight="600"))
-    b.append(text(gx, 108, "darker = ignores the words and", 10.5, MUTED))
-    b.append(text(gx, 122, "parks on punctuation instead", 10.5, MUTED))
+    gx, gy, c = 706, 138, 12.5
+    b.append(text(gx - 34, 92, "12 layers × 12 heads each = 144", 12.5, INK,
+                  weight="600"))
+    b.append(text(gx - 34, 108, "one square per head. darker = it ignores", 10.5, MUTED))
+    b.append(text(gx - 34, 121, "the words and parks on punctuation.", 10.5, MUTED))
     for L, row in enumerate(DELIM_FRAC):
         for Hd, v in enumerate(row):
             op = 0.10 + 0.85 * v
             b.append(f"<rect x='{gx+Hd*c:.1f}' y='{gy+L*c:.1f}' width='{c-1.6:.1f}' "
                      f"height='{c-1.6:.1f}' fill='{RED}' opacity='{op:.2f}'/>")
-    b.append(text(gx - 8, gy + 6 * c + 4, "layers", 10.5, MUTED, "end"))
-    b.append(text(gx + 6 * c, gy + 12 * c + 16, "heads", 10.5, MUTED, "middle"))
+    for k in (0, 5, 11):
+        b.append(text(gx - 6, gy + k * c + 9, str(k + 1), 9, MUTED, "end", mono=True))
+        b.append(text(gx + k * c + 5.5, gy + 12 * c + 11, str(k + 1), 9, MUTED,
+                      "middle", mono=True))
+    b.append(text(gx - 22, gy + 6 * c, "layer", 10.5, MUTED, "end"))
+    b.append(text(gx + 6 * c, gy + 12 * c + 26, "head within that layer", 10.5, MUTED,
+                  "middle"))
+    b.append(text(gx - 34, gy + 12 * c + 46, "These squares are not attention", 10, MUTED))
+    b.append(text(gx - 34, gy + 12 * c + 59, "weights and do not sum to 1.", 10, MUTED))
 
-    b.append(box(24, 300, W - 48, 62, fill="#fff6e5", stroke="#f0d9a8"))
-    b.append(text(40, 322, "Heads specialise, but most of them are not doing anything "
+    b.append(box(24, 372, W - 48, 82, fill="#fff6e5", stroke="#f0d9a8"))
+    b.append(text(40, 394, "Heads specialise, but most of them are not doing anything "
                   "tidy.", 12.5, INK, weight="600"))
-    b.append(text(40, 342, "56 of the 144 send over 70% of their attention to "
-                  "punctuation and sentence markers — a known idling behaviour. Only "
-                  "16 mostly read the words.", 12, MUTED))
+    b.append(text(40, 414, "Counting only what the real words point at: 57 of the 144 "
+                  "send over 70% of their attention to punctuation and the", 12, MUTED))
+    b.append(text(40, 432, "sentence markers — a known idling behaviour — and 23 "
+                  "mostly read the words.", 12, MUTED))
 
-    b.append(line(24, 380, W - 24, 380, GRID, 1))
-    b.append(text(24, 402, "A head is a 64-number slice of the 768: twelve of them, "
-                  "each attending independently, then joined back together. "
-                  "12 × 64 = 768.", 12, INK))
-    b.append(text(24, 424, "A layer is one round of that. Stacking twelve means a "
-                  "token can be influenced by a word it never looked at directly — "
-                  "reached through", 12, MUTED))
-    b.append(text(24, 442, "whatever the layer below already folded in.", 12, MUTED))
+    b.append(line(24, 472, W - 24, 472, GRID, 1))
+    b.append(text(24, 494, "Within one layer a head is a 64-number slice of the 768 "
+                  "— twelve slices attending independently, then joined back "
+                  "together: 12 × 64 = 768.", 12, INK))
+    b.append(text(24, 516, "A layer is one round of that, and the twelve layers do "
+                  "not share heads — each has its own twelve, hence 144 in total. "
+                  "Stacking them lets a", 12, MUTED))
+    b.append(text(24, 534, "token be influenced by a word it never looked at "
+                  "directly, reached through whatever the layer below folded in.",
+                  12, MUTED))
     return svg(W, H, "".join(b), "Layers and attention heads")
 
 

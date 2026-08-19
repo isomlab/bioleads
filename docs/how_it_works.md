@@ -218,10 +218,17 @@ the same thing on an unrelated sentence, averaging 0.99 on the preceding token
 throughout. Layer 3 head 3 instead reaches across the sentence, linking `arterial`
 to `vasodilation` at 0.61.
 
-But it would be misleading to suggest all 144 have tidy jobs. **56 of them send
-over 70% of their attention to punctuation and the sentence markers**, a known
-idling behaviour — a head with nothing to contribute parks its attention
-somewhere harmless. Only 16 mostly read the actual words. The useful mental model
+**Where 144 comes from:** the twelve layers do not share heads. Each layer has
+its own twelve, so the model contains 12 × 12 = 144 of them, and the grid in the
+figure has one square per head — rows are the layers, columns are the twelve
+heads *within* that layer. (Those squares are a summary statistic, not attention
+weights; only the bars on the left sum to 1.)
+
+But it would be misleading to suggest all 144 have tidy jobs. Counting only what
+the real words point at, **57 of them send over 70% of their attention to
+punctuation and the sentence markers** — a known idling behaviour, where a head
+with nothing to contribute parks its attention somewhere harmless. Just 23 mostly
+read the actual words. The useful mental model
 is not twelve experts with twelve labelled specialities, but a large pool of
 cheap, partly-redundant pattern detectors of which a minority matter for any given
 sentence.

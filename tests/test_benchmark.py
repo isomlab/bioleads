@@ -407,3 +407,38 @@ def test_base_kind_splits_the_centred_suffix(bench):
     assert bench._base_kind("relevance_seeds_centred") == ("relevance_seeds", True)
     assert bench._base_kind("relevance_seeds") == ("relevance_seeds", False)
     assert bench._base_kind("relevance_centred") == ("relevance", True)
+
+
+def test_figures_are_numbered_in_the_order_they_appear():
+    """Figure numbering has drifted from reading order twice. This pins it.
+
+    Every figure in how_it_works.md must appear in ascending numeric order, its
+    caption number must match its filename number, and every SVG on disk must be
+    referenced exactly once.
+    """
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    doc = root / "docs" / "how_it_works.md"
+    figdir = root / "docs" / "figures"
+    if not doc.exists() or not figdir.exists():
+        pytest.skip("docs tree not present")
+
+    text = doc.read_text()
+    refs = re.findall(r"!\[Figure (\d+)[^\]]*\]\(figures/(\d+)-([a-z0-9-]+)\.svg\)",
+                      text, re.S)
+    assert refs, "no figure references found"
+
+    captions = [int(c) for c, _, _ in refs]
+    files = [int(f) for _, f, _ in refs]
+    assert captions == sorted(captions), f"captions out of order: {captions}"
+    assert captions == list(range(1, len(captions) + 1)), f"gaps: {captions}"
+    assert captions == files, f"caption/filename mismatch: {list(zip(captions, files))}"
+
+    on_disk = sorted(p.name for p in figdir.glob("*.svg"))
+    referenced = sorted(f"{f:02d}-{stem}.svg" for _, f, stem in
+                        [(c, int(f), st) for c, f, st in refs])
+    assert on_disk == referenced, (
+        f"stale or missing figure files:\n  on disk    {on_disk}\n"
+        f"  referenced {referenced}")

@@ -593,9 +593,9 @@ def fig_directions(n=1):
 # the captions follow.
 ORDER = [
     ("two-directions", fig_directions),
-    ("tokens-to-vector", fig_tokens),
     ("token-in-context", fig_context),
     ("layers-and-heads", fig_heads),
+    ("tokens-to-vector", fig_tokens),   # the recap, after all five steps are told
     ("seed-direction", fig_centroid),
     ("scoring-by-angle", fig_angle),
     ("shared-direction", fig_shared),

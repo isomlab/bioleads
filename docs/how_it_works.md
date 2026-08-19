@@ -167,7 +167,7 @@ in "arterial smooth muscle" and "he lost muscle mass". That is the problem the
 twelve transformer layers exist to solve. In each layer, every token looks at
 every other token and is rewritten in light of them, twelve times over.
 
-![Figure 3 — the stored numbers are only a starting point](figures/03-token-in-context.svg)
+![Figure 2 — the stored numbers are only a starting point](figures/02-token-in-context.svg)
 
 It is worth seeing how violent that rewrite is. Following the single token
 `muscle` through the model:
@@ -210,8 +210,7 @@ of attention weights, the layer computes twelve in parallel, each working on its
 own 64-number slice of the 768; their results are joined back together at the end.
 That is the whole of the arithmetic behind "12 heads × 64 = 768".
 
-![Figure 4 — inside a layer: twelve heads, each reading the sentence
-differently](figures/04-layers-and-heads.svg)
+![Figure 3 — inside a layer: twelve heads, each reading the sentence differently](figures/03-layers-and-heads.svg)
 
 Heads do specialise, and some are strikingly literal. Layer 1 head 8 gives 0.999
 of `muscle`'s attention to `smooth`, the word immediately before it — and it does
@@ -250,9 +249,10 @@ gate's only job is topical filtering, and the co-occurrence network in stage 5 i
 undirected anyway. It would not be fine for extracting directed claims, and
 nothing downstream should be read as doing that.
 
-The average is finally scaled to length 1 so only its *direction* matters:
+The average is finally scaled to length 1 so only its *direction* matters.
+That is the whole of step 1:
 
-![Figure 2 — a sentence becomes one vector](figures/02-tokens-to-vector.svg)
+![Figure 4 — the whole of step 1, end to end](figures/04-tokens-to-vector.svg)
 
 Now the formal version of exactly that picture. PubMedBERT emits a vector
 $\mathbf{h}_t$ per token, and bioleads averages the *real* tokens — skipping the

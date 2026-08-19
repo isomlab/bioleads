@@ -307,6 +307,73 @@ def fig_heads(n=1):
 
 
 # --------------------------------------------------------------------------- #
+# 3c. What one head actually computes
+# --------------------------------------------------------------------------- #
+def fig_head_mechanics(n=1):
+    """Query, key, value — the arithmetic inside a single head."""
+    W, H = 880, 520
+    b = [text(24, 30, f"{n} · What one head actually computes", 15, INK, weight="600")]
+    b.append(text(24, 56, "Layer 1, head 8, asking on behalf of the word “muscle”. "
+                  "Every number here is from the model.", 12, MUTED))
+
+    # the three projections
+    b.append(text(24, 92, "The layer holds three 768×768 matrices. This head owns "
+                  "columns 512–575 of each — its 64-wide slice.", 11.5, MUTED))
+    for i, (nm, sub, col, x0) in enumerate([
+            ("query", "what “muscle” is looking for", BLUE, 24),
+            ("key", "what each word offers", GREEN, 306),
+            ("value", "what gets passed on", AMBER, 588)]):
+        b.append(box(x0, 110, 262, 66, fill="#ffffff"))
+        b.append(text(x0 + 14, 132, nm, 12.5, col, weight="600"))
+        b.append(text(x0 + 14, 150, sub, 11, MUTED))
+        b.append(text(x0 + 14, 168, "768 numbers in → 64 out", 10.5, INK, mono=True))
+
+    # the comparison
+    b.append(text(24, 208, "Every word’s key is compared with that one query — a dot "
+                  "product, divided by √64 to keep the numbers in range:", 11.5, MUTED))
+    rows = [("smooth", 23.95, 0.999, GREEN), ("muscle", 16.31, 0.0005, MUTED),
+            ("arterial", None, None, MUTED)]
+    y = 228
+    b.append(text(150, y, "key of…", 11, MUTED, "end"))
+    b.append(text(300, y, "q · k / √64", 11, MUTED, "end", mono=True))
+    b.append(text(470, y, "after softmax", 11, MUTED, "end", mono=True))
+    for nm, sc, wt, col in rows:
+        y += 22
+        b.append(text(150, y, nm, 11.5, col, "end", mono=True))
+        if sc is None:
+            b.append(text(300, y, "…", 11.5, MUTED, "end", mono=True))
+            b.append(text(470, y, "…", 11.5, MUTED, "end", mono=True))
+            continue
+        b.append(text(300, y, f"{sc:.2f}", 11.5, INK, "end", mono=True))
+        b.append(text(470, y, f"{wt:.4f}", 11.5, col, "end", mono=True))
+        b.append(f"<rect x='{482}' y='{y-9}' width='{max(1.5, 200*wt):.1f}' "
+                 f"height='11' rx='2' fill='{col}' opacity='0.7'/>")
+    b.append(text(24, 316, "A gap of 7.6 in the raw scores becomes 0.999 against "
+                  "0.0005 — softmax turns a preference into a near-decision.",
+                  11.5, MUTED))
+
+    # the output
+    b.append(box(24, 340, W - 48, 74, fill=CARD))
+    b.append(text(40, 362, "The head’s answer for “muscle”", 12.5, INK, weight="600"))
+    b.append(text(40, 382, "= 0.999 × value(smooth)  +  0.0005 × value(muscle)  +  … "
+                  "→ 64 numbers", 11.5, INK, mono=True))
+    b.append(text(40, 402, "Almost literally: “for this round, become the word before "
+                  "me.”", 11.5, MUTED))
+
+    b.append(line(24, 434, W - 24, 434, GRID, 1))
+    b.append(text(24, 456, "All twelve heads do this at once on their own 64-wide "
+                  "slices. Their outputs are laid end to end — 12 × 64 = 768 — and "
+                  "passed through a", 12, INK))
+    b.append(text(24, 474, "fourth matrix that mixes them back together. That "
+                  "combined result is what the token becomes, and the next layer "
+                  "starts again from it.", 12, MUTED))
+    b.append(text(24, 502, "So a head is not a component you could point at in "
+                  "isolation — it is a 64-column slice of three shared matrices, plus "
+                  "the comparison that slice performs.", 12, MUTED))
+    return svg(W, H, "".join(b), "What one head computes")
+
+
+# --------------------------------------------------------------------------- #
 # 2. Scoring by angle, with real cosines
 # --------------------------------------------------------------------------- #
 def fig_angle(n=1):
@@ -605,7 +672,8 @@ def fig_directions(n=1):
 ORDER = [
     ("two-directions", fig_directions),
     ("token-in-context", fig_context),
-    ("layers-and-heads", fig_heads),
+    ("head-mechanics", fig_head_mechanics),   # what a head is…
+    ("layers-and-heads", fig_heads),          # …then what all 144 of them do
     ("tokens-to-vector", fig_tokens),   # the recap, after all five steps are told
     ("seed-direction", fig_centroid),
     ("scoring-by-angle", fig_angle),

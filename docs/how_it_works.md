@@ -205,12 +205,44 @@ across the sentence, and the resulting weights decide how much of each other
 token gets mixed in. A token that spends 0.99 of its attention on one word is,
 for that round, essentially copying it.
 
-A **head** is one independent way of doing that. Rather than compute a single set
-of attention weights, the layer computes twelve in parallel, each working on its
-own 64-number slice of the 768; their results are joined back together at the end.
-That is the whole of the arithmetic behind "12 heads × 64 = 768".
+**What a head is, exactly.** Not a module you could point at — a *slice*. Each
+layer holds three learned 768 × 768 matrices, and head 8 owns columns 512–575 of
+each: its 64-wide share. Run a token's 768 numbers through those three slices and
+you get three 64-number vectors, which are given three different jobs:
 
-![Figure 3 — inside a layer: twelve heads, each reading the sentence differently](figures/03-layers-and-heads.svg)
+| | what it is | plain reading |
+|---|---|---|
+| **query** | the token through this head's slice of the first matrix | what this word is looking for |
+| **key** | every token through its slice of the second | what each word offers |
+| **value** | every token through its slice of the third | what actually gets passed on |
+
+Queries and keys exist separately because the two are not the same question — what
+a word is looking for and what it advertises about itself are different, and the
+comparison between them is deliberately asymmetric.
+
+The head compares its one query against every key by dot product, divides by √64
+to keep the numbers in a range where the next step behaves, and softmaxes the
+results into weights that sum to 1. Its answer is then the weighted sum of the
+*values* — 64 numbers.
+
+![Figure 3 — what one head actually computes](figures/03-head-mechanics.svg)
+
+For `muscle` in layer 1 head 8, the key for `smooth` scores **23.95** against that
+query and the next best scores 16.31. After the softmax that gap of 7.6 becomes
+**0.999 against 0.0005** — softmax turns a preference into very nearly a decision,
+and the head's output is essentially "for this round, become the word before me".
+
+All twelve heads do this at once on their own slices. Their 64-number answers are
+laid end to end — **12 × 64 = 768** — and passed through a fourth matrix that mixes
+them back together; that result is what the token becomes, and the next layer
+starts from it.
+
+So a head is a 64-column slice of three shared matrices plus the comparison that
+slice performs. Nothing more concrete than that exists to point at. (The account
+above is not a paraphrase: recomputing this head by hand from the raw weight
+matrices reproduces the model's own attention to 3 × 10⁻⁷.)
+
+![Figure 4 — inside a layer: twelve heads, each reading the sentence differently](figures/04-layers-and-heads.svg)
 
 Heads do specialise, and some are strikingly literal. Layer 1 head 8 gives 0.999
 of `muscle`'s attention to `smooth`, the word immediately before it — and it does
@@ -259,7 +291,7 @@ nothing downstream should be read as doing that.
 The average is finally scaled to length 1 so only its *direction* matters.
 That is the whole of step 1:
 
-![Figure 4 — the whole of step 1, end to end](figures/04-tokens-to-vector.svg)
+![Figure 5 — the whole of step 1, end to end](figures/05-tokens-to-vector.svg)
 
 Now the formal version of exactly that picture. PubMedBERT emits a vector
 $\mathbf{h}_t$ per token, and bioleads averages the *real* tokens — skipping the
@@ -295,7 +327,7 @@ because it quietly measures how much the seeds agree. Averaging unit arrows that
 point the same way barely shortens them; averaging arrows that disagree produces
 something much shorter, pointing between them.
 
-![Figure 5 — seeds that agree give a long average; seeds that disagree give a short one](figures/05-seed-direction.svg)
+![Figure 6 — seeds that agree give a long average; seeds that disagree give a short one](figures/06-seed-direction.svg)
 
 This is the geometry behind the documented failure mode: a seed set covering two
 subjects averages to a direction in the gap between them, and can rank papers
@@ -332,7 +364,7 @@ signal.
 
 A candidate belongs if its arrow points nearly the same way as the topic arrow.
 
-![Figure 6 — candidates scored by the angle they make with the topic](figures/06-scoring-by-angle.svg)
+![Figure 7 — candidates scored by the angle they make with the topic](figures/07-scoring-by-angle.svg)
 
 $$s_c \;=\; \hat{\mathbf{e}}_c \cdot \mathbf{q}_0 \;=\; \cos\theta_c \;\in\; [-1, 1]$$
 
@@ -349,7 +381,7 @@ real candidate pool, every raw cosine falls between 0.985 and 0.991.
 It is worth seeing *why*, because it looks like a bug and is not. Of the 768
 numbers, **one is very nearly the same for every text there is**:
 
-![Figure 7 — one dimension holds about the same value for every text](figures/07-shared-direction.svg)
+![Figure 8 — one dimension holds about the same value for every text](figures/08-shared-direction.svg)
 
 Dimension 424 sits at roughly −0.96 for a TRPV1 paper, a wheat-fertiliser paper,
 a microglia paper, and the sentence "the cat sat on the mat" alike, and accounts
@@ -389,7 +421,7 @@ papers use that vocabulary too. No amount of aiming at the topic separates them.
 So the gate also learns from its own worst matches. Take the lowest-scoring
 candidates, average them into a direction, and tilt the topic vector away from it:
 
-![Figure 8 — the negative term rotates the query vector away from the worst candidates](figures/08-negative-term.svg)
+![Figure 9 — the negative term rotates the query vector away from the worst candidates](figures/09-negative-term.svg)
 
 $$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
 
@@ -436,7 +468,7 @@ the corpus gets.
 
 Benchmarked, precision falls and recall rises as $K$ grows (12 reviews):
 
-![Figure 9 — precision falls and recall rises as K grows](figures/09-top-k-tradeoff.svg)
+![Figure 10 — precision falls and recall rises as K grows](figures/10-top-k-tradeoff.svg)
 
 The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
 recall of unfiltered snowballing, 0.3252, on 87% less material.** The recall gap

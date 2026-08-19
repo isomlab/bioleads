@@ -87,7 +87,7 @@ def write(name, content):
 # --------------------------------------------------------------------------- #
 def fig_map(n=1):
     """Orientation figure — every term in this section, and how they compose."""
-    W, H = 880, 986
+    W, H = 880, 1040
     b = [text(24, 30, f"{n} · The pieces, and how they fit together", 15, INK,
               weight="600")]
     b.append(text(24, 56, "Everything in this stage is built from one idea — a list "
@@ -112,7 +112,7 @@ def fig_map(n=1):
     # ---- band 2: inside the model -------------------------------------------
     b.append(text(24, 214, "WHERE VECTORS COME FROM — inside PubMedBERT", 10.5, MUTED,
                   weight="600"))
-    b.append(box(24, 224, W - 48, 452, fill="#ffffff"))
+    b.append(box(24, 224, W - 48, 502, fill="#ffffff"))
 
     b.append(text(44, 250, "word piece", 11.5, INK, weight="600"))
     b.append(box(44, 258, 96, 24, fill=CARD))
@@ -125,8 +125,9 @@ def fig_map(n=1):
     for i in range(12):
         b.append(f"<rect x='{196 + i * 9}' y='258' width='7' height='24' rx='1.5' "
                  f"fill='{MUTED}' opacity='0.45'/>")
-    b.append(text(196, 300, "the same in every", 10.5, MUTED))
-    b.append(text(196, 314, "sentence ever written", 10.5, MUTED))
+    b.append(text(196, 300, "the same numbers every", 10.5, MUTED))
+    b.append(text(196, 314, "time this word appears,", 10.5, MUTED))
+    b.append(text(196, 328, "in any sentence", 10.5, MUTED))
     b.append(arrow(316, 270, 354, 270, MUTED, 1.8))
 
     # the nesting: head -> layer -> model
@@ -154,39 +155,44 @@ def fig_map(n=1):
     # ---- inset A: what "a 64-wide slice" actually means ---------------------
     b.append(line(44, 392, W - 68, 392, GRID, 1))
     b.append(text(44, 414, "what “a 64-wide slice” means", 12, INK, weight="600"))
-    b.append(text(44, 432, "The head reads the whole token. What is sliced is the "
-                  "matrix, not the vector.", 11, MUTED))
+    b.append(text(44, 432, "Every head sees all 768 numbers of the token. Heads "
+                  "differ in the weights they use, not in which", 11, MUTED))
+    b.append(text(44, 446, "part of the token they are handed.", 11, MUTED))
     for i in range(36):
-        b.append(f"<rect x='{44 + i * 7}' y='446' width='5.5' height='20' rx='1' "
+        b.append(f"<rect x='{44 + i * 7}' y='462' width='5.5' height='20' rx='1' "
                  f"fill='{GREEN}' opacity='0.55'/>")
-    b.append(text(44, 482, "all 768 numbers of the token", 10.5, MUTED))
-    b.append(arrow(310, 456, 348, 456, MUTED, 1.8))
-    b.append(box(358, 430, 214, 56, fill="#e8eefb", stroke="#c3d3f2"))
-    b.append(text(465, 450, "the layer’s 768 × 768 matrix", 10.5, BLUE, "middle"))
+    b.append(text(44, 498, "the token — all 768 of its numbers", 10.5, MUTED))
+    b.append(arrow(310, 472, 348, 472, MUTED, 1.8))
+    b.append(box(358, 440, 214, 56, fill="#e8eefb", stroke="#c3d3f2"))
+    b.append(text(465, 460, "the layer’s weights — 768 columns", 10.5, BLUE,
+                  "middle"))
     for i in range(12):
         op = 0.95 if i == 3 else 0.25
-        b.append(f"<rect x='{368 + i * 17}' y='458' width='14' height='20' rx='2' "
+        b.append(f"<rect x='{368 + i * 17}' y='468' width='14' height='20' rx='2' "
                  f"fill='{BLUE}' opacity='{op}'/>")
-    b.append(text(465, 500, "head 4 owns these 64 columns", 10.5, BLUE, "middle"))
-    b.append(arrow(582, 456, 620, 456, MUTED, 1.8))
+    b.append(text(465, 500, "each block = 64 columns. head 4 uses", 10.5, BLUE,
+                  "middle"))
+    b.append(text(465, 514, "this one: columns 192–255", 10.5, BLUE, "middle"))
+    b.append(arrow(582, 472, 620, 472, MUTED, 1.8))
     for i in range(9):
-        b.append(f"<rect x='{630 + i * 7}' y='446' width='5.5' height='20' rx='1' "
+        b.append(f"<rect x='{630 + i * 7}' y='462' width='5.5' height='20' rx='1' "
                  f"fill={chr(39)}{BLUE}{chr(39)} opacity='0.8'/>")
-    b.append(text(630, 482, "64 numbers out", 10.5, BLUE))
-    b.append(text(630, 500, "twelve heads means twelve such slices,", 10.5, MUTED))
-    b.append(text(630, 514, "laid end to end again = 768", 10.5, MUTED))
+    b.append(text(630, 498, "this head’s answer — 64 numbers", 10.5, BLUE))
+    b.append(text(630, 530, "the other eleven heads use the", 10.5, MUTED))
+    b.append(text(630, 544, "other eleven blocks. Their answers", 10.5, MUTED))
+    b.append(text(630, 558, "join back up to 768.", 10.5, MUTED))
 
     # ---- inset B: what "rewritten twelve times" means -----------------------
-    b.append(line(44, 528, W - 68, 528, GRID, 1))
-    b.append(text(44, 550, "what “rewritten twelve times” means", 12, INK,
+    b.append(line(44, 578, W - 68, 578, GRID, 1))
+    b.append(text(44, 600, "what “rewritten twelve times” means", 12, INK,
                   weight="600"))
-    b.append(text(44, 568, "The same token, after each layer. Every step is a small "
+    b.append(text(44, 618, "The same token, after each layer. Every step is a small "
                   "edit; together they move it a long way — it stops being", 11, MUTED))
-    b.append(text(44, 582, "“muscle” in general and becomes “muscle” in this "
+    b.append(text(44, 632, "“muscle” in general and becomes “muscle” in this "
                   "sentence.", 11, MUTED))
     TRACE = [1.000, .795, .696, .594, .576, .562, .523, .494, .492, .478, .454,
              .440, .403]
-    x0, y0, wdt, hgt = 60, 600, 700, 52
+    x0, y0, wdt, hgt = 60, 650, 700, 52
     for gv, lab in ((1.0, "1.0"), (0.5, "0.5"), (0.0, "0")):
         yy = y0 + hgt - hgt * gv
         b.append(line(x0, yy, x0 + wdt, yy, GRID, 1))
@@ -207,8 +213,8 @@ def fig_map(n=1):
 
 
     # ---- band 3: what bioleads does -----------------------------------------
-    b.append(text(24, 712, "WHAT bioleads DOES WITH THEM", 10.5, MUTED, weight="600"))
-    b.append(box(24, 722, W - 48, 174, fill="#ffffff"))
+    b.append(text(24, 762, "WHAT bioleads DOES WITH THEM", 10.5, MUTED, weight="600"))
+    b.append(box(24, 772, W - 48, 174, fill="#ffffff"))
 
     def stack(x, y, k, col, lab, sub):
         out = []
@@ -221,37 +227,37 @@ def fig_map(n=1):
         out.append(text(x, y + k * 11 + 32, sub, 10.5, MUTED))
         return "".join(out)
 
-    b.append(text(48, 742, "↑ the vectors the model just produced", 10, GREEN))
-    b.append(stack(48, 748, 4, GREEN, "every token", "in one paper"))
-    b.append(arrow(148, 772, 186, 772, MUTED, 1.8))
-    b.append(text(196, 756, "average", 11, INK, weight="600"))
-    b.append(stack(196, 768, 1, GREEN, "one paper", "= one vector, length 1"))
-    b.append(arrow(300, 772, 338, 772, MUTED, 1.8))
-    b.append(text(319, 752, "repeat for", 9.5, MUTED, "middle"))
-    b.append(text(319, 763, "every paper", 9.5, MUTED, "middle"))
+    b.append(text(48, 792, "↑ the vectors the model just produced", 10, GREEN))
+    b.append(stack(48, 798, 4, GREEN, "every token", "in one paper"))
+    b.append(arrow(148, 822, 186, 822, MUTED, 1.8))
+    b.append(text(196, 806, "average", 11, INK, weight="600"))
+    b.append(stack(196, 818, 1, GREEN, "one paper", "= one vector, length 1"))
+    b.append(arrow(300, 822, 338, 822, MUTED, 1.8))
+    b.append(text(319, 802, "repeat for", 9.5, MUTED, "middle"))
+    b.append(text(319, 813, "every paper", 9.5, MUTED, "middle"))
 
-    b.append(stack(348, 748, 4, BLUE, "your seed papers", "the ones you chose"))
-    b.append(arrow(448, 772, 486, 772, MUTED, 1.8))
-    b.append(text(496, 756, "average", 11, INK, weight="600"))
-    b.append(stack(496, 768, 1, BLUE, "the topic", "one direction to aim at"))
-    b.append(arrow(600, 772, 638, 772, MUTED, 1.8))
+    b.append(stack(348, 798, 4, BLUE, "your seed papers", "the ones you chose"))
+    b.append(arrow(448, 822, 486, 822, MUTED, 1.8))
+    b.append(text(496, 806, "average", 11, INK, weight="600"))
+    b.append(stack(496, 818, 1, BLUE, "the topic", "one direction to aim at"))
+    b.append(arrow(600, 822, 638, 822, MUTED, 1.8))
 
-    b.append(box(648, 742, 208, 92, fill="#eaf1fb", stroke="#c3d3f2"))
-    b.append(text(662, 764, "the angle between", 11.5, INK, weight="600"))
-    b.append(text(662, 782, "a candidate and the topic", 11.5, INK))
-    b.append(text(662, 804, "→ rank all candidates", 11, GREEN))
-    b.append(text(662, 822, "→ keep the top K", 11, GREEN, weight="600"))
+    b.append(box(648, 792, 208, 92, fill="#eaf1fb", stroke="#c3d3f2"))
+    b.append(text(662, 814, "the angle between", 11.5, INK, weight="600"))
+    b.append(text(662, 832, "a candidate and the topic", 11.5, INK))
+    b.append(text(662, 854, "→ rank all candidates", 11, GREEN))
+    b.append(text(662, 872, "→ keep the top K", 11, GREEN, weight="600"))
 
-    b.append(text(48, 856, "Steps 1–5 below walk this left to right. Everything "
+    b.append(text(48, 906, "Steps 1–5 below walk this left to right. Everything "
                   "after — the seed profile, the negative correction, the cut — "
                   "happens in the third band,", 12, MUTED))
-    b.append(text(48, 874, "and never touches the machinery in the second.", 12, MUTED))
+    b.append(text(48, 924, "and never touches the machinery in the second.", 12, MUTED))
 
-    b.append(line(24, 916, W - 24, 916, GRID, 1))
-    b.append(text(24, 938, "One sentence for the whole stage: turn every paper into "
+    b.append(line(24, 966, W - 24, 966, GRID, 1))
+    b.append(text(24, 988, "One sentence for the whole stage: turn every paper into "
                   "one arrow, point an arrow at your topic, and keep the papers "
                   "whose arrows", 12, INK))
-    b.append(text(24, 958, "point most nearly the same way.", 12, INK))
+    b.append(text(24, 1008, "point most nearly the same way.", 12, INK))
     return svg(W, H, "".join(b), "The pieces and how they fit together")
 
 

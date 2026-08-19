@@ -104,11 +104,13 @@ stage makes happens in the bottom band.
 Two phrases in that band are worth unpacking, because both are easy to read
 wrongly.
 
-**"A 64-wide slice"** does not mean the head sees 64 of the token's numbers. Each
-head reads the token *whole*, all 768 of them. What is cut into twelve is the
-**matrix**: the layer holds 768 × 768 weights, head 4 owns 64 of those columns,
-and putting 768 numbers through 64 columns gives 64 numbers out. Twelve heads,
-twelve such slices, and their outputs laid end to end come back to 768.
+**"A 64-wide slice"** does not mean the head is handed 64 of the token's numbers.
+Every head sees the token *whole*, all 768. What is cut into twelve is the
+**weights**: the layer holds a 768 × 768 block of them, head 4 uses columns
+192–255, and putting 768 numbers through 64 columns gives 64 numbers back. The
+other eleven heads use the other eleven blocks of columns, and their eleven
+answers join back up to 768. So the heads differ in *which weights they apply*,
+never in which part of the token they get.
 
 **"Rewritten twelve times over"** means the token's vector is replaced at every
 layer, each version built from the one before. No single step changes it much —

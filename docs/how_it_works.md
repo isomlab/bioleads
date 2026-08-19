@@ -95,17 +95,7 @@ can't seed this — there is nothing to follow.
 
 Every seed sits between two very different sets of papers.
 
-```
-         PAST                      SEEDS                       FUTURE
-    ─────────────────────────────────────────────────────────────────────▶ time
-
-    ○ ○ ○ ○ ○ ○ ○ ○ ○           ★ ★ ★ ★ ★           ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○
-    └───────┬───────┘           └────┬────┘           └──────────┬──────────┘
-        references                you chose               cited_by
-        (backward)                  these                 (forward)
-    "what the seeds cite"                          "what cites the seeds"
-      ~2,300 papers                                    ~47,000 papers
-```
+![The two citation directions, drawn to scale](figures/07-two-directions.svg)
 
 Those counts are measured, not illustrative: across the systematic-review seed
 sets in [the benchmark](benchmark.md), one round backward yielded 2,342 papers
@@ -131,12 +121,6 @@ bioleads' answer is to treat **the seed papers as the definition of the topic** 
 they are the only papers known to be on topic, because you chose them — and to
 make every candidate earn its place against them.
 
-```
-   seeds ──▶ embed ──▶ topic ──▶ score ──▶ learn what ──▶ keep
-             papers    vector    candidates   isn't on      top K
-                                              topic
-             step 1    step 2     step 3       step 4      step 5
-```
 
 What follows is one continuous geometric story. Papers become arrows; the seeds
 define a direction; candidates are ranked by the angle they make with it; and a
@@ -145,13 +129,35 @@ scoring well without belonging.
 
 ### Step 1 · Every paper becomes a vector
 
-Picture each paper as an arrow on a very high-dimensional map of the literature.
-Papers about similar things point in similar directions. The whole gate is built
-on that one idea.
+Everything below rests on one idea: **turn each paper into a list of numbers, so
+that papers about similar things end up with similar lists.** If you already know
+what a sentence embedding is, skip to the equations.
 
-PubMedBERT reads a title and abstract and emits a vector $\mathbf{h}_t$ for every
-token. bioleads averages the *real* tokens — skipping the padding that makes a
-batch rectangular — to get one arrow per document:
+The model reads text in pieces called **tokens** — roughly words, but split
+further when a word is unusual, so a fixed vocabulary can spell anything. Our
+sentence becomes ten of them, including two markers the model adds to show where
+the text starts and ends:
+
+```
+[CLS]  trpv1  mediates  vasodilation  in  arterial  smooth  muscle  .  [SEP]
+```
+
+`trpv1` survives as one token because PubMedBERT was trained on biomedical text
+and has it in its vocabulary; a general-purpose model would shatter it into
+`tr ##pv ##1`. That is most of why a domain model is worth using here.
+
+PubMedBERT then turns **each token into 768 numbers**. Those numbers are not
+chosen by hand and no single one means anything on its own — they are what the
+model learned during training, and their only job is that similar meanings land
+in similar places. A paper's own vector is the **average across its tokens**, and
+that average is finally scaled to length 1 so only its *direction* matters:
+
+![A sentence becomes one vector: tokens, per-token numbers, averaging, and
+normalising](figures/01-tokens-to-vector.svg)
+
+Now the formal version of exactly that picture. PubMedBERT emits a vector
+$\mathbf{h}_t$ per token, and bioleads averages the *real* tokens — skipping the
+padding that makes a batch rectangular:
 
 $$\mathbf{e}_d \;=\; \frac{\sum_{t} m_t \, \mathbf{h}_t}{\sum_{t} m_t}$$
 
@@ -183,20 +189,7 @@ because it quietly measures how much the seeds agree. Averaging unit arrows that
 point the same way barely shortens them; averaging arrows that disagree produces
 something much shorter, pointing between them.
 
-```
-   seeds that agree                      seeds that disagree
-   ─────────────────                     ───────────────────
-
-       ŝ₁ ↗                                  ŝ₁ ↗
-       ŝ₂ ↗   nearly parallel                ŝ₂ →   pulling apart
-       ŝ₃ ↗                                  ŝ₃ ↘
-
-       ●━━━━━━━━━━━━━━━▶ q̄                   ●━━━▶ q̄
-       │◀───── ‖q̄‖ ≈ 1 ─────▶│               │◀ ‖q̄‖ ≪ 1
-
-   q₀ points where the                   q₀ points into the gap between
-   seeds actually are                    topics that no seed occupies
-```
+![Seeds that agree give a long average; seeds that disagree give a short one](figures/04-seed-direction.svg)
 
 This is the geometry behind the documented failure mode: a seed set covering two
 subjects averages to a direction in the gap between them, and can rank papers
@@ -233,15 +226,7 @@ signal.
 
 A candidate belongs if its arrow points nearly the same way as the topic arrow.
 
-```
-                          ● A            small angle  →  high score
-                        ╱
-                      ╱  θ_A
-       ──────────────●━━━━━━━━━━━━━━━━▶  q₀
-                      ╲  θ_B
-                        ╲
-                          ● B            wide angle   →  low score
-```
+![Candidates scored by the angle they make with the topic direction](figures/02-scoring-by-angle.svg)
 
 $$s_c \;=\; \hat{\mathbf{e}}_c \cdot \mathbf{q}_0 \;=\; \cos\theta_c \;\in\; [-1, 1]$$
 
@@ -253,7 +238,20 @@ disappears. A score of 1 means identical direction, 0 means unrelated.
 
 In practice biomedical abstracts all occupy broadly similar semantic space, so
 absolute values cluster high and mean little on their own — measured across a
-real candidate pool, every raw cosine falls between 0.985 and 0.991. **The useful
+real candidate pool, every raw cosine falls between 0.985 and 0.991.
+
+It is worth seeing *why*, because it looks like a bug and is not. Of the 768
+numbers, **one is very nearly the same for every text there is**:
+
+![One dimension holds about the same value for every text, whatever it is
+about](figures/03-shared-direction.svg)
+
+Dimension 424 sits at roughly −0.96 for a TRPV1 paper, a wheat-fertiliser paper,
+a microglia paper, and the sentence "the cat sat on the mat" alike, and accounts
+for about 93% of each vector's squared length. Two documents are therefore ~93%
+identical before either one says anything — which is the whole explanation for
+scores that never leave the high nineties. Language models are known to do this;
+the vectors occupy a narrow cone rather than spreading over the sphere. **The useful
 signal is the ranking**, which is why the cut in step 5 is a rank, not a
 threshold.
 
@@ -279,22 +277,7 @@ papers use that vocabulary too. No amount of aiming at the topic separates them.
 So the gate also learns from its own worst matches. Take the lowest-scoring
 candidates, average them into a direction, and tilt the topic vector away from it:
 
-```
-   before                                     after
-
-          X ●                                        X ●
-             ╲                                          ╲   θ′ < θ
-              ╲ θ                                        ╲
-   ────────────●━━━━━━━━━▶ q₀           ────────────●━━━━━━━━━▶ q
-              ╱ θ                                        ╱
-             ╱                                          ╱   θ″ > θ
-          M ●                                        M ●
-             ╲                                          ╲
-              ● n̂                                        ● n̂
-
-   X and M make equal angles with        q tilts away from n̂. M lies on
-   q₀, so they score identically         n̂'s side, so it falls further
-```
+![The negative term rotates the query vector away from the worst candidates](figures/05-negative-term.svg)
 
 $$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
 
@@ -314,16 +297,6 @@ call.
 
 From the regression test, with real numbers:
 
-```
-   similarity →  0.0        0.2        0.4        0.6        0.8
-                 ├──────────┼──────────┼──────────┼──────────┤
-   γ = 0                          tail▲            M▲X▲          M and X tie
-                 ├──────────┼──────────┼──────────┼──────────┤
-   γ = 0.25            tail▲                     M▲     X▲       X clears M
-                 ├──────────┼──────────┼──────────┼──────────┤
-
-        X = on-topic paper    M = methods paper    tail = off-topic candidates
-```
 
 X and M start tied at 0.7071. The negative term moves them to 0.7566 and 0.6136
 while pushing the tail from 0.3693 to about 0.14.
@@ -351,19 +324,7 @@ the corpus gets.
 
 Benchmarked, precision falls and recall rises as $K$ grows (12 reviews):
 
-```
-     K   median precision             median recall                   corpus
-   ───   ───────────────────────────   ────────────────────────────   ──────
-    10   ████████████ 0.1255          ███ 0.0333                         199
-    25   █████████ 0.0941             ███████ 0.0903                     486
-    50   ████████ 0.0854              ███████████ 0.1406                 975
-   100   ██████ 0.0624                ███████████████████ 0.2473       1,948
-   200   █████ 0.0511                 ███████████████████████ 0.2992   3,350
-   400   ████ 0.0385                  ████████████████████████ 0.3186  4,780
-   800   ███ 0.0328                   █████████████████████████ 0.3252  6,595
-   ───   ───────────────────────────   ────────────────────────────   ──────
-   bfs   ██ 0.0244                    █████████████████████████ 0.3252 49,683
-```
+![Precision falls and recall rises as K grows](figures/06-top-k-tradeoff.svg)
 
 The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
 recall of unfiltered snowballing, 0.3252, on 87% less material.** The recall gap

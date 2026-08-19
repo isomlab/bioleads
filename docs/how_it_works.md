@@ -87,289 +87,329 @@ PMC full text · Max records (caps how many hits a query fetches, default 500).
 
 ## 2. Grow the corpus by following citations
 
-**What it does.** Optional. Starts from the documents that carry a PMID and
-walks the citation graph outward, fetching what it finds and appending it to the
-corpus. Local PDFs without a PMID can't seed this — there's nothing to follow.
+**What it does.** Optional. Starts from the documents that carry a PMID, walks
+the citation graph outward, and appends what it finds. Local PDFs without a PMID
+can't seed this — there is nothing to follow.
 
-This stage is where bioleads does something that isn't just plumbing, so it's
-worth understanding the reasoning rather than only the controls.
+This is the one stage where bioleads does something more than plumbing, so it is
+documented mechanism-first: what the two directions are, what the strategy does
+with them, the exact arithmetic, then what measurement had to say about all of
+it.
 
-### The asymmetry the design rests on
+### 2.1 The two directions
 
-Citation links point two ways, and **the two directions are not equally
-reliable**:
+Every seed sits in the middle of two very different sets of papers.
 
-- **Forward — papers that *cite* your seed.** To cite a paper you generally have
-  to engage with what it showed. The citing set therefore clusters *around the
-  seed's topic*. High precision, limited recall.
-- **Backward — papers your seed *cites*.** A reference list is everything the
-  authors needed: the method, the reagent, the statistical tool, the mouse line,
-  background from an adjacent field, a courtesy citation. It is a *union of
-  topics*, only some of which are the topic you care about. High recall, poor
-  precision.
+```
+         PAST                      SEEDS                       FUTURE
+    ─────────────────────────────────────────────────────────────────────▶ time
 
-Plain snowballing treats both directions the same, which is why it drifts: one
-round backward through a reference list drags in every field the seed happened
-to touch, and the next round expands from *those*, compounding the drift.
+    ○ ○ ○ ○ ○ ○ ○ ○ ○           ★ ★ ★ ★ ★           ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○
+    └───────┬───────┘           └────┬────┘           └──────────┬──────────┘
+        references                you chose               cited_by
+        (backward)                  these                 (forward)
+    "what the seeds cite"                          "what cites the seeds"
+      ~2,300 papers                                    ~47,000 papers
+```
 
-But the backward direction is also where the interesting material lives — the
-foundational work, the older literature, the papers that ABC discovery (stage 6)
-needs in order to find a connection nobody has stated. You don't want to skip
-it. You want to *filter* it.
+Those two counts are measured, not illustrative: across the 12 systematic-review
+seed sets used in [the benchmark](benchmark.md), one round backward yielded
+2,342 papers and one round forward yielded roughly 47,000. **Forward is ~20×
+larger.** That size difference drives most of what follows.
 
-### The move: trust the seeds, filter everything else
+The directions also differ in kind:
 
-That reasoning is what the design was *originally* built on, and measurement
-overturned it (below). What `relevance` does **now** is trust neither direction:
+- **Backward — what a seed cites.** A reference list is everything the authors
+  needed: the method, the reagent, the statistical tool, the mouse line,
+  background from an adjacent field, a courtesy citation. A union of topics.
+- **Forward — what cites a seed.** To cite a paper you generally engage with what
+  it showed — but a widely-used method or reagent paper is cited by every field
+  that uses it.
 
-1. **Profile from the seeds alone.** Your seed documents are the only papers
-   known to be on topic — you chose them. They're condensed into a single
-   **profile vector**: the mean of their unit-normalized PubMedBERT embeddings.
-2. **Gate both directions against it.** Forward citers and backward references
-   are each collected, embedded, ranked by **cosine similarity to the profile**,
-   and cut to the top **K** — per direction. Everything else is discarded before
-   it reaches the corpus.
+Plain snowballing (`bfs`) takes both wholesale, which is why it drifts: one round
+backward drags in every field the seed touched, and the next round expands from
+*those*. But backward is also where the foundational and older literature lives —
+exactly what ABC discovery (stage 6) needs to find a link nobody has stated. The
+goal is therefore not to skip a direction but to **filter** both.
 
-The profile is a **Rocchio query vector**, which means it has a negative half as
-well:
+### 2.2 What the strategy does
 
-> q = normalize( centroid(profile) − γ · centroid(worst-scoring candidates) )
+`relevance` trusts neither direction. It trusts only the seeds — the one set of
+papers known to be on topic, because you chose them — and filters everything
+else against them.
 
-Pointing the gate only *toward* the topic is not the same as pointing it *away
-from* what the topic isn't. A methods paper that shares the profile's technique
-vocabulary can sit as close to a positive centroid as a genuinely on-topic paper
-does — the centroid has no way to tell them apart, because the profile documents
-use that technique vocabulary too. Subtracting a negative centroid is what
-creates the separation.
+```
+                        ┌──────────────────┐
+                        │   seed docs  S   │  PMID-bearing, chosen by you
+                        └───┬──────────┬───┘
+              ┌─────────────┘          └─────────────┐
+              ▼                                      ▼
+   ┌─────────────────────┐              ┌──────────────────────────┐
+   │ PROFILE             │              │ CANDIDATES               │
+   │  embed S            │              │  F = cited_by(S)         │
+   │  average            │              │  B = references(S)       │
+   │  normalise          │              │  fetch text, embed       │
+   │            →  q₀    │              │            →  ê_c        │
+   └──────────┬──────────┘              └────────────┬─────────────┘
+              │                                      │
+              └──────────────┬───────────────────────┘
+                             ▼
+                 ┌───────────────────────┐
+                 │  score   s_c = ê_c·q₀ │   cosine similarity
+                 └───────────┬───────────┘
+                             ▼
+                 ┌───────────────────────────────────┐
+                 │  negative term        (if γ > 0)  │
+                 │   worst-scoring fraction  →  n̂    │
+                 │   q = normalise(q₀ − γ·n̂)         │
+                 │   re-score against q              │
+                 └───────────┬───────────────────────┘
+                             ▼
+                 ┌───────────────────────┐
+                 │  keep top K           │   applied to F and to B
+                 └───────────┬───────────┘   separately
+                             ▼
+                      added to the corpus
+```
 
-**The negatives come free, from the candidate pool itself.** Phase 2 exists
-precisely because a reference list is mostly off-topic, which means its
-low-scoring tail is already a supply of *hard* negatives — citation-adjacent,
-plausible, and wrong — which is exactly the region the gate has to discriminate.
-So candidates are scored twice: once against the positive centroid to find the
-tail, then again against the full Rocchio vector. No extra fetches, and no extra
-model calls (the candidate embeddings are computed once and reused).
+Both directions run through the same gate, independently, each keeping its own
+top K. Nothing passes through unfiltered.
 
-Guards: the negative term switches off when the pool is smaller than
-`rocchio_min_candidates` (its tail wouldn't mean anything), and the tail is
-clamped so it can never reach into the top-K the gate is about to keep. Setting
-`rocchio_gamma` to 0 reduces the whole thing to the positive-only centroid.
+### 2.3 The math
 
-The result is meant to be backward-direction *recall* at forward-direction
-*precision*: you reach the foundational literature without inheriting the
-reference list's off-topic bulk.
+Five steps. Everything below is what the code actually computes; the symbols are
+used consistently.
 
-**No model is trained here.** Nothing is fit, and there are no learned
-parameters — the profile is a weighted difference of two averages, and the gate
-is a rank cutoff. In information-retrieval terms this is **pseudo-relevance
-feedback** in the classical Rocchio (1971) form: treat a set as relevant, build
-a query representation out of it, then re-rank with that. In the current design
-the "relevant" set is simply the user's seeds, which makes it closer to ordinary
-relevance feedback than to the pseudo variety.
+| symbol | meaning |
+|---|---|
+| $S$ | the seed documents |
+| $F$, $B$ | forward (`cited_by`) and backward (`references`) candidate sets |
+| $\mathbf{e}_d$ | the embedding of document $d$ |
+| $\hat{\mathbf{e}}_d$ | that embedding, scaled to unit length |
+| $\mathbf{q}_0$, $\mathbf{q}$ | the profile vector, before and after the negative term |
+| $\gamma$ | `rocchio_gamma`, the weight of the negative term |
+| $K$ | `expand_top_k`, how many papers survive per direction |
 
-**How relevance is measured.** With the `embed` extra installed, PubMedBERT
-cosine as described above. Without it, the same shape in a cheaper space: the
-profile becomes a term vector over the NER entities, weighted by how many
-profile documents mention each term (a term shared across the topic's papers is
-more characteristic than a one-off), and candidates are scored by cosine against
-it. The fallback is automatic, and a failure in the embedding path degrades to
-it rather than sinking the run.
+**Step 1 — embed a document.** PubMedBERT reads the title and abstract and emits
+one vector per token. Those are averaged over the real (non-padding) tokens —
+"mean pooling" — to get one vector for the document:
 
-### Measured: the precision half of this claim does not hold
+$$\mathbf{e}_d \;=\; \frac{\sum_{t} m_t \, \mathbf{h}_t}{\sum_{t} m_t}$$
 
-The asymmetry above is the design's *rationale*. It is also an empirical claim,
-and [the benchmark](benchmark.md) now tests it against systematic reviews
-instead of argument. On 40 reviews, 5 seeds each, one round, with the
-publication-year correction applied:
+where $\mathbf{h}_t$ is the model's output for token $t$ and $m_t$ is 1 for a
+real token and 0 for padding. Text is truncated at 256 tokens. Every vector is
+then scaled to unit length,
 
-| direction | median precision | median recall | median candidates |
+$$\hat{\mathbf{e}}_d \;=\; \frac{\mathbf{e}_d}{\lVert \mathbf{e}_d \rVert}$$
+
+which is what makes the dot products further down equal cosines.
+
+**Step 2 — build the profile.** Average the seed vectors and re-normalise:
+
+$$\mathbf{q}_0 \;=\; \frac{\bar{\mathbf{e}}_S}{\lVert \bar{\mathbf{e}}_S \rVert}, \qquad \bar{\mathbf{e}}_S = \frac{1}{|S|}\sum_{d \in S} \hat{\mathbf{e}}_d$$
+
+The average of several unit vectors points "between" them, so $\mathbf{q}_0$ is a
+single direction standing for the topic the seeds share. Re-normalising matters
+because averaging shortens the vector — seeds that disagree shorten it more —
+and only the *direction* should carry meaning.
+
+**Step 3 — score a candidate.** Because both vectors are unit length, the dot
+product *is* the cosine of the angle between them:
+
+$$s_c \;=\; \hat{\mathbf{e}}_c \cdot \mathbf{q}_0 \;=\; \cos\theta_c \;\in\; [-1, 1]$$
+
+1 means "points the same way as the topic", 0 means unrelated. In practice
+biomedical abstracts all point broadly similarly, so the useful signal is in the
+*ranking*, not the absolute value.
+
+**Step 4 — the negative term.** Pointing the gate *toward* the topic is not the
+same as pointing it *away from* what the topic isn't. A methods paper that shares
+the seeds' technique vocabulary can sit exactly as close to $\mathbf{q}_0$ as a
+genuinely on-topic paper, because the seed papers use that vocabulary too. The
+fix is Rocchio's negative term: take the worst-scoring candidates as a stand-in
+for "off topic", average them, and subtract.
+
+$$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
+
+where $N$ is the lowest-scoring fraction of the candidate pool. Candidates are
+then re-scored against $\mathbf{q}$ instead of $\mathbf{q}_0$. Geometrically the
+query vector rotates away from the off-topic cloud, which spreads apart
+candidates the positive centroid alone had tied:
+
+```
+   similarity →  0.0        0.2        0.4        0.6        0.8
+                 ├──────────┼──────────┼──────────┼──────────┤
+   γ = 0                          tail▲            M▲X▲          M and X tie
+                 ├──────────┼──────────┼──────────┼──────────┤
+   γ = 0.25            tail▲                     M▲     X▲       X clears M
+                 ├──────────┼──────────┼──────────┼──────────┤
+
+        X = on-topic paper    M = methods paper    tail = off-topic candidates
+```
+
+Those are real numbers from the regression test: the positive centroid scores X
+and M identically at 0.7071, and the negative term moves them to 0.7566 and
+0.6136 while pushing the tail from 0.3693 to ~0.14.
+
+**Why the negatives are free.** The gate exists because a candidate pool is
+mostly off topic — so the pool's own low-scoring tail *is* a supply of negatives,
+and better ones than random papers would be: they are citation-adjacent and
+plausible, which is the distinction the gate actually has to make. Candidates are
+scored twice but embedded once, so this costs a dot product, not a second model
+pass.
+
+The selection has three guards, all in `_pseudo_negative_idx`:
+
+- $\gamma \le 0$ disables it entirely, recovering the plain positive centroid.
+- A pool smaller than `rocchio_min_candidates` (8) has no meaningful tail.
+- The tail is clamped so it can never reach into the top $K$ about to be kept —
+  a document should not be evidence of what the topic *isn't* while also being
+  kept as on-topic. (Re-scoring can reorder, so this is enforced on the
+  first-pass ranking.)
+
+**Step 5 — the cut.** Sort by score, keep the $K$ highest, discard the rest
+before they ever reach the corpus. Applied to $F$ and $B$ separately, so the
+strategy returns at most $2K$ new documents per round.
+
+**Without the `embed` extra.** The same five steps run in term space instead of
+embedding space. The profile is a vector over NER terms weighted by how many
+profile documents contain each,
+
+$$p_t \;=\; \bigl|\{\, d \in S : t \in \text{terms}(d) \,\}\bigr|$$
+
+a candidate is the 0/1 indicator vector of its own term set $C$, and the score is
+the same cosine:
+
+$$s_C \;=\; \frac{\sum_{t \in C} q_t}{\lVert \mathbf{q} \rVert \cdot \sqrt{|C|}}$$
+
+with $\sqrt{|C|}$ being the length of a binary vector with $|C|$ ones. The
+negative term works identically, subtracting a term vector built from the tail.
+The upgrade to PubMedBERT is automatic when the extra is installed, and a failure
+in the embedding path falls back here rather than sinking the run.
+
+### 2.4 The parameters
+
+| control | symbol | default | what it changes |
 |---|---|---|---|
-| forward (`cited_by`) | 0.0152 | 0.1154 | 487 |
-| backward (`references`) | **0.0530** | **0.1667** | 164 |
+| `expand_top_k` | $K$ | 50 | papers kept **per direction**. The main control over corpus size and cleanliness. |
+| `rocchio_gamma` | $\gamma$ | 0.25 | weight of the negative term. Measured to change almost nothing — see 2.5. |
+| `rocchio_neg_frac` | | 0.25 | fraction of the pool taken as the negative tail. |
+| `rocchio_min_candidates` | | 8 | pools smaller than this skip the negative term. |
+| `expand_fwd_rounds` / `expand_back_rounds` | | 1 / 1 | depth in each direction. Not exposed in the GUI. |
+| `expand_max` | | 1000 | hard cap on total PMIDs. |
+| `expand_source` | | `all` | NCBI ELink, NIH iCite, or the union. |
 
-**Backward wins on both, in 33 of the 40 reviews** (median precision ratio 0.43).
-The two directions surface a comparable number of true hits — 403 forward against
-397 backward — but forward has to drag in 2.88× as many candidates to do it, and
-one seed set pulled 30,848.
+Two things about the GUI controls are easy to get wrong: choosing `relevance`
+**runs expansion even with "Citation expansion rounds" set to 0** (that spinbox
+drives `bfs` only), and **`Follow` is ignored** by `relevance`, which always does
+both directions.
 
-So the direction the pipeline *used to* treat as reliable is, on this measure,
-the noisy one. Two consequences followed, and both were acted on:
+### 2.5 What the measurements said
 
-- **The stated justification for `relevance` was unsupported.** It builds a
-  better corpus than `bfs` — measured below — but not for the reason originally
-  given.
-- **The ungated half was the wrong half.** The old phase 1 added *every* forward
-  citer without filtering and gated only the backward references, spending the
-  filtering effort on the cleaner direction. Both are gated now.
+This design replaced an earlier one **on evidence**, and the evidence is worth
+keeping visible because it contradicts the intuition the original was built on.
+Method and full tables: [docs/benchmark.md](benchmark.md). Ground truth is a
+systematic review's reference list; seeds are sampled from it; the arms try to
+recover the rest.
 
-One caveat, stated once and not used to explain the result away: the ground truth
-*is* a reference list, so "can a seed's references predict other references" may
-sit closer to backward's home turf than a topic-labelled benchmark would. That
-is a reason to want a second, non-citation ground truth — not a reason to keep
-asserting an asymmetry that measured the other way.
+**The original design.** Profile built from the seeds *plus* their forward
+citers, with every citer added ungated and only backward references filtered —
+on the theory that citing papers converge on a seed's topic while reference lists
+sprawl.
 
-### Measured: the gate governs 5% of what the strategy returns
+**Finding 1 — the asymmetry runs the other way.** Over 40 reviews, backward was
+*more* precise than forward in **33 of 40**: forward P 0.0152 / R 0.1154 against
+backward P 0.0530 / R 0.1667. Comparable true hits (403 vs 397) but forward drags
+2.88× the volume. The direction the design treated as reliable is the noisy one.
 
-A second run (12 reviews, 5 seeds, gamma swept, titles-only scoring) measured the
-gate itself:
+**Finding 2 — the gate governed 5% of the output.** Backward references were
+2,342 of the ~49,700 documents the strategy returned; the other ~95% were
+ungated forward citers. The profile, the negative term and $K$ were all tuning
+one twentieth of the result — and the cleaner twentieth. This is also why
+$\gamma$ looked inert: $\gamma = 0 \to 0.25$ moved the total from 172 hits to
+**173**, one document across ~48,000 retrieved. Re-running with full abstracts
+instead of titles changed nothing (172 / 173 / 172), refuting the obvious
+"scoring fidelity" explanation.
 
-| arm | median P | median R | median F1 | total retrieved | total hits |
+**Finding 3 — gating the other way is much better.** Two arms, 12 reviews:
+
+| arm | median P | median R | median F1 | retrieved | pooled P |
 |---|---|---|---|---|---|
-| `backward` (ungated) | 0.0399 | 0.1426 | **0.0634** | 2,342 | 95 |
-| `both` (= bfs) | 0.0244 | 0.3252 | 0.0442 | 49,683 | 205 |
-| `relevance` γ=0 | 0.0247 | 0.2659 | 0.0434 | 47,975 | 172 |
-| `relevance` γ=0.25 | 0.0247 | 0.2659 | 0.0434 | 47,974 | 173 |
-| `relevance` γ=0.5 | 0.0263 | 0.2726 | 0.0461 | 47,972 | 177 |
+| `relevance` (original) | 0.0247 | 0.2659 | 0.0434 | 47,974 | 0.36% |
+| `both` (= bfs) | 0.0244 | 0.3252 | 0.0442 | 49,683 | 0.41% |
+| `relevance_fwd` | 0.0520 | 0.1760 | 0.0718 | 2,712 | 4.46% |
+| **`relevance_seeds`** | **0.0854** | 0.1406 | **0.0927** | **975** | **10.56%** |
 
-Two things fall out.
+`relevance_fwd` inverts the design (profile on backward, gate forward);
+`relevance_seeds` is the control — profile on the **seeds alone**, gate both —
+and it wins: better F1 in 10 of 12 reviews, better precision in 11 of 12, and
+better than `relevance_fwd` in 11 of 12. Because the arm *least* exposed to the
+circularity worry (the ground truth is itself a reference list, which could
+flatter an arm that profiles on references) is the strongest, the result is not
+an artefact. **`relevance_seeds` is what stage 2 now implements.**
 
-**The negative term is inert at its default.** Going from γ=0 to γ=0.25 changes
-the outcome in 4 of 12 reviews and moves the total from 172 hits to 173 — one
-document across nearly 48,000 retrieved. γ=0.5 moves it to 177.
+**Finding 4 — $K$ is the knob, not $\gamma$.** Swept on `relevance_seeds`:
 
-The obvious suspect was the input: scoring on iCite *titles* would leave every
-candidate pointing much the same way in embedding space, so the tail centroid
-would nearly parallel the positive one and subtracting it would rescale more than
-it reorients. **That explanation was tested and is wrong.** Re-run with
-`--abstracts`, scoring on title + abstract, the gate finds *exactly* the same
-number of hits — 172, 173, 172 for γ = 0, 0.25, 0.5 — against 172, 173, 177 on
-titles. Richer text bought nothing; at γ=0.5 it cost 5 hits.
+```
+     K   median precision             median recall                   corpus
+   ───   ───────────────────────────   ────────────────────────────   ──────
+    10   ████████████ 0.1255          ███ 0.0333                         199
+    25   █████████ 0.0941             ███████ 0.0903                     486
+    50   ████████ 0.0854              ███████████ 0.1406                 975
+   100   ██████ 0.0624                ███████████████████ 0.2473       1,948
+   200   █████ 0.0511                 ███████████████████████ 0.2992   3,350
+   400   ████ 0.0385                  ████████████████████████ 0.3186  4,780
+   800   ███ 0.0328                   █████████████████████████ 0.3252  6,595
+   ───   ───────────────────────────   ────────────────────────────   ──────
+   bfs   ██ 0.0244                    █████████████████████████ 0.3252 49,683
+```
 
-So the negative term is inert regardless of how good the text is, which points
-back at the structural problem below rather than at the scoring.
+The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
+same recall as `bfs`, 0.3252, on 87% less material.** The recall gap at smaller
+$K$ is the cutoff choosing, not the gate losing — so there is no breadth argument
+for unfiltered snowballing.
 
-**The gate is attached to the wrong 5%.** Compared with `both`, relevance
-retrieves 3.4% fewer candidates and loses 15.6% of the hits. It looks
-ineffective because it *is* barely acting: backward references are only 2,342 of
-the ~49,700 documents this strategy returns. The other ~95% are forward citers,
-added with no filtering at all. So the entire apparatus — profile, negative term,
-top-K — tunes a knob controlling one twentieth of the output, and (per the
-measurement above) the cleaner twentieth at that.
+Choose $K$ by what stage 6 needs rather than by F1:
 
-Plain `backward` retrieves 2,342 documents for 95 hits — 4.1% precision, against
-0.4% for `both`. On this benchmark, doing less is worth more.
+- **$K \approx 10\text{–}25$** — sharpest (F1 peaks at 25), for reading a tight
+  corpus yourself.
+- **$K = 50$** (default) — best paired record of any $K$: better F1 than `bfs` in
+  11 of 12 reviews, than raw `backward` in 10 of 12, and best of any $K$ in 7 of 12.
+- **$K \approx 100\text{–}200$** — for ABC discovery, which can only find an A–C
+  pair if some B is in the corpus: 76–92% of `bfs`'s recall at 2.1–2.6× its
+  median precision (13–18× by pooled precision), on 93–96% less material.
 
-This also explains the inert negative term without appealing to text quality: no
-setting of γ can move an aggregate when the thing γ controls is one twentieth of
-the output.
+**Caveats.** 12 reviews for the gate comparisons, 40 for the asymmetry. Scoring
+used iCite titles, though the abstract re-run agreed. Ground truth is a reference
+list, which may favour backward-ish arms generally — a topic-labelled benchmark
+would be the independent check.
 
-### Measured: gating the other way is much better
+### 2.6 When it breaks
 
-The obvious implication — gate forward rather than backward — was then tested
-directly. Two arms, 12 reviews, γ=0.25:
+- **Seeds that don't share a topic.** The profile is one centroid, so a two-topic
+  seed set averages to the space *between* them and can rank papers from neither
+  highly. Run them as separate corpora.
+- **Very few seeds.** One seed makes $\mathbf{q}_0$ that paper's own vector, and
+  the gate becomes "papers similar to this one" rather than "papers about this
+  topic".
+- **$K$ is a count, not a threshold.** Exactly $K$ papers are kept per direction
+  even when none of them are close, and equally $K$ is a ceiling when hundreds
+  are.
+- **No PMIDs, no expansion.** PDF-only corpora cannot seed this at all.
 
-- **`relevance_fwd`** inverts the design: profile on seeds + backward references,
-  gate the forward citers, pass backward through.
-- **`relevance_seeds`** is the control: profile on the **seeds alone** and gate
-  *both* directions, trusting neither. It exists because `relevance_fwd`
-  profiles on backward references while the ground truth *is* a reference list,
-  which could flatter it circularly.
+### 2.7 The other strategy: `bfs`
 
-| arm | median P | median R | median F1 | retrieved | hits | overall precision |
-|---|---|---|---|---|---|---|
-| `relevance` (shipped) | 0.0247 | 0.2659 | 0.0434 | 47,974 | 173 | 0.36% |
-| `both` (= bfs) | 0.0244 | **0.3252** | 0.0442 | 49,683 | 205 | 0.41% |
-| `backward` | 0.0399 | 0.1426 | 0.0634 | 2,342 | 95 | 4.06% |
-| `relevance_fwd` | 0.0520 | 0.1760 | 0.0718 | 2,712 | 121 | 4.46% |
-| **`relevance_seeds`** | **0.0854** | 0.1406 | **0.0927** | **975** | 103 | **10.56%** |
-
-Both inversions beat the shipped strategy, and **the control wins outright** —
-`relevance_seeds` has the better F1 in 10 of 12 reviews, the better precision in
-11 of 12, and beats `relevance_fwd` in 11 of 12. Since the arm *least* exposed to
-the circularity worry is the strongest, the result is not an artefact of the
-ground truth being a reference list.
-
-Read together with everything above, the conclusion is specific: **profiling on
-forward citers is actively harmful.** Dropping them from the profile and gating
-both directions turns 47,974 retrieved documents at 0.36% precision into 975 at
-10.56% — a 29× improvement in precision for 49× less material.
-
-**This is now implemented.** `relevance` builds its profile from the seeds alone
-and gates both directions; the numbers in this section are what motivated the
-change, and the `relevance` arm in the benchmark still reproduces the old
-behaviour for comparison.
-
-### The knob that actually matters: top-K, swept
-
-`both` has the better **recall** in the table above (0.3252 against 0.1406), and
-this pipeline's downstream job — term enrichment and ABC discovery — may prefer
-breadth to cleanliness. But that gap is not a property of the gate; it is
-`expand_top_k`, which caps each gated direction. Swept on `relevance_seeds`
-(12 reviews, γ=0.25):
-
-| K | median P | median R | median F1 | retrieved | hits | overall P |
-|---|---|---|---|---|---|---|
-| 10 | **0.1255** | 0.0333 | 0.0504 | 199 | 28 | **14.07%** |
-| 25 | 0.0941 | 0.0903 | **0.0948** | 486 | 56 | 11.52% |
-| 50 | 0.0854 | 0.1406 | 0.0927 | 975 | 103 | 10.56% |
-| 100 | 0.0624 | 0.2473 | 0.0865 | 1,948 | 146 | 7.49% |
-| 200 | 0.0511 | 0.2992 | 0.0745 | 3,350 | 183 | 5.46% |
-| 400 | 0.0385 | 0.3186 | 0.0611 | 4,780 | 195 | 4.08% |
-| 800 | 0.0328 | **0.3252** | 0.0542 | 6,595 | 201 | 3.05% |
-| *`both`* | *0.0244* | *0.3252* | *0.0442* | *49,683* | *205* | *0.41%* |
-| *`backward`* | *0.0399* | *0.1426* | *0.0634* | *2,342* | *95* | *4.06%* |
-
-Three things worth taking from this.
-
-**The gate dominates `bfs` rather than trading against it.** At K=800 it reaches
-the same median recall as `both` — 0.3252 — with 201 of its 205 hits, from 6,595
-documents instead of 49,683. That is 98% of the findings for 13% of the material,
-at 7.4× the precision. There is no recall argument for `both`: whatever breadth
-you want, the gate gets it more cleanly.
-
-**The shipped `expand_top_k = 50` is a good default.** It has the better F1 in 11
-of 12 reviews against `both` and 10 of 12 against `backward` — the best paired
-record of any K tried. The parameter was never the problem; the profile source
-was.
-
-**Pick K by what stage 6 needs, not by F1.** F1 peaks at K=25, but ABC discovery
-wants intermediates, and an A–C pair can only be found if some B is in the
-corpus. K≈100–200 buys recall of 0.25–0.30 at 2.1–2.6× `both`'s median
-precision (13–18× by pooled precision) while retrieving 93–96% less material,
-which is likely the right region for hypothesis generation; K≈10–25 is for
-reading a tight corpus yourself.
-
-`rocchio_gamma`, by contrast, changed one document in twelve reviews. Sweep K.
-
-### The assumption, and when it breaks
-
-"Forward converges" is a heuristic, not a law. It holds for a **topical research
-seed**, where citations track the finding. It weakens badly for a **method,
-tool, or review** paper: those get cited across every field that uses them, so
-the citing set is broad, the profile averages over unrelated topics, and the
-phase-2 gate stops discriminating. If your seeds are methods papers, expect the
-filter to behave more like plain BFS.
-
-Two smaller caveats: the profile is a **single centroid**, so a genuinely
-two-topic seed set averages into the space between them and may rank papers from
-*neither* topic highly; and top-**K** is a fixed count, not a similarity
-threshold, so K papers are always kept even when none of them are close.
-
-### The other strategy
-
-`bfs` — plain snowball, no gating. Each round takes the current frontier, adds
-everything linked to it, and chases those in the next round, until it hits the
-record cap. Direction is yours: `references` (backward), `cited_by` (forward),
-or `both`. Use it when you want exhaustive coverage of a small, tight seed set
-and intend to do the filtering yourself.
+Plain snowball, no gating. Each round takes the current frontier, adds everything
+linked to it, and chases those next, up to the record cap. Direction is yours:
+`references` (backward), `cited_by` (forward), or `both`. Use it when you want
+exhaustive coverage of a small, tight seed set and intend to do the filtering
+yourself — noting that on the benchmark, `relevance` reaches the same recall more
+cleanly at large $K$.
 
 ### Controls
 
-Citation expansion rounds (0 = off) · Follow · Source (NCBI ELink, NIH iCite, or
-the union) · Strategy · Relevance top-K · Max records.
-
-Two things about the controls are easy to get wrong:
-
-- **Selecting `relevance` runs expansion even with rounds set to 0.** The rounds
-  spinbox drives `bfs` only. Relevance depth is a separate pair of settings
-  (`Config.expand_fwd_rounds` and `expand_back_rounds`, both 1 by default) that
-  the GUI doesn't expose — one round forward, one round backward.
-- **`Follow` is ignored by `relevance`**, which by construction always goes
-  forward first and backward second.
-
-The Rocchio settings (`rocchio_gamma`, `rocchio_neg_frac`,
-`rocchio_min_candidates`) are Python-API only — the GUI and CLI use the
-defaults.
+Citation expansion rounds (0 = off) · Follow · Source · Strategy · Relevance
+top-K · Max records.
 
 ## 3. Extract entities
 

@@ -239,38 +239,52 @@ references while `icite` finds 184; `all` gives the union.)
 Seeds without a PMID (raw PDFs, refs lacking an accession) can't be expanded by
 either source. Cycles are avoided: a record already seen is never re-queued.
 
-**Relevance-guided expansion** (`--expand-strategy relevance`) is a smarter,
-two-phase alternative to the plain BFS snowball. It exploits an asymmetry
-between the two link directions — forward citations were expected to be
-topically *precise* but limited, backward references *comprehensive* but noisy —
-by spending the precision of the first direction as a filter on the recall of the
-second. **Benchmarking has not borne that out** (backward measured *more*
-precise, in 33 of 40 systematic reviews); see [docs/benchmark.md](docs/benchmark.md). (No
-model is trained: this is pseudo-relevance feedback, the profile is a centroid,
-and the gate is a cosine ranking. Full reasoning in
-[How bioleads works](docs/how_it_works.md#2-grow-the-corpus-by-following-citations).)
+**Relevance-guided expansion** (`--expand-strategy relevance`) is a filtered
+alternative to the plain BFS snowball. Both citation directions are noisy, so
+neither is trusted:
 
-1. **Phase 1 — forward (`cited_by`).** Papers that cite your seeds tend to
-   *converge* on the seed's topic, so the seeds plus their citers are used to
-   build a **topic profile** (a term/embedding fingerprint of the subject). All
-   forward citers are added to the corpus.
-2. **Phase 2 — backward (`references`), gated.** A paper's reference list is
-   topically *diffuse* — it cites methods, tangential background, and adjacent
-   fields alongside the on-topic work. So rather than swallow every reference,
-   each candidate is scored against the Phase-1 profile and only the
-   `--expand-top-k` most relevant are kept.
+1. **Profile from the seeds alone.** Your seed documents are the only papers
+   known to be on topic, so they — and nothing else — form the **topic profile**
+   (a term/embedding fingerprint of the subject).
+2. **Both directions gated against it.** Forward citers (`cited_by`) and
+   backward references (`references`) are each collected, scored against that
+   profile, and cut to the `--expand-top-k` most relevant *per direction*.
+   Nothing passes through unfiltered.
 
-Relevance is measured by **NER term-overlap cosine**, automatically upgraded to
-**PubMedBERT cosine** when the `embed` extra is installed. The profile is a
-**Rocchio query vector**: the positive centroid of the Phase-1 documents *minus*
-`rocchio_gamma` times the centroid of the worst-scoring candidates. Those
-negatives come free from the candidate pool's own tail — citation-adjacent but
-off-topic, which is the distinction the gate actually has to make. Set
-`rocchio_gamma=0` for a positive-only centroid. Added records are
-tagged with their phase (`forward`/`backward`) and, for kept references, a
-`relevance` score. Caveat: the "forward converges" assumption is strongest for
-topical research seeds; a popular *method/tool/review* seed gets cited across
-many fields, so its profile is broader and the Phase-2 gate discriminates less.
+Relevance is **NER term-overlap cosine**, automatically upgraded to **PubMedBERT
+cosine** when the `embed` extra is installed. The profile is a **Rocchio query
+vector**: the centroid of the seed documents minus `rocchio_gamma` times the
+centroid of the worst-scoring candidates (set `rocchio_gamma=0` for a
+positive-only centroid). Every kept record is tagged with its direction
+(`forward`/`backward`) and its `relevance` score.
+
+`--expand-top-k` is the control that matters: it sets corpus size and
+cleanliness together. Swept against systematic reviews (12 reviews, full table
+in [docs/benchmark.md](docs/benchmark.md)):
+
+| K | median P | median R | median F1 | retrieved | vs BFS |
+|---|---|---|---|---|---|
+| 10 | 0.1255 | 0.0333 | 0.0504 | 199 | 10% of its recall, 100% less material |
+| 25 | 0.0941 | 0.0903 | **0.0948** | 486 | 28% |
+| **50** | 0.0854 | 0.1406 | 0.0927 | 975 | 43% — best in 7 of 12 reviews |
+| 100 | 0.0624 | 0.2473 | 0.0865 | 1,948 | 76% of its recall, 96% less material |
+| 200 | 0.0511 | 0.2992 | 0.0745 | 3,350 | 92%, 93% less |
+| 800 | 0.0328 | 0.3252 | 0.0542 | 6,595 | **100%**, 87% less |
+
+K=25 is sharpest and **K=50** (the default) has the best paired record. But note
+the last row: at K=800 the strategy matches BFS's recall *exactly* while
+retrieving 87% less. K≈100–200 is the region to prefer when the corpus feeds ABC
+discovery, which needs the intermediate concepts present at all — 76–92% of BFS's
+reach at 2–3× its median precision.
+
+> **This design replaced an earlier one, on evidence.** Until 2026-08 the profile
+> was built from the seeds *plus* their forward citers, and every citer was added
+> ungated, on the theory that citing papers converge on a seed's topic while
+> reference lists sprawl. Benchmarking measured the opposite: forward citers were
+> the *less* precise direction, made up ~95% of the returned volume, and putting
+> them in the profile actively hurt. Profiling on seeds alone and gating both
+> directions took 47,974 retrieved documents at 0.36% precision to 975 at 10.56%.
+> Full numbers and method in [docs/benchmark.md](docs/benchmark.md).
 
 ### GUI
 

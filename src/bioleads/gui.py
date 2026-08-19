@@ -222,8 +222,7 @@ class BioleadsGUI:
             "Stage 2 · Grow the corpus. Follow citation links out from the "
             "PMID seeds this many rounds (0 = off); each round chases what the "
             "previous round found. Drives the bfs strategy only — relevance "
-            "always runs one round forward then one round backward, even with "
-            "this set to 0.")
+            "always runs one round in each direction, even with this set to 0.")
         ttk.Label(exp, text="Follow:").pack(side="left")
         follow_menu = ttk.OptionMenu(exp, self.expand_link_var, self.expand_link_var.get(),
                                      "references", "cited_by", "both")
@@ -233,8 +232,8 @@ class BioleadsGUI:
             "Stage 2 · Grow the corpus. references = papers your seeds cite "
             "(backward, into the foundations); cited_by = papers that cite your "
             "seeds (forward, into the follow-up work); both = the union. "
-            "Ignored by the relevance strategy, which always runs forward then "
-            "backward.")
+            "Ignored by the relevance strategy, which always does both, gating "
+            "each.")
         ttk.Label(exp, text="Source:").pack(side="left")
         source_menu = ttk.OptionMenu(exp, self.expand_source_var, self.expand_source_var.get(),
                                      "all", "ncbi", "icite")
@@ -264,12 +263,11 @@ class BioleadsGUI:
             strategy_menu,
             "Stage 2 · Grow the corpus. bfs snowballs along Follow, adding "
             "every linked paper — exhaustive, and it drifts off topic because a "
-            "reference list spans every field the seed touched. relevance uses "
-            "the reliable direction to filter the unreliable one: papers citing "
-            "your seeds are topically tight, so it averages them into a topic "
-            "profile, subtracts the candidate pool's own off-topic tail from it, "
-            "then keeps only the top-K of the seeds' references by cosine "
-            "similarity — backward reach without backward noise.")
+            "reference list spans every field the seed touched. relevance "
+            "trusts neither direction: it builds a topic profile from your "
+            "seeds alone, then keeps only the top-K papers most similar to it "
+            "in each direction. Benchmarked far cleaner than bfs at equal "
+            "reach — see docs/benchmark.md.")
         ttk.Label(exp2, text="Relevance top-K:").pack(side="left")
         topk_spin = ttk.Spinbox(exp2, from_=1, to=100000, width=6,
                                 textvariable=self.expand_topk_var)
@@ -277,11 +275,13 @@ class BioleadsGUI:
         self._add_tooltip(
             topk_spin,
             "Stage 2 · Grow the corpus. Relevance strategy only (ignored by "
-            "bfs). In phase 2, the seeds' backward references are scored "
-            "against the topic profile and only the top-K are kept. Lower K "
-            "(~20–50) stays tight on the seed topic but may miss links; higher "
-            "K (~200+) casts a wider net but pulls in more off-topic papers. "
-            "Max records still caps the total.")
+            "bfs). Candidates in each direction are scored against the seed "
+            "profile and only the top-K are kept — so this is the main control "
+            "over corpus size and cleanliness. Benchmarked: K=25 is sharpest, "
+            "K=50 the best all-round (the default), and K~100–200 keeps 76–92% "
+            "of bfs's reach at 2–3x its precision — prefer that range when you "
+            "want ABC hypotheses, which need the linking concepts present at "
+            "all. Max records still caps the total.")
 
     def _row_entry(self, parent, row, label, var, button=None, hint=None) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=6, pady=3)

@@ -1,18 +1,24 @@
 """Relevance-guided two-phase citation expansion (pseudo-relevance feedback).
 
-The intuition (see README "Citation expansion"):
+Both citation directions are noisy, so neither is trusted and both are filtered:
 
-* **Forward** links (`cited_by`) *converge* on a topic — a paper that cites your
-  seed is usually working in the same area — so the seeds plus their citers make
-  a clean **topic profile**.
-* **Backward** links (`references`) *diverge* — a paper cites methods, tangential
-  background, and adjacent fields alongside the on-topic work — so swallowing a
-  reference list is noisy.
+* The **profile** is built from the seed documents alone — the only papers we
+  know are on topic, because the user chose them.
+* **Forward** links (`cited_by`) and **backward** links (`references`) are each
+  collected, scored against that profile, and cut to the top-K.
 
-So we use Phase 1 (forward) to learn what the topic looks like, then in Phase 2
-score each backward reference against that profile and keep only the most
-relevant (top-K). Relevance is NER term-overlap cosine, auto-upgraded to
-PubMedBERT cosine when the `embed` extra is installed.
+Relevance is NER term-overlap cosine, auto-upgraded to PubMedBERT cosine when
+the `embed` extra is installed.
+
+This replaces an earlier design that built the profile from the seeds *plus*
+their forward citers and passed every citer through ungated, on the theory that
+citing papers converge on a seed's topic. Benchmarking against systematic
+reviews (see docs/benchmark.md) measured that theory false: forward citers were
+the *less* precise direction, they made up ~95% of the returned volume, and
+including them in the profile actively hurt. Profiling on seeds alone and gating
+both directions took 47,974 retrieved documents at 0.36% precision to 975 at
+10.56%, and at a high enough top-K it matches plain BFS recall while retrieving
+87% less.
 
 The profile is a Rocchio query vector: the positive centroid of the profile
 documents, minus `cfg.rocchio_gamma` times the centroid of the worst-scoring
@@ -47,11 +53,12 @@ def relevance_guided_expand(
     log=None,
     cancel=None,
 ) -> list[Document]:
-    """Return new Documents to append: all forward citers + top-K relevant refs.
+    """Return new Documents to append: the top-K relevant of each direction.
 
-    `seed_docs` are the already-loaded documents; their PMIDs seed both phases
-    and their text feeds the topic profile. Network failures in either phase are
-    non-fatal — the phase that succeeds still contributes.
+    `seed_docs` are the already-loaded documents; their PMIDs seed both
+    directions and their text — and only their text — forms the topic profile.
+    Network failures in either direction are non-fatal: whichever succeeds still
+    contributes.
     """
     cfg = cfg or Config()
     email = email or cfg.entrez_email
@@ -64,55 +71,46 @@ def relevance_guided_expand(
         return []
     have = {d.doc_id for d in seed_docs}
 
-    # ---- Phase 1: forward (cited_by) → topic profile --------------------------
-    _check_cancel(cancel)
-    say(f"  phase 1 (cited_by): collecting papers that cite {len(seeds)} seed(s)…")
-    fwd_ids = expand_pmids(
-        seeds, rounds=cfg.expand_fwd_rounds, link="cited_by",
-        source=cfg.expand_source, max_records=cfg.expand_max,
-        email=email, api_key=api_key, cancel=cancel, progress=log,
-    )
-    fwd_new = [i for i in fwd_ids if i not in seeds and f"PMID:{i}" not in have]
-    fwd_docs = (
-        fetch_pubmed_by_ids(fwd_new, email=email, api_key=api_key,
-                            fulltext=fulltext, cancel=cancel, progress=log)
-        if fwd_new else []
-    )
-    for d in fwd_docs:
-        d.meta["expanded"] = True
-        d.meta["expand_phase"] = "forward"
-    say(f"  phase 1 (cited_by): {len(fwd_docs)} citing papers → topic profile")
+    # The profile is the seeds themselves: the only documents known to be on
+    # topic. Citers were once folded in here; benchmarking showed that hurt.
+    profile_docs = list(seed_docs)
+    seen = set(have)
+    added: list[Document] = []
 
-    profile_docs = list(seed_docs) + fwd_docs
+    def _collect(phase: str, link: str, rounds: int):
+        """Fetch one direction's candidates and keep the top-K by relevance."""
+        _check_cancel(cancel)
+        say(f"  {phase} ({link}): collecting candidates from {len(seeds)} seed(s)…")
+        ids = expand_pmids(
+            seeds, rounds=rounds, link=link,
+            source=cfg.expand_source, max_records=cfg.expand_max,
+            email=email, api_key=api_key, cancel=cancel, progress=log,
+        )
+        new = [i for i in ids if i not in seeds and f"PMID:{i}" not in seen]
+        docs = (
+            fetch_pubmed_by_ids(new, email=email, api_key=api_key,
+                                fulltext=fulltext, cancel=cancel, progress=log)
+            if new else []
+        )
+        if not docs:
+            say(f"  {phase} ({link}): no new candidates.")
+            return
+        say(f"  scoring {len(docs)} {link} candidate(s) against the seed profile…")
+        kept = _top_k_relevant(profile_docs, docs, cfg, say=say)
+        for d, score in kept:
+            d.meta["expanded"] = True
+            d.meta["expand_phase"] = phase
+            d.meta["relevance"] = round(float(score), 4)
+            seen.add(d.doc_id)
+        added.extend(d for d, _ in kept)
+        say(f"  {phase} ({link}): kept {len(kept)} of {len(docs)} candidate(s) "
+            f"by relevance (top_k={cfg.expand_top_k})")
 
-    # ---- Phase 2: backward (references), gated by relevance -------------------
-    _check_cancel(cancel)
-    say("  phase 2 (references): collecting backward references to score…")
-    bwd_ids = expand_pmids(
-        seeds, rounds=cfg.expand_back_rounds, link="references",
-        source=cfg.expand_source, max_records=cfg.expand_max,
-        email=email, api_key=api_key, cancel=cancel, progress=log,
-    )
-    seen = have | {f"PMID:{i}" for i in fwd_new}
-    bwd_new = [i for i in bwd_ids if i not in seeds and f"PMID:{i}" not in seen]
-    bwd_docs = (
-        fetch_pubmed_by_ids(bwd_new, email=email, api_key=api_key,
-                            fulltext=fulltext, cancel=cancel, progress=log)
-        if bwd_new else []
-    )
-
-    if bwd_docs:
-        say(f"  scoring {len(bwd_docs)} backward reference(s) against the topic "
-            f"profile…")
-    kept = _top_k_relevant(profile_docs, bwd_docs, cfg, say=say)
-    for d, score in kept:
-        d.meta["expanded"] = True
-        d.meta["expand_phase"] = "backward"
-        d.meta["relevance"] = round(float(score), 4)
-    say(f"  phase 2 (references): kept {len(kept)} of {len(bwd_docs)} candidates "
-        f"by relevance (top_k={cfg.expand_top_k})")
-
-    return fwd_docs + [d for d, _ in kept]
+    # Forward first only so its keeps are de-duplicated out of the backward
+    # pool; neither direction is privileged any more.
+    _collect("forward", "cited_by", cfg.expand_fwd_rounds)
+    _collect("backward", "references", cfg.expand_back_rounds)
+    return added
 
 
 def _top_k_relevant(profile_docs, cand_docs, cfg, *, say=None):

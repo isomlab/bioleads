@@ -386,10 +386,10 @@ def test_progress_callback_reports_each_stage():
     assert [d.doc_id for d, _ in kept] == ["PMID:200"]
 
 
-def test_relevance_guided_expand_two_phase(monkeypatch):
-    # Forward citers seed the topic profile; backward refs are gated to top-K by
-    # relevance to it. Stub the network; with no `embed` extra the scorer falls
-    # back to NER term overlap.
+def test_relevance_guided_expand_gates_both_directions(monkeypatch):
+    # The profile is the seeds alone, and BOTH directions are cut to top-K.
+    # Stub the network; with no `embed` extra the scorer falls back to NER
+    # term overlap.
     import bioleads.expansion as E
 
     seed_docs = [Document(doc_id="PMID:1",
@@ -399,15 +399,16 @@ def test_relevance_guided_expand_two_phase(monkeypatch):
     def fake_expand(seeds, *, rounds, link, source, max_records, email, api_key,
                     cancel=None, progress=None):
         if link == "cited_by":
-            return list(seeds) + ["100"]          # forward citer (on-topic)
+            return list(seeds) + ["100", "101"]   # one on-topic citer, one not
         if link == "references":
-            return list(seeds) + ["200", "201"]   # backward candidates
+            return list(seeds) + ["200", "201"]   # one on-topic ref, one not
         return list(seeds)
 
     texts = {
-        "100": "trpv1 vasodilation arterial tissue",                 # forward
-        "200": "trpv1 vasodilation channel calcium",                 # backward, on-topic
-        "201": "mitochondria glycolysis oxidative phosphorylation",  # backward, off-topic
+        "100": "trpv1 vasodilation arterial tissue",                 # fwd, on-topic
+        "101": "crystallography detector calibration software",      # fwd, off-topic
+        "200": "trpv1 vasodilation channel calcium",                 # bwd, on-topic
+        "201": "mitochondria glycolysis oxidative phosphorylation",  # bwd, off-topic
     }
 
     def fake_fetch(ids, *, email=None, api_key=None, fulltext=False, cancel=None,
@@ -421,15 +422,59 @@ def test_relevance_guided_expand_two_phase(monkeypatch):
     added = relevance_guided_expand(seed_docs, cfg)
     ids = {d.doc_id for d in added}
 
-    # the forward citer is always kept and tagged
+    # Forward is gated now, not passed through: the off-topic citer is dropped.
     assert "PMID:100" in ids
-    fwd = [d for d in added if d.meta.get("expand_phase") == "forward"]
-    assert fwd and all(d.meta.get("expanded") for d in fwd)
+    assert "PMID:101" not in ids, "forward citers must be gated, not added wholesale"
+    # Backward gated the same way.
+    assert "PMID:200" in ids
+    assert "PMID:201" not in ids
 
-    # backward gated to top_k=1 -> on-topic 200 kept, off-topic 201 dropped
+    # Both directions are tagged and scored.
+    fwd = [d for d in added if d.meta.get("expand_phase") == "forward"]
     bwd = [d for d in added if d.meta.get("expand_phase") == "backward"]
+    assert [d.doc_id for d in fwd] == ["PMID:100"]
     assert [d.doc_id for d in bwd] == ["PMID:200"]
-    assert "relevance" in bwd[0].meta
+    assert all(d.meta.get("expanded") for d in added)
+    assert all("relevance" in d.meta for d in added), \
+        "every kept document now carries its relevance score, forward included"
+
+
+def test_relevance_profile_is_the_seeds_alone(monkeypatch):
+    """A flood of off-topic citers must not drag the profile off the seed topic.
+
+    Under the old design the citers *were* the profile, so enough of them could
+    redefine the topic and let their own kind through.
+    """
+    import bioleads.expansion as E
+
+    seed_docs = [Document(doc_id="PMID:1", text="trpv1 vasodilation calcium artery",
+                          source="pubmed")]
+    citers = [str(300 + i) for i in range(12)]
+
+    def fake_expand(seeds, *, rounds, link, source, max_records, email, api_key,
+                    cancel=None, progress=None):
+        if link == "cited_by":
+            return list(seeds) + citers
+        if link == "references":
+            return list(seeds) + ["200", "201"]
+        return list(seeds)
+
+    texts = {c: "crystallography detector calibration synchrotron optics" for c in citers}
+    texts["200"] = "trpv1 vasodilation channel calcium artery"
+    texts["201"] = "crystallography detector calibration synchrotron optics"
+
+    def fake_fetch(ids, *, email=None, api_key=None, fulltext=False, cancel=None,
+                   progress=None):
+        return [Document(doc_id=f"PMID:{i}", text=texts[i], source="pubmed") for i in ids]
+
+    monkeypatch.setattr(E, "expand_pmids", fake_expand)
+    monkeypatch.setattr(E, "fetch_pubmed_by_ids", fake_fetch)
+
+    added = relevance_guided_expand(
+        seed_docs, Config(expand_strategy="relevance", expand_top_k=1))
+    bwd = [d for d in added if d.meta.get("expand_phase") == "backward"]
+    # Twelve off-topic citers did not stop the on-topic reference winning.
+    assert [d.doc_id for d in bwd] == ["PMID:200"]
 
 
 def test_seed_pmids_from_documents():

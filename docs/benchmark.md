@@ -103,6 +103,39 @@ and the gate as a whole governs only ~5% of what the relevance strategy returns
 scoring) and are unchanged — richer text does not rescue the gate, so the cause
 is structural rather than a scoring-fidelity artefact.
 
+## The top-K sweep
+
+`expand_top_k` caps each gated direction, and it is the parameter that actually
+moves the numbers — unlike `rocchio_gamma`, which moved one document in twelve
+reviews. Swept on `relevance_seeds` at γ=0.25, 12 reviews, 5 seeds, titles
+scoring, year cutoff on:
+
+| K | median P | median R | median F1 | retrieved | hits | pooled P | beats `both` |
+|---|---|---|---|---|---|---|---|
+| 10 | 0.1255 | 0.0333 | 0.0504 | 199 | 28 | 14.07% | 4/12 |
+| 25 | 0.0941 | 0.0903 | **0.0948** | 486 | 56 | 11.52% | 9/12 |
+| **50** | 0.0854 | 0.1406 | 0.0927 | 975 | 103 | 10.56% | **11/12** |
+| 100 | 0.0624 | 0.2473 | 0.0865 | 1,948 | 146 | 7.49% | 11/12 |
+| 200 | 0.0511 | 0.2992 | 0.0745 | 3,350 | 183 | 5.46% | 10/12 |
+| 400 | 0.0385 | 0.3186 | 0.0611 | 4,780 | 195 | 4.08% | — |
+| 800 | 0.0328 | **0.3252** | 0.0542 | 6,595 | 201 | 3.05% | — |
+
+Reference lines: `both` (= bfs) median P 0.0244, R 0.3252, F1 0.0442, 49,683
+retrieved, 205 hits, 0.41% pooled. `backward` 0.0399 / 0.1426 / 0.0634, 2,342
+retrieved.
+
+Reading it:
+
+- **F1 peaks at K=25**, but **K=50 has the best paired record** — better F1 than
+  `both` in 11 of 12 reviews and than `backward` in 10 of 12, and the best F1 of
+  any K in 7 of 12. That is why 50 is the default.
+- **At K=800 recall equals `both` exactly** (0.3252) on 87% less material. The
+  gate is not trading recall away; below that it is choosing to.
+- **K≈100–200 is the region for ABC discovery**, which can only find an A–C pair
+  if some B is in the corpus: 76–92% of `both`'s recall at 2.1–2.6× its median
+  precision, retrieving 93–96% less.
+- Pick K by what stage 6 needs, not by F1.
+
 If you re-run and get a different answer, the parameters that matter most are
 `--seeds` (fewer seeds means a narrower profile), `--min-refs`, and whether the
 year cutoff is on — check those before concluding the earlier run was wrong.

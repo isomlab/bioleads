@@ -73,17 +73,27 @@ class Config:
 
     # Expansion strategy:
     #   "bfs"       -> plain breadth-first snowball along expand_link (above).
-    #   "relevance" -> two-phase, pseudo-relevance-feedback expansion:
-    #       Phase 1 follows cited_by (forward; converges on the seed topic) and
-    #       builds a topic profile from the seeds + their citers. Phase 2 follows
-    #       references (backward; topically diffuse) but keeps only the
-    #       expand_top_k candidates most similar to that profile. Relevance uses
-    #       NER term-overlap, auto-upgrading to PubMedBERT cosine when the
-    #       `embed` extra is installed.
+    #   "relevance" -> pseudo-relevance-feedback expansion. The topic profile is
+    #       built from the seed documents alone; both directions (cited_by, then
+    #       references) are collected, scored against it, and cut to the
+    #       expand_top_k most similar. Relevance uses NER term-overlap,
+    #       auto-upgrading to PubMedBERT cosine when the `embed` extra is
+    #       installed.
+    #       Until 2026-08 the profile also contained the forward citers, which
+    #       were then added ungated. Benchmarking against systematic reviews
+    #       (docs/benchmark.md) measured that worse on every count, so both
+    #       directions are now gated and only the seeds define the topic.
     expand_strategy: str = "bfs"
-    expand_fwd_rounds: int = 1   # phase-1 (cited_by) depth
-    expand_back_rounds: int = 1  # phase-2 (references) depth
-    expand_top_k: int = 50       # keep this many most-relevant backward papers
+    expand_fwd_rounds: int = 1   # cited_by depth
+    expand_back_rounds: int = 1  # references depth
+    # Keep this many most-relevant papers *per direction*. Swept on the
+    # systematic-review benchmark (12 reviews; docs/benchmark.md): K=25 has the
+    # best median F1 (0.0948), K=50 the best paired record (best in 7 of 12) at
+    # F1 0.0927, and K~100-200 keeps 76-92% of BFS's recall at 2-3x its median
+    # precision while retrieving 93-96% less material — the region to prefer
+    # when the corpus feeds ABC discovery, which needs the intermediate concepts
+    # present at all. Recall matches BFS exactly at K=800, still on 87% less.
+    expand_top_k: int = 50
 
     # --- Relevance gating (Rocchio) ---
     # Phase 2 scores each backward reference against the phase-1 topic profile.

@@ -82,12 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--expand-strategy", choices=["bfs", "relevance"],
                    default="bfs",
                    help="'bfs' = plain snowball along --expand-link (default); "
-                        "'relevance' = two-phase: learn a topic profile from "
-                        "forward citers, then keep only the most on-topic "
-                        "backward references")
+                        "'relevance' = profile the topic from the seeds alone, "
+                        "then keep only the --expand-top-k most on-topic papers "
+                        "in each direction")
     p.add_argument("--expand-top-k", type=int, default=Config.expand_top_k,
                    metavar="K", help="relevance strategy: keep the K most "
-                                     "on-topic backward references")
+                                     "on-topic papers per direction")
     p.add_argument("--expand-max", type=int, default=Config.expand_max,
                    metavar="N", help="cap on total PMIDs (seeds + discovered)")
     p.add_argument("--citations", action=argparse.BooleanOptionalAction,

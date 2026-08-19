@@ -117,20 +117,18 @@ foundational work, the older literature, the papers that ABC discovery (stage 6)
 needs in order to find a connection nobody has stated. You don't want to skip
 it. You want to *filter* it.
 
-### The move: use the reliable direction to filter the unreliable one
+### The move: trust the seeds, filter everything else
 
-That's what `relevance` does. It spends the precision of the forward direction
-on the recall of the backward one:
+That reasoning is what the design was *originally* built on, and measurement
+overturned it (below). What `relevance` does **now** is trust neither direction:
 
-1. **Phase 1 — build a topic profile from forward citations.** Collect the
-   papers citing your seeds. Because that set is topically concentrated, seeds +
-   citers together are a decent empirical description of "what this topic looks
-   like". They're condensed into a single **profile vector**: the mean of the
-   unit-normalized PubMedBERT embeddings of those documents.
-2. **Phase 2 — score the backward references against it.** Collect the seeds'
-   references — the diffuse, high-recall direction — embed each one, and rank it
-   by **cosine similarity to the profile**. Keep only the top **K**. The rest
-   are discarded before they ever reach the corpus.
+1. **Profile from the seeds alone.** Your seed documents are the only papers
+   known to be on topic — you chose them. They're condensed into a single
+   **profile vector**: the mean of their unit-normalized PubMedBERT embeddings.
+2. **Gate both directions against it.** Forward citers and backward references
+   are each collected, embedded, ranked by **cosine similarity to the profile**,
+   and cut to the top **K** — per direction. Everything else is discarded before
+   it reaches the corpus.
 
 The profile is a **Rocchio query vector**, which means it has a negative half as
 well:
@@ -164,11 +162,10 @@ reference list's off-topic bulk.
 **No model is trained here.** Nothing is fit, and there are no learned
 parameters — the profile is a weighted difference of two averages, and the gate
 is a rank cutoff. In information-retrieval terms this is **pseudo-relevance
-feedback** in the classical Rocchio (1971) form: assume a set you retrieved is
-relevant, build a query representation out of it, then re-rank with that. The
-parts are all standard; what's specific to bioleads is *which* sets it trusts —
-forward citers as the positive evidence, the backward tail as the negative — and
-why those roles fall out of the citation direction.
+feedback** in the classical Rocchio (1971) form: treat a set as relevant, build
+a query representation out of it, then re-rank with that. In the current design
+the "relevant" set is simply the user's seeds, which makes it closer to ordinary
+relevance feedback than to the pseudo variety.
 
 **How relevance is measured.** With the `embed` extra installed, PubMedBERT
 cosine as described above. Without it, the same shape in a cheaper space: the
@@ -195,15 +192,15 @@ The two directions surface a comparable number of true hits — 403 forward agai
 397 backward — but forward has to drag in 2.88× as many candidates to do it, and
 one seed set pulled 30,848.
 
-So the direction this pipeline treats as *reliable* is, on this measure, the
-noisy one. Two consequences worth being blunt about:
+So the direction the pipeline *used to* treat as reliable is, on this measure,
+the noisy one. Two consequences followed, and both were acted on:
 
-- **The stated justification for `relevance` is unsupported.** It may still build
-  a better corpus than `bfs` — that is a separate question, measured separately —
-  but not for the reason given.
-- **The ungated half looks like the wrong half.** Phase 1 adds *every* forward
-  citer without filtering and only gates the backward references. The measurement
-  says the filtering effort is being spent on the cleaner direction.
+- **The stated justification for `relevance` was unsupported.** It builds a
+  better corpus than `bfs` — measured below — but not for the reason originally
+  given.
+- **The ungated half was the wrong half.** The old phase 1 added *every* forward
+  citer without filtering and gated only the backward references, spending the
+  filtering effort on the cleaner direction. Both are gated now.
 
 One caveat, stated once and not used to explain the result away: the ground truth
 *is* a reference list, so "can a seed's references predict other references" may
@@ -287,9 +284,10 @@ forward citers is actively harmful.** Dropping them from the profile and gating
 both directions turns 47,974 retrieved documents at 0.36% precision into 975 at
 10.56% — a 29× improvement in precision for 49× less material.
 
-**This is measured but not implemented.** Changing what the profile is built from
-changes what the strategy *is*, and that is a decision for the maintainer, not a
-docs edit.
+**This is now implemented.** `relevance` builds its profile from the seeds alone
+and gates both directions; the numbers in this section are what motivated the
+change, and the `relevance` arm in the benchmark still reproduces the old
+behaviour for comparison.
 
 ### The knob that actually matters: top-K, swept
 
@@ -326,9 +324,10 @@ was.
 
 **Pick K by what stage 6 needs, not by F1.** F1 peaks at K=25, but ABC discovery
 wants intermediates, and an A–C pair can only be found if some B is in the
-corpus. K≈100–200 buys recall of 0.25–0.30 at 5–7× `both`'s precision, which is
-likely the right region for hypothesis generation; K≈10–25 is for reading a tight
-corpus yourself.
+corpus. K≈100–200 buys recall of 0.25–0.30 at 2.1–2.6× `both`'s median
+precision (13–18× by pooled precision) while retrieving 93–96% less material,
+which is likely the right region for hypothesis generation; K≈10–25 is for
+reading a tight corpus yourself.
 
 `rocchio_gamma`, by contrast, changed one document in twelve reviews. Sweep K.
 

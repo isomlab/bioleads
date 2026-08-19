@@ -156,6 +156,64 @@ def fig_tokens(n=1):
 
 
 # --------------------------------------------------------------------------- #
+# 2b. What the layers do to one token
+# --------------------------------------------------------------------------- #
+def fig_context(n=1):
+    """Why a token's stored numbers are not the numbers the model ends up using."""
+    W, H = 880, 400
+    b = [text(24, 30, f"{n} · The stored numbers are only a starting point", 15, INK,
+              weight="600")]
+    b.append(text(24, 56, "Following one token — “muscle”, row 3760 — through the "
+                  "twelve layers, in two different sentences.", 12, MUTED))
+
+    # the stored row
+    b.append(box(24, 92, 210, 78, fill="#ffffff"))
+    b.append(text(36, 114, "row 3760 of the table", 11, MUTED))
+    b.append(text(36, 136, "-0.09  -0.05  -0.09  …", 10.5, INK, mono=True))
+    b.append(text(36, 158, "the same every time", 10.5, MUTED, style="italic"))
+    b.append(text(24, 186, "context-free: identical in", 11, MUTED))
+    b.append(text(24, 202, "every sentence ever written", 11, MUTED))
+
+    b.append(arrow(240, 131, 292, 131, MUTED, 2))
+
+    # the layers
+    b.append(box(296, 86, 150, 92, fill="#e8eefb", stroke="#c3d3f2"))
+    b.append(text(371, 112, "12 layers", 12.5, BLUE, "middle", weight="600"))
+    b.append(text(371, 132, "each token looks at", 10.5, MUTED, "middle"))
+    b.append(text(371, 148, "every other token", 10.5, MUTED, "middle"))
+    b.append(text(371, 168, "and is rewritten", 10.5, MUTED, "middle"))
+    b.append(text(371, 200, "the sentence enters here", 11, MUTED, "middle"))
+
+    b.append(arrow(452, 131, 504, 131, MUTED, 2))
+
+    # two outcomes
+    for i, (sent, val, col) in enumerate([
+            ("“arterial smooth muscle …”", "+0.08  -0.03  +0.21  …", GREEN),
+            ("“he lost muscle mass …”", "-0.17  -0.08  +0.09  …", AMBER)]):
+        y = 92 + i * 76
+        b.append(box(510, y, 346, 60, fill="#ffffff"))
+        b.append(text(524, y + 22, sent, 11.5, col))
+        b.append(text(524, y + 44, val, 10.5, INK, mono=True))
+
+    b.append(box(24, 236, W - 48, 96, fill="#fff6e5", stroke="#f0d9a8"))
+    b.append(text(40, 260, "Measured on this exact token", 12.5, INK, weight="600"))
+    rows = [("stored row  vs  the artery sentence", "0.135"),
+            ("stored row  vs  the illness sentence", "0.140"),
+            ("the two sentences, against each other", "0.939")]
+    for i, (lab, v) in enumerate(rows):
+        b.append(text(40, 282 + i * 18, lab, 11.5, MUTED))
+        b.append(text(330, 282 + i * 18, v, 11.5, INK, "end", mono=True))
+    b.append(text(360, 288, "The stored row barely resembles what comes out —", 11.5, INK))
+    b.append(text(360, 306, "the layers do not adjust it, they replace it.", 11.5, INK))
+
+    b.append(text(24, 362, "So “muscle” in an artery paper and “muscle” in a wasting "
+                  "study are different numbers, which is what lets one vector stand "
+                  "for a meaning", 12, MUTED))
+    b.append(text(24, 380, "rather than a spelling.", 12, MUTED))
+    return svg(W, H, "".join(b), "The layers rewrite each token")
+
+
+# --------------------------------------------------------------------------- #
 # 2. Scoring by angle, with real cosines
 # --------------------------------------------------------------------------- #
 def fig_angle(n=1):
@@ -454,6 +512,7 @@ def fig_directions(n=1):
 ORDER = [
     ("two-directions", fig_directions),
     ("tokens-to-vector", fig_tokens),
+    ("token-in-context", fig_context),
     ("seed-direction", fig_centroid),
     ("scoring-by-angle", fig_angle),
     ("shared-direction", fig_shared),

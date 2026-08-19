@@ -159,11 +159,31 @@ outside those 30,522 entries cannot be represented at all, which is exactly why
 rare words get split until the pieces are all in the list.
 
 That row number then indexes a second table of **30,522 × 768 numbers** learned
-during training: one row of 768 per vocabulary entry. So a token starts as *the
-768 numbers stored for it*. Those starting numbers know nothing about context —
-`muscle` begins identically in "smooth muscle" and "muscle of the argument" — so
-twelve transformer layers then rewrite each token's 768 numbers by mixing in the
-other tokens around it. What comes out is that word *in that sentence*.
+during training: one row of 768 per vocabulary entry. So a token *starts* as the
+768 numbers stored for it.
+
+Those stored numbers know nothing about the sentence — `muscle` starts identically
+in "arterial smooth muscle" and "he lost muscle mass". That is the problem the
+twelve transformer layers exist to solve. In each layer, every token looks at
+every other token and is rewritten in light of them, twelve times over.
+
+![Figure 3 — the stored numbers are only a starting point](figures/03-token-in-context.svg)
+
+It is worth seeing how violent that rewrite is. Following the single token
+`muscle` through the model:
+
+| compared | cosine |
+|---|---|
+| its stored row vs. its vector in the artery sentence | **0.135** |
+| its stored row vs. its vector in the illness sentence | **0.140** |
+| the two sentence versions against each other | 0.939 |
+
+The stored row barely resembles what comes out. **The layers do not adjust the
+lookup, they largely replace it** — the row number is closer to an index than to a
+meaning. And the same word in two different sentences ends up as genuinely
+different numbers, which is what lets a vector stand for a *meaning* rather than a
+*spelling*. It is also why the whole approach beats counting words: `myocyte` and
+`muscle cell` can land near each other without sharing a single character.
 
 **Why 768?** It is not derived from the data or the vocabulary. It is the width
 the model was built with — the "base" size in the BERT family — and every token
@@ -173,8 +193,30 @@ use 1024 or more and are correspondingly slower; smaller ones lose accuracy. For
 our purposes 768 is simply a fixed, inherited constant, and no individual one of
 those numbers means anything on its own — only the whole pattern does.
 
-A paper's own vector is then the **average across its tokens**, scaled to length 1
-so only its *direction* matters:
+**Averaging the tokens.** The gate needs *one* vector per paper, and what we have
+is one per token, so they are averaged — the simplest way to combine them, and the
+one bioleads uses. "Real tokens" in the equation below means the actual words:
+sentences in a batch are padded to equal length so the arrays are rectangular, and
+those padding slots are excluded so a short abstract is not diluted by its own
+padding.
+
+Averaging costs something, and it is worth knowing what. Word order is largely
+flattened. Measured on two sentences that differ only by swapping subject and
+object:
+
+| pair | cosine |
+|---|---|
+| "TRPV1 activates TMEM184C" vs "TMEM184C activates TRPV1" | **0.9988** |
+| the same sentence vs. a different claim entirely | 0.9814 |
+
+Reversing the direction of an interaction changes the paper's vector *less* than
+changing its subject does. So this representation is good at "which topic is this
+about" and poor at "what exactly does it claim" — which is fine here, because the
+gate's only job is topical filtering, and the co-occurrence network in stage 5 is
+undirected anyway. It would not be fine for extracting directed claims, and
+nothing downstream should be read as doing that.
+
+The average is finally scaled to length 1 so only its *direction* matters:
 
 ![Figure 2 — a sentence becomes one vector](figures/02-tokens-to-vector.svg)
 
@@ -212,7 +254,7 @@ because it quietly measures how much the seeds agree. Averaging unit arrows that
 point the same way barely shortens them; averaging arrows that disagree produces
 something much shorter, pointing between them.
 
-![Figure 3 — seeds that agree give a long average; seeds that disagree give a short one](figures/03-seed-direction.svg)
+![Figure 4 — seeds that agree give a long average; seeds that disagree give a short one](figures/04-seed-direction.svg)
 
 This is the geometry behind the documented failure mode: a seed set covering two
 subjects averages to a direction in the gap between them, and can rank papers
@@ -249,7 +291,7 @@ signal.
 
 A candidate belongs if its arrow points nearly the same way as the topic arrow.
 
-![Figure 4 — candidates scored by the angle they make with the topic](figures/04-scoring-by-angle.svg)
+![Figure 5 — candidates scored by the angle they make with the topic](figures/05-scoring-by-angle.svg)
 
 $$s_c \;=\; \hat{\mathbf{e}}_c \cdot \mathbf{q}_0 \;=\; \cos\theta_c \;\in\; [-1, 1]$$
 
@@ -266,7 +308,7 @@ real candidate pool, every raw cosine falls between 0.985 and 0.991.
 It is worth seeing *why*, because it looks like a bug and is not. Of the 768
 numbers, **one is very nearly the same for every text there is**:
 
-![Figure 5 — one dimension holds about the same value for every text](figures/05-shared-direction.svg)
+![Figure 6 — one dimension holds about the same value for every text](figures/06-shared-direction.svg)
 
 Dimension 424 sits at roughly −0.96 for a TRPV1 paper, a wheat-fertiliser paper,
 a microglia paper, and the sentence "the cat sat on the mat" alike, and accounts
@@ -306,7 +348,7 @@ papers use that vocabulary too. No amount of aiming at the topic separates them.
 So the gate also learns from its own worst matches. Take the lowest-scoring
 candidates, average them into a direction, and tilt the topic vector away from it:
 
-![Figure 6 — the negative term rotates the query vector away from the worst candidates](figures/06-negative-term.svg)
+![Figure 7 — the negative term rotates the query vector away from the worst candidates](figures/07-negative-term.svg)
 
 $$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
 
@@ -353,7 +395,7 @@ the corpus gets.
 
 Benchmarked, precision falls and recall rises as $K$ grows (12 reviews):
 
-![Figure 7 — precision falls and recall rises as K grows](figures/07-top-k-tradeoff.svg)
+![Figure 8 — precision falls and recall rises as K grows](figures/08-top-k-tradeoff.svg)
 
 The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
 recall of unfiltered snowballing, 0.3252, on 87% less material.** The recall gap

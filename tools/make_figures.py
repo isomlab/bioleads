@@ -287,9 +287,9 @@ def fig_layer(n=1):
     b.append(box(140, ytop - 16, 190, 120, fill="#e8eefb", stroke="#c3d3f2"))
     b.append(text(235, ytop + 4, "ATTENTION", 11.5, BLUE, "middle", weight="600"))
     b.append(text(235, ytop + 22, "the twelve heads", 10.5, MUTED, "middle"))
-    b.append(text(235, ytop + 38, "blends in the other", 10.5, INK, "middle"))
-    b.append(text(235, ytop + 54, "tokens, in proportions", 10.5, INK, "middle"))
-    b.append(text(235, ytop + 68, "it works out per pair", 10.5, INK, "middle"))
+    b.append(text(235, ytop + 38, "looks at the other tokens", 10.5, INK, "middle"))
+    b.append(text(235, ytop + 54, "— i.e. mixes them in, by", 10.5, MUTED, "middle"))
+    b.append(text(235, ytop + 68, "how well each one matches", 10.5, MUTED, "middle"))
     b.append(text(235, ytop + 88, "→ a correction, 29% as big", 10, BLUE, "middle"))
 
     b.append(text(352, ytop + 30, "⊕", 20, INK, "middle"))
@@ -438,9 +438,9 @@ def fig_context(n=1):
     # the layers
     b.append(box(296, 86, 150, 92, fill="#e8eefb", stroke="#c3d3f2"))
     b.append(text(371, 112, "12 layers", 12.5, BLUE, "middle", weight="600"))
-    b.append(text(371, 132, "each token blends in", 10.5, MUTED, "middle"))
-    b.append(text(371, 146, "the others, in proportion", 10.5, MUTED, "middle"))
-    b.append(text(371, 160, "to how well they match", 10.5, MUTED, "middle"))
+    b.append(text(371, 132, "each token looks at every", 10.5, MUTED, "middle"))
+    b.append(text(371, 146, "other — mixing in a share", 10.5, MUTED, "middle"))
+    b.append(text(371, 160, "of each, by how well it fits", 10.5, MUTED, "middle"))
     b.append(text(371, 200, "the sentence enters here", 11, MUTED, "middle"))
 
     b.append(arrow(452, 131, 504, 131, MUTED, 2))

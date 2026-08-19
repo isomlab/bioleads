@@ -171,9 +171,19 @@ def _embedding_scores(profile_docs, cand_docs, cfg, *, say=None) -> list[float]:
 
     prof_texts = [d.content for d in profile_docs] or [""]
     P = _unit_rows(embed_texts(prof_texts, cfg))
-    q = _unit(P.mean(axis=0))
-
     C = _unit_rows(embed_texts([d.content for d in cand_docs], cfg))
+
+    if cfg.relevance_center and len(C):
+        # The candidate pool is the surrounding literature, so its mean is a
+        # usable estimate of the direction every biomedical paper shares.
+        # Removing it leaves the part of each vector that is about the paper.
+        mu = C.mean(axis=0)
+        P, C = _unit_rows(P - mu), _unit_rows(C - mu)
+        if say:
+            say(f"  relevance: centred on the candidate-pool mean "
+                f"(‖mu‖={float(np.linalg.norm(mu)):.3f})")
+
+    q = _unit(P.mean(axis=0))
     scores = C @ q
 
     # Rocchio negative term. The candidates are embedded once and reused, so the

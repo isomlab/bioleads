@@ -369,3 +369,38 @@ def test_harness_cutoff_matches_the_librarys_top_k(bench, monkeypatch):
         ranked = sorted(zip((d.meta["pmid"] for d in cands), scores),
                         key=lambda ps: ps[1], reverse=True)
         assert {p for p, _ in ranked[:k]} == expected, f"cutoff differs at k={k}"
+
+
+def test_centred_arms_set_the_config_flag_and_keep_the_base_behaviour(bench, monkeypatch):
+    import bioleads.expansion as exp_mod
+    from bioleads.config import Config
+
+    seen = []
+
+    def fake_scores(profile_docs, cand_docs, cfg, **kw):
+        seen.append(cfg.relevance_center)
+        return [1.0 / (i + 1) for i in range(len(cand_docs))]
+
+    monkeypatch.setattr(exp_mod, "_relevance_scores", fake_scores)
+
+    records = {"1": {"cited_by": ["10", "11"], "references": ["20", "21"], "title": "s"}}
+    for pid in ("10", "11", "20", "21"):
+        records[pid] = {"title": f"t{pid}"}
+    t = _trial(bench, ["1"], records, target=[])
+
+    plain = bench.run_arm("relevance_seeds:0.25:1", t,
+                          {"records": records, "texts": None, "cfg": Config()})
+    assert seen == [False, False], "uncentred arm must leave the flag off"
+
+    seen.clear()
+    centred = bench.run_arm("relevance_seeds_centred:0.25:1", t,
+                            {"records": records, "texts": None, "cfg": Config()})
+    assert seen == [True, True], "centred arm must set relevance_center"
+    # same gating shape — only the scoring space differs
+    assert len(centred) == len(plain) == 2
+
+
+def test_base_kind_splits_the_centred_suffix(bench):
+    assert bench._base_kind("relevance_seeds_centred") == ("relevance_seeds", True)
+    assert bench._base_kind("relevance_seeds") == ("relevance_seeds", False)
+    assert bench._base_kind("relevance_centred") == ("relevance", True)

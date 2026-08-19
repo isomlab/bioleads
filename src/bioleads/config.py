@@ -116,6 +116,15 @@ class Config:
     rocchio_neg_frac: float = 0.25   # fraction of the tail used as negatives
     rocchio_min_candidates: int = 8  # below this, the tail is too small to trust
 
+    # Mean-pooled PubMedBERT vectors are strongly anisotropic: ~99.5% of every
+    # unit document vector is one direction shared by all biomedical text, so
+    # candidates are ranked on the ~10% that remains. With relevance_center on,
+    # the candidate pool's mean is subtracted from the profile and the
+    # candidates before scoring, which removes that shared component and lets
+    # the gate work on the part that distinguishes papers. Embedding path only;
+    # the NER term-overlap fallback ignores it.
+    relevance_center: bool = False
+
     # --- Citation network ---
     # Build a directed paper-to-paper citation graph over the corpus's
     # PMID-bearing records (via NIH iCite) and rank papers by how often they're

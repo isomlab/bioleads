@@ -252,7 +252,21 @@ def capped_profile(pmids, cap: int):
 #                    Worth having because relevance_fwd profiles on backward
 #                    references while the ground truth *is* a reference list,
 #                    which could flatter it for a circular reason.
-RELEVANCE_ARMS = ("relevance", "relevance_fwd", "relevance_seeds")
+#   ..._centred      any arm above, with cfg.relevance_center on: the candidate
+#                    pool's mean is removed before scoring, so the gate ranks on
+#                    what distinguishes papers rather than on the ~99.5% shared
+#                    direction every biomedical abstract carries.
+RELEVANCE_ARMS = ("relevance", "relevance_fwd", "relevance_seeds",
+                  "relevance_seeds_centred", "relevance_centred")
+
+_CENTRED = "_centred"
+
+
+def _base_kind(kind: str) -> tuple[str, bool]:
+    """Split a '..._centred' arm into its base kind and the centring flag."""
+    if kind.endswith(_CENTRED):
+        return kind[: -len(_CENTRED)] or "relevance", True
+    return kind, False
 
 
 def parse_arm(name: str):
@@ -272,7 +286,7 @@ def scored_pmids(trial: Trial, cap: int, arms=()) -> set[str]:
     """Every PMID the given relevance arms will embed for this trial."""
     forward = _seed_links(trial, "cited_by")
     backward = _seed_links(trial, "references")
-    kinds = {a.split(":", 1)[0] for a in arms} or {"relevance"}
+    kinds = {_base_kind(a.split(":", 1)[0])[0] for a in arms} or {"relevance"}
     need = set(trial.seeds)
     if "relevance" in kinds:
         need |= set(capped_profile(forward, cap)) | backward
@@ -347,8 +361,10 @@ def run_arm(name: str, trial: Trial, ctx: dict) -> set[str]:
         from bioleads.expansion import _relevance_scores
 
         _, gamma, topk = parse_arm(name)
+        base, centred = _base_kind(kind)
         cfg = _replace(ctx["cfg"],
-                       rocchio_gamma=Config.rocchio_gamma if gamma is None else gamma)
+                       rocchio_gamma=Config.rocchio_gamma if gamma is None else gamma,
+                       relevance_center=centred)
         top_k = ctx["cfg"].expand_top_k if topk is None else topk
         records, texts = ctx["records"], ctx.get("texts")
         # A single heavily-cited seed can pull tens of thousands of citers, which
@@ -366,7 +382,8 @@ def run_arm(name: str, trial: Trial, ctx: dict) -> set[str]:
 
         def gate(profile_ids, candidate_ids, tag) -> set[str]:
             """Keep the top-K of `candidate_ids` by relevance to `profile_ids`."""
-            key = (trial.review.pmid, kind, tag, cfg.rocchio_gamma)
+            key = (trial.review.pmid, kind, tag, cfg.rocchio_gamma,
+                   cfg.relevance_center)
             if key not in memo:
                 cands = _docs_from_records(sorted(candidate_ids), records, texts)
                 if not cands:
@@ -382,15 +399,15 @@ def run_arm(name: str, trial: Trial, ctx: dict) -> set[str]:
                     (ranked[:top_k] if top_k and top_k > 0 else ranked)}
 
         seeds = list(trial.seeds)
-        if kind == "relevance":
+        if base == "relevance":
             # The shipped strategy: forward passes through ungated.
             return set(forward) | gate(seeds + capped_profile(forward, cap),
                                        backward, "bwd")
-        if kind == "relevance_fwd":
+        if base == "relevance_fwd":
             # The inversion: backward passes through, forward is gated.
             return set(backward) | gate(seeds + capped_profile(backward, cap),
                                         forward, "fwd")
-        if kind == "relevance_seeds":
+        if base == "relevance_seeds":
             # Neither direction trusted: profile from the seeds, gate both.
             return gate(seeds, forward, "fwd") | gate(seeds, backward, "bwd")
     raise ValueError(f"unknown arm: {name}")

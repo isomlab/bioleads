@@ -926,3 +926,67 @@ def test_no_fallback_notice_when_tfidf_was_actually_requested():
     rank_terms(entities, Config(enrichment_method="tfidf"), background=None,
                progress=msgs.append)
     assert not any("fell back" in m.lower() for m in msgs), msgs
+
+
+def test_centring_recovers_signal_the_shared_direction_hides(monkeypatch):
+    """Reproduces the measured anisotropy: a huge common component plus a small
+    distinguishing one. Uncentred, every candidate scores nearly the same;
+    centred, the on-topic candidate separates."""
+    np = pytest.importorskip("numpy")
+    import bioleads.embeddings as emb_mod
+    from bioleads.expansion import _embedding_scores
+
+    shared = np.array([10.0, 0.0, 0.0])          # the ~99.5% every paper carries
+    topic = np.array([0.0, 1.0, 0.0])            # what the seeds are about
+    other = np.array([0.0, 0.0, 1.0])            # a different subject
+    vecs = {
+        "seed": shared + topic,
+        "on":   shared + topic,                  # same subject as the seeds
+        "off1": shared + other,
+        "off2": shared + other,
+        "off3": shared + other,
+    }
+
+    def fake_embed(texts, cfg=None):
+        return np.vstack([vecs[t] for t in texts])
+
+    monkeypatch.setattr(emb_mod, "embed_texts", fake_embed)
+
+    def doc(key):
+        return Document(doc_id=key, text=key, source="pubmed", meta={"pmid": key})
+
+    profile = [doc("seed")]
+    cands = [doc("on"), doc("off1"), doc("off2"), doc("off3")]
+
+    plain = _embedding_scores(profile, cands, Config(rocchio_gamma=0.0))
+    centred = _embedding_scores(profile, cands,
+                                Config(rocchio_gamma=0.0, relevance_center=True))
+
+    # Uncentred, the shared direction dominates and the gap is tiny.
+    gap_plain = plain[0] - max(plain[1:])
+    gap_centred = centred[0] - max(centred[1:])
+    assert gap_plain < 0.02, f"setup should nearly tie uncentred: {plain}"
+    assert gap_centred > 0.5, f"centring should separate them: {centred}"
+    assert gap_centred > gap_plain * 10
+    # ordering is correct either way; centring widens the margin
+    assert plain[0] == max(plain) and centred[0] == max(centred)
+
+
+def test_centring_is_off_by_default_and_a_no_op_without_it(monkeypatch):
+    np = pytest.importorskip("numpy")
+    import bioleads.embeddings as emb_mod
+    from bioleads.expansion import _embedding_scores
+
+    assert Config().relevance_center is False, "must stay opt-in until measured"
+
+    rng = np.random.default_rng(0)
+    mat = rng.normal(size=(4, 6)) + 5.0
+    monkeypatch.setattr(emb_mod, "embed_texts", lambda texts, cfg=None: mat[: len(texts)])
+
+    def doc(i):
+        return Document(doc_id=str(i), text=str(i), source="pubmed", meta={"pmid": str(i)})
+
+    profile, cands = [doc(0)], [doc(1), doc(2), doc(3)]
+    a = _embedding_scores(profile, cands, Config(rocchio_gamma=0.0))
+    b = _embedding_scores(profile, cands, Config(rocchio_gamma=0.0))
+    assert a == b

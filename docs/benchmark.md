@@ -1,14 +1,18 @@
 # Benchmarking citation expansion
 
 `tools/benchmark_expansion.py` measures the two things
-[stage 2](how_it_works.md#2-grow-the-corpus-by-following-citations) asserts but
-never tested:
+[stage 2](how_it_works.md#2-grow-the-corpus-by-following-citations) once asserted
+from first principles and had never tested:
 
 1. **Is the asymmetry real?** Are papers that *cite* a seed more topically
    precise than the papers a seed *cites*?
 2. **Does the relevance gate help, and at what `rocchio_gamma`?**
 
-Both were argued from first principles. This turns them into numbers.
+It answered both, and the answers rewrote the stage: the asymmetry runs the
+other way, and the gate as it then stood was filtering the wrong direction. What
+stage 2 ships today — profile from the seeds alone, gate both directions — is
+the `relevance_seeds` arm below, which came out of this benchmark rather than
+preceding it.
 
 ## How it measures
 
@@ -43,12 +47,17 @@ and a rigged one. `--no-year-cutoff` shows how much it matters.
 | `forward` | papers citing the seeds (one round, via iCite) |
 | `backward` | papers the seeds cite (one round, via iCite) |
 | `both` | the union — equivalent to `bfs` at one round |
-| `relevance:<gamma>` | all forward citers, plus the top-K backward references gated at that `rocchio_gamma` |
+| `relevance:<gamma>` | the **original** design: all forward citers ungated, plus the top-K backward references gated at that `rocchio_gamma` |
+| `relevance_fwd` | its inversion: profile on the backward references, gate the forward citers |
+| `relevance_seeds` | **what stage 2 ships**: profile on the seeds alone, gate both directions |
+| `relevance_centred` / `relevance_seeds_centred` | the same two with the pool mean removed before scoring |
 
-The `relevance` arm mirrors `relevance_guided_expand` exactly: seeds + forward
-citers form the profile, backward references are the gated candidates, and the
-result is every forward citer plus the kept top-K. `relevance:0` is the
-positive-only centroid, so it is the control arm for the negative term.
+`relevance_seeds` is the arm that mirrors `relevance_guided_expand` — profile
+from the seeds, both directions scored against it and cut to the top-K. The
+plain `relevance` arm is kept because it is what the code used to do, and a
+comparison needs the thing it replaced. `<gamma>` sets `rocchio_gamma` on either;
+`relevance_seeds:0` is the positive-only centroid, so it is the control arm for
+the negative term.
 
 ## Running it
 
@@ -60,7 +69,7 @@ That answers the asymmetry question and needs only iCite. To also sweep the gate
 
 ```bash
 python3 tools/benchmark_expansion.py --reviews 25 --seeds 5 \
-    --arms forward,backward,both,relevance --gammas 0,0.25,0.5 --out bench.csv
+    --arms both,relevance,relevance_seeds --gammas 0,0.25,0.5 --out bench.csv
 ```
 
 Everything fetched is cached under `--cache`, which defaults to
@@ -96,13 +105,15 @@ by median F1 with its delta against `gamma=0`.
 
 The design predicts **forward wins on precision and loses on recall**. The first
 run at scale (40 reviews, 5 seeds) found the opposite: backward won on *both*, in
-33 of 40 reviews. See [How bioleads works](how_it_works.md#measured-the-precision-half-of-this-claim-does-not-hold)
+33 of 40 reviews. See [How bioleads works](how_it_works.md#what-the-measurements-showed)
 for the numbers and what follows from them.
 
 The gamma sweep is measured in the same place. Headline: at the default
 `rocchio_gamma=0.25` the negative term moves one document across twelve reviews,
-and the gate as a whole governs only ~5% of what the relevance strategy returns
-(the rest being ungated forward citers). Both were re-run with `--abstracts` (title + abstract
+and in the design that then shipped the gate governed only ~5% of what the
+strategy returned — the other ~95% being forward citers admitted without ever
+meeting it. (That is the finding that produced `relevance_seeds`, where the gate
+governs everything.) Both were re-run with `--abstracts` (title + abstract
 scoring) and are unchanged — richer text does not rescue the gate, so the cause
 is structural rather than a scoring-fidelity artefact.
 

@@ -6,7 +6,7 @@
 
 The default pass is offline and deterministic, so it can run on every push: it
 confirms that every relative link points at a file that is actually in the
-repository. A link to a file that exists only on someone's laptop looks fine
+repository, and that any #anchor on it matches a heading in that file. A link to a file that exists only on someone's laptop looks fine
 locally and 404s for everybody else, which is the failure this catches.
 
 --external additionally confirms that the anchors this guide links to on the
@@ -65,6 +65,32 @@ def head_ok(url):
     return False
 
 
+def anchors_in(path):
+    """Every heading slug in a markdown file, the way GitHub generates them.
+
+    Lowercased, punctuation dropped, spaces to hyphens, and a repeat heading
+    gets -1, -2 appended. Fenced code is skipped so a shell comment starting
+    with # is not mistaken for a heading.
+    """
+    slugs, seen, fenced = set(), {}, False
+    for line in open(path, encoding="utf-8"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        m = re.match(r"^(#{1,6})\s+(.*?)\s*$", line)
+        if not m:
+            continue
+        text = re.sub(r"`([^`]*)`", r"\1", m.group(2))       # code spans keep their text
+        text = re.sub(r"[*_]", "", text)
+        slug = re.sub(r"\s+", "-", re.sub(r"[^\w\s-]", "", text).strip().lower())
+        n = seen.get(slug, 0)
+        seen[slug] = n + 1
+        slugs.add(slug if not n else "%s-%d" % (slug, n))
+    return slugs
+
+
 def links_in(path):
     text = open(path, encoding="utf-8").read()
     out = re.findall(r"\[[^\]]*\]\(([^)\s]+)\)", text)
@@ -114,6 +140,15 @@ def main():
             if not os.path.exists(target):
                 problems.append("%s: relative link %s points at %s, which is not in this "
                                 "repository" % (f, link, target))
+                continue
+            # The file existing is not enough: a link into a renamed heading
+            # lands the reader at the top of the page with no sign anything
+            # went wrong. This is the same check --external already makes
+            # against the website.
+            frag = urllib.parse.unquote(link.partition("#")[2])
+            if frag and target.endswith(".md") and frag not in anchors_in(target):
+                problems.append("%s: %s has no heading #%s — it was renamed or removed"
+                                % (f, target, frag))
 
     print("checked %d file(s): %d relative link(s)%s%s"
           % (len(files), n_rel,

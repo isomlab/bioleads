@@ -97,7 +97,12 @@ def run_pipeline(
     # In "relevance" mode the two-phase expansion runs here (it needs NER /
     # embeddings), so suppress load_documents' plain BFS snowball to avoid
     # double-expanding.
-    relevance_mode = documents is None and cfg.expand_strategy == "relevance"
+    # Both strategies are off at expand_rounds = 0. relevance used to ignore the
+    # setting and expand anyway, which made "rounds" mean nothing for half the
+    # users of it and made the strategy default un-flippable: choosing it would
+    # silently have put a network round on every run.
+    relevance_mode = (documents is None and cfg.expand_strategy == "relevance"
+                      and cfg.expand_rounds > 0)
     if documents is not None:
         docs = documents
         say(f"Using {len(docs)} document(s) supplied directly.")

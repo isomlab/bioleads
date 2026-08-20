@@ -310,10 +310,11 @@ class BioleadsGUI:
         self._field(card, 1, "Rounds",
                     self._spin(card, self.expand_var, 0, 10),
                     "Follow citation links out from the PMID seeds this many "
-                    "rounds (0 = off); each round chases what the previous "
-                    "round found. Drives the bfs strategy only — relevance "
-                    "always runs one round in each direction, even with this "
-                    "set to 0.")
+                    "rounds (0 = off, and off is the default); each round "
+                    "chases what the previous round found. bfs runs this "
+                    "many rounds; relevance runs one gated round in each "
+                    "direction, so for it any value above 0 means the same "
+                    "thing.")
         self._field(card, 2, "Follow",
                     self._combo(card, self.expand_link_var,
                                 ["references", "cited_by", "both"]),

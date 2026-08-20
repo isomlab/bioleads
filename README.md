@@ -114,16 +114,16 @@ bioleads --pmids @my_pmids.txt --out ./results
 bioleads --refs my_library.ris --out ./results
 bioleads --refs my_library.xml --out ./results
 
-# Snowball: grow the corpus by following citations from the seeds (2 rounds):
-bioleads --pmids @seeds.txt --expand 2 --out ./results
-bioleads --refs my_library.ris --expand 1 --expand-link cited_by --out ./results
+# Grow the corpus by following citations from the seeds. --expand 1 is enough:
+# the default strategy is `relevance`, which gates one round in each direction
+# against a profile built from the seeds, keeping the top-K of each.
+bioleads --pmids @seeds.txt --expand 1 --out ./results
+bioleads --pmids @seeds.txt --expand 1 --expand-top-k 100 --out ./results
 
-# Maximum coverage: follow both directions; sources default to NCBI ∪ iCite:
-bioleads --pmids @seeds.txt --expand 1 --expand-link both --out ./results
-
-# Relevance-guided: profile the topic from forward citers, then keep only the
-# most on-topic backward references (top-K):
-bioleads --pmids @seeds.txt --expand-strategy relevance --expand-top-k 50 --out ./results
+# Plain snowball instead — everything linked, ungated, for N rounds:
+bioleads --pmids @seeds.txt --expand 2 --expand-strategy bfs --out ./results
+bioleads --refs my_library.ris --expand 1 --expand-strategy bfs \
+         --expand-link cited_by --out ./results
 
 # Open discovery seeded from specific concepts:
 bioleads --pmids @seeds.txt --anchors "trpv1,inflammation" --out ./results
@@ -234,14 +234,18 @@ supported (they often lack abstracts or aren't reliably structured).
 
 ### Citation expansion (snowballing)
 
-`--expand N` grows the corpus iteratively from the **PMID-bearing seeds** (from
-`--pmids`, `--pubmed`, or `--refs`): each round adds the papers linked from the
-current frontier and then chases those in the next round, up to `--expand-max`
-total records. `--expand-link both` (the default) unions the two directions;
-`references` alone follows the papers each seed *cites* (backward), and
-`cited_by` alone follows papers that *cite* the seeds (forward). Newly
-discovered records are fetched from PubMed and tagged `expanded` in their
-metadata.
+`--expand N` grows the corpus from the **PMID-bearing seeds** (from `--pmids`,
+`--pubmed`, or `--refs`). Nothing is expanded without it, whichever strategy is
+selected. What `N` means depends on the strategy: under the default
+`relevance` any `N > 0` means one gated round in each direction (see below);
+under `bfs` it is a depth, each round adding the papers linked from the current
+frontier and then chasing those in the next, up to `--expand-max` total records.
+
+`--expand-link both` (the default) unions the two directions; `references`
+alone follows the papers each seed *cites* (backward), and `cited_by` alone
+follows papers that *cite* the seeds (forward). It applies to `bfs` only —
+`relevance` always does both and gates each. Newly discovered records are
+fetched from PubMed and tagged `expanded` in their metadata.
 
 `--expand-source` picks where the citation links come from. By default you
 don't have to choose — it **unions both backends** for the broadest recall:
@@ -262,9 +266,11 @@ references while `icite` finds 184; `all` gives the union.)
 Seeds without a PMID (refs lacking an accession) can't be expanded by either
 source. Cycles are avoided: a record already seen is never re-queued.
 
-**Relevance-guided expansion** (`--expand-strategy relevance`) is a filtered
-alternative to the plain BFS snowball. Both citation directions are noisy, so
-neither is trusted:
+**Relevance-guided expansion** is what `--expand` does by default. It is the
+filtered alternative to the plain BFS snowball (`--expand-strategy bfs`), and it
+is the default because it measured better: at equal reach it beat `bfs` on F1 in
+35 of 40 reviews at K=50 and 38 of 40 at K=100, with about ten times the pooled
+precision. Both citation directions are noisy, so neither is trusted:
 
 1. **Profile from the seeds alone.** Your seed documents are the only papers
    known to be on topic, so they — and nothing else — form the **topic profile**

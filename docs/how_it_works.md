@@ -731,6 +731,8 @@ failure in the embedding path falls back here rather than sinking the run.
 
 | control | symbol | default | what it changes |
 |---|---|---|---|
+| `expand_strategy` | | `relevance` | this gate, or `bfs` for an ungated snowball; **`relevance` is the default because it measured better** (below), and picking `bfs` bypasses everything else in this table |
+| `expand_rounds` | | 0 | **expansion is off until this is ≥ 1**, whichever strategy is set. Above 0 `relevance` runs one gated round in each direction; `bfs` treats it as a depth |
 | `expand_top_k` | $K$ | 50 | papers kept **per direction**; the main control over corpus size and cleanliness |
 | `rocchio_gamma` | $\gamma$ | 0.25 | weight of the negative term — measured to change almost nothing |
 | `rocchio_neg_frac` | | 0.25 | fraction of the pool taken as the negative tail |
@@ -739,10 +741,10 @@ failure in the embedding path falls back here rather than sinking the run.
 | `expand_max` | | 1000 | hard cap on total PMIDs |
 | `expand_source` | | `all` | NCBI ELink, NIH iCite, or the union |
 
-Two GUI behaviours are easy to get wrong: choosing `relevance` **runs expansion
-even with "Citation expansion rounds" set to 0** (that spinbox drives `bfs`
-only), and **`Follow` is ignored** by `relevance`, which always does both
-directions.
+One GUI behaviour is easy to get wrong: **`Follow` is ignored** by `relevance`,
+which always does both directions and gates each. "Citation expansion rounds"
+now means the same thing for both strategies — 0 is off — though `relevance`
+treats any value above 0 as one gated round each way rather than as a depth.
 
 ### What the measurements showed
 
@@ -822,11 +824,13 @@ topic-labelled benchmark would be the independent check.
 
 ### The other strategy: `bfs`
 
-Plain snowball, no gating. Each round takes the current frontier, adds everything
-linked to it, and chases those next, up to the record cap. Direction is yours:
-`references`, `cited_by`, or `both`. Use it when you want exhaustive coverage of
-a small, tight seed set and intend to filter yourself — noting that on the
-benchmark `relevance` reaches the same recall more cleanly at large $K$.
+Plain snowball, no gating — and no longer the default, since none of the
+machinery above applies to it: no profile, no negative term, no $K$. Each round
+takes the current frontier, adds everything linked to it, and chases those next,
+up to the record cap. Direction is yours: `references`, `cited_by`, or `both`.
+Use it when you want exhaustive coverage of a small, tight seed set and intend to
+filter yourself — noting that on the benchmark `relevance` reaches the same
+recall more cleanly at large $K$.
 
 ### Controls
 

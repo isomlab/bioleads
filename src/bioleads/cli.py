@@ -68,12 +68,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "iCite (default, broadest coverage), 'ncbi' = Entrez "
                         "ELink only (PMC-derived), 'icite' = NIH iCite / Open "
                         "Citation Collection only")
-    p.add_argument("--expand-strategy", choices=["bfs", "relevance"],
-                   default="bfs",
-                   help="'bfs' = plain snowball along --expand-link (default); "
-                        "'relevance' = profile the topic from the seeds alone, "
-                        "then keep only the --expand-top-k most on-topic papers "
-                        "in each direction")
+    p.add_argument("--expand-strategy", choices=["relevance", "bfs"],
+                   default=Config.expand_strategy,
+                   help="'relevance' (default) = profile the topic from the "
+                        "seeds alone, then keep only the --expand-top-k most "
+                        "on-topic papers in each direction; 'bfs' = plain "
+                        "ungated snowball along --expand-link. Either way "
+                        "nothing is expanded until --expand is set")
     p.add_argument("--expand-top-k", type=int, default=Config.expand_top_k,
                    metavar="K", help="relevance strategy: keep the K most "
                                      "on-topic papers per direction")

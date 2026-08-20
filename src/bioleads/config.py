@@ -78,7 +78,14 @@ class Config:
     #       were then added ungated. Benchmarking against systematic reviews
     #       (docs/benchmark.md) measured that worse on every count, so both
     #       directions are now gated and only the seeds define the topic.
-    expand_strategy: str = "bfs"
+    #
+    # Default is `relevance`: at equal reach it beat `bfs` on F1 in 35 of 40
+    # reviews at K=50 and 38 of 40 at K=100, with roughly ten times the pooled
+    # precision (docs/benchmark.md). Picking `bfs` skips the whole gate — the
+    # seed profile, the Rocchio negative term and expand_top_k are all
+    # relevance-only — so the benchmarked path should be the one you get
+    # without asking.
+    expand_strategy: str = "relevance"
     expand_fwd_rounds: int = 1   # cited_by depth
     expand_back_rounds: int = 1  # references depth
     # Keep this many most-relevant papers *per direction*. Swept on the

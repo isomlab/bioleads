@@ -49,7 +49,7 @@ class Config:
     # --- PubMed fetching ---
     entrez_email: str = "disom.biophysics@gmail.com"
     entrez_api_key: str | None = None
-    pubmed_retmax: int = 500
+    pubmed_retmax: int = 1000
     # Upgrade open-access PubMed Central articles to full body text (intro/
     # methods/results) when available; others fall back to title + abstract.
 
@@ -148,6 +148,12 @@ class Config:
     # barely touches authors.
     min_paper_degree: int = 0
     min_author_degree: int = 0
+    # The paper-count view's own floor, counted in corpus papers rather than in
+    # citation degree. A degree threshold cannot serve here: a lab publishing
+    # steadily that nothing in the corpus cites has degree 0, and that lab is
+    # exactly what the view exists to show, so a degree floor would delete its
+    # subject. Filters the picture and the ranking alike.
+    min_author_papers: int = 0
 
     # --- Misc ---
     seed: int = 0

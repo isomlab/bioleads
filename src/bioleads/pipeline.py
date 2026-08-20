@@ -233,4 +233,32 @@ def run_pipeline(
             if auth_3d:
                 result.outputs["author_network_3d"] = auth_3d
 
+            # The same senior authors and the same citation edges, measured by
+            # output rather than standing: node size is corpus papers. Built
+            # separately because the max_graph_nodes trim has to keep the most
+            # published authors here, not the most cited ones — otherwise a lab
+            # publishing steadily without being cited in-corpus, which is
+            # precisely what this view is for, never reaches the picture.
+            say("Rendering senior-author paper-count network…")
+            paper_graph = build_author_citation_graph(
+                docs, cfg, prefetched=prefetched, rank_by="papers",
+                cancel=cancel, progress=progress)
+            if paper_graph is not None and paper_graph.number_of_nodes():
+                aprank_csv = os.path.join(out_dir, "author_paper_ranking.csv")
+                authors_df(paper_graph, by="papers").to_csv(aprank_csv, index=False)
+                result.outputs["author_paper_ranking"] = aprank_csv
+
+                ap_html = os.path.join(out_dir, "author_paper_network.html")
+                result.outputs["author_paper_network"] = write_author_html(
+                    paper_graph, ap_html,
+                    title="bioleads senior-author paper-count network",
+                    size_attr="papers")
+                ap_3d = write_author_html_3d(
+                    paper_graph,
+                    os.path.join(out_dir, "author_paper_network_3d.html"),
+                    title="bioleads senior-author paper-count network (3D)",
+                    seed=cfg.seed, size_attr="papers")
+                if ap_3d:
+                    result.outputs["author_paper_network_3d"] = ap_3d
+
     return result

@@ -943,6 +943,47 @@ def test_pipeline_writes_author_outputs(tmp_path, monkeypatch):
         assert os.path.exists(res.outputs["author_network_3d"])
 
 
+def test_pipeline_writes_author_paper_outputs(tmp_path, monkeypatch):
+    """The paper-count view ships alongside the citation view."""
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    cfg = _cfg()
+    cfg.do_citation_network = True
+    res = run_pipeline(documents=_citation_docs(), cfg=cfg, out_dir=str(tmp_path))
+
+    assert os.path.exists(res.outputs["author_paper_ranking"])
+    assert os.path.exists(res.outputs["author_paper_network"])
+    # Ranked by corpus output, not by standing: papers descends.
+    import csv
+    with open(res.outputs["author_paper_ranking"]) as fh:
+        papers = [int(row["papers"]) for row in csv.DictReader(fh)]
+    assert papers == sorted(papers, reverse=True), \
+        "the paper ranking must be ordered by papers, not citations"
+
+
+def test_author_paper_view_keeps_the_prolific_not_the_cited(monkeypatch):
+    """The display trim must follow the measure the view is about.
+
+    Ranking by citations while sizing by papers drops exactly the authors this
+    view exists to surface: a lab publishing steadily that nothing in the
+    corpus happens to cite.
+    """
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    cfg = _cfg()
+    cfg.max_graph_nodes = 1          # force the trim to choose
+
+    by_papers = build_author_citation_graph(_citation_docs(), cfg, rank_by="papers")
+    by_cites = build_author_citation_graph(_citation_docs(), cfg)
+
+    assert by_papers.number_of_nodes() == 1
+    kept = next(iter(by_papers.nodes(data=True)))[1]
+    everyone = build_author_citation_graph(_citation_docs(), Config())
+    most_papers = max(d.get("papers", 0) for _, d in everyone.nodes(data=True))
+    assert kept["papers"] == most_papers, \
+        "the papers view kept an author who is not the most published"
+    # And the two views are free to disagree about who survives.
+    assert by_cites.number_of_nodes() == 1
+
+
 def test_write_author_html(tmp_path, monkeypatch):
     pytest.importorskip("pyvis")
     from bioleads.citations import write_author_html

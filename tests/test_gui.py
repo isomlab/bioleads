@@ -122,6 +122,37 @@ def run_with_outputs(app, tmp_path):
     return _make
 
 
+def test_paper_count_group_sits_under_the_citation_group():
+    """The two senior-author views are siblings, and read as a pair.
+
+    They share a shape — 2D, 3D, Ranking — so a reader can tell at a glance
+    that the second measures the same authors differently, rather than being
+    a stray set of files under "Other outputs".
+    """
+    from bioleads.gui import OUTPUT_GROUPS
+
+    names = [g for g, _ in OUTPUT_GROUPS]
+    cit = names.index("Senior-author citation network")
+    papers = names.index("Senior-author paper-count network")
+    assert papers == cit + 1, "the paper-count view must sit directly under it"
+
+    rows = dict(OUTPUT_GROUPS)
+    labels = [lab for lab, _ in rows["Senior-author paper-count network"]]
+    assert labels == [lab for lab, _ in rows["Senior-author citation network"]]
+    assert [k for _, k in rows["Senior-author paper-count network"]] == [
+        "author_paper_network", "author_paper_network_3d", "author_paper_ranking"]
+
+
+def test_paper_count_outputs_are_not_stray_keys(app):
+    """Every author_paper_* key is claimed by a group, so none falls to "Other"."""
+    from bioleads.gui import OUTPUT_GROUPS
+
+    claimed = {k for _, rows in OUTPUT_GROUPS for _, k in rows}
+    for key in ("author_paper_network", "author_paper_network_3d",
+                "author_paper_ranking"):
+        assert key in claimed
+
+
 def test_outputs_tab_is_empty_before_a_run(app):
     assert "No outputs yet" in _labels(app)[0]
 

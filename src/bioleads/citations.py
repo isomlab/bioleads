@@ -284,6 +284,7 @@ def build_author_citation_graph(
     cfg: Config | None = None,
     *,
     prefetched: tuple | None = None,
+    rank_by: str = "in_corpus_citations",
     cancel=None,
     progress=None,
 ) -> nx.DiGraph:
@@ -304,6 +305,11 @@ def build_author_citation_graph(
     papers), and ``in_corpus_citations`` (weighted in-degree — how often the
     author is cited within the corpus), the metric the most-cited ranking and
     node size use.
+
+    `rank_by` decides which measure survives the `max_graph_nodes` trim —
+    ``"in_corpus_citations"`` for the standing view, ``"papers"`` for the
+    productivity one. It changes only *which* authors are displayed when the
+    graph is too large to draw, never the graph that is built.
 
     A record with no author list cannot be placed and is skipped. Matching is by
     name string, so "Smith J" and "Smith JA" are two people.
@@ -357,15 +363,30 @@ def build_author_citation_graph(
 
     g = _prune_by_degree(g, cfg.min_author_degree, "author", say)
 
+    if rank_by == "papers" and cfg.min_author_papers > 0:
+        keep = [n for n, d in g.nodes(data=True)
+                if (d.get("papers") or 0) >= cfg.min_author_papers]
+        if len(keep) < g.number_of_nodes():
+            say(f"  dropped {g.number_of_nodes() - len(keep)} author(s) below "
+                f"{cfg.min_author_papers} corpus paper(s); {len(keep)} left.")
+            g = g.subgraph(keep).copy()
+
     if g.number_of_nodes() > cfg.max_graph_nodes:
+        # Trim by whatever the view is about. Ranking by citations while
+        # displaying paper counts would drop the prolific-but-uncited authors
+        # the paper view exists to show — a lab publishing steadily without
+        # being cited *within this corpus* is exactly the case of interest.
+        second = ("global_citations" if rank_by == "in_corpus_citations"
+                  else "in_corpus_citations")
         ranked = sorted(
             g.nodes,
-            key=lambda n: (g.nodes[n]["in_corpus_citations"],
-                           g.nodes[n].get("global_citations") or 0),
+            key=lambda n: (g.nodes[n].get(rank_by) or 0,
+                           g.nodes[n].get(second) or 0),
             reverse=True,
         )
         g = g.subgraph(ranked[: cfg.max_graph_nodes]).copy()
-        say(f"  trimmed to the top {cfg.max_graph_nodes} most-cited author(s) "
+        noun = "most-published" if rank_by == "papers" else "most-cited"
+        say(f"  trimmed to the top {cfg.max_graph_nodes} {noun} author(s) "
             f"for display.")
     return g
 
@@ -409,8 +430,12 @@ def to_dataframe(graph: nx.DiGraph):
     )
 
 
-def authors_to_dataframe(graph: nx.DiGraph):
-    """Senior authors ranked by in-corpus citations, as a DataFrame (for CSV)."""
+def authors_to_dataframe(graph: nx.DiGraph, by: str = "in_corpus_citations"):
+    """Senior authors ranked by `by`, as a DataFrame (for CSV).
+
+    `by="papers"` orders by how many corpus papers each was senior author on —
+    productivity within the corpus rather than standing within it.
+    """
     import pandas as pd
 
     rows = [
@@ -420,7 +445,7 @@ def authors_to_dataframe(graph: nx.DiGraph):
             "in_corpus_citations": d.get("in_corpus_citations", 0),
             "global_citations": d.get("global_citations", 0),
         }
-        for _, d in most_cited(graph)
+        for _, d in most_cited(graph, by=by)
     ]
     return pd.DataFrame(
         rows,
@@ -522,13 +547,19 @@ def _author_hover(n, d) -> str:
 
 
 def write_author_html(
-    g: nx.DiGraph, path: str, title: str = "bioleads senior-author citation network"
+    g: nx.DiGraph, path: str, title: str = "bioleads senior-author citation network",
+    size_attr: str = "in_corpus_citations",
 ) -> str:
-    """Render the senior-author citation network to standalone HTML (pyvis).
+    """Render the senior-author network to standalone HTML (pyvis).
 
-    Nodes are authors, sized by in-corpus citations (most-cited authors are
-    largest); an arrow A → B means an author A (co)authored a paper that cites a
-    paper (co)authored by B. Falls back to GraphML if pyvis isn't installed.
+    Nodes are authors, sized by `size_attr`; an arrow A → B means an author A
+    (co)authored a paper that cites a paper (co)authored by B. Falls back to
+    GraphML if pyvis isn't installed.
+
+    The edges are citations whichever measure sizes the nodes. With
+    ``size_attr="papers"`` the picture answers "who publishes most here, and
+    who cites whom" at once — a large node with no arrows into it is a lab
+    publishing steadily in this field that nothing in the corpus cites.
     """
     try:
         from pyvis.network import Network
@@ -542,12 +573,11 @@ def write_author_html(
     net = Network(height="800px", width="100%", notebook=False, directed=True,
                   heading=title, bgcolor="#ffffff")
     if g.number_of_nodes():
-        max_cit = max((d["in_corpus_citations"] for _, d in g.nodes(data=True)),
-                      default=0)
+        top = max((d.get(size_attr) or 0 for _, d in g.nodes(data=True)), default=0)
         for n, d in g.nodes(data=True):
-            cit = d["in_corpus_citations"]
-            size = 10 + 30 * (cit / max_cit if max_cit else 0)
-            net.add_node(n, label=d.get("author") or n, value=cit + 1, size=size,
+            v = d.get(size_attr) or 0
+            size = 10 + 30 * (v / top if top else 0)
+            net.add_node(n, label=d.get("author") or n, value=v + 1, size=size,
                          title="\n".join(_author_tip_lines(n, d)))
         for a, b, ed in g.edges(data=True):
             net.add_edge(a, b, title=f"cites ×{ed.get('weight', 1)}", arrows="to")
@@ -563,6 +593,7 @@ def write_author_html(
 def write_author_html_3d(
     g: nx.DiGraph, path: str,
     title: str = "bioleads senior-author citation network (3D)", seed: int = 0,
+    size_attr: str = "in_corpus_citations",
 ) -> str | None:
     """Render the senior-author citation network as a rotatable 3D Plotly graph.
 
@@ -572,6 +603,6 @@ def write_author_html_3d(
     from .graph3d import write_graph_3d
 
     return write_graph_3d(
-        g, path, title=title, size_attr="in_corpus_citations", seed=seed,
-        color_attr="in_corpus_citations", hover=_author_hover, directed=True,
+        g, path, title=title, size_attr=size_attr, seed=seed,
+        color_attr=size_attr, hover=_author_hover, directed=True,
     )

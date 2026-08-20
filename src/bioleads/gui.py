@@ -77,6 +77,11 @@ OUTPUT_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("3D", "author_network_3d"),
         ("Ranking (CSV)", "author_ranking"),
     ]),
+    ("Senior-author paper-count network", [
+        ("2D", "author_paper_network"),
+        ("3D", "author_paper_network_3d"),
+        ("Ranking (CSV)", "author_paper_ranking"),
+    ]),
     ("Tables", [
         ("Ranked terms (CSV)", "ranked_terms"),
         ("Hypotheses (CSV)", "candidates"),
@@ -88,8 +93,8 @@ class BioleadsGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("bioleads")
-        self.root.geometry("1240x800")
-        self.root.minsize(1000, 640)
+        self.root.geometry("1240x960")
+        self.root.minsize(1000, 700)
         self.root.configure(background=BG)
         self._queue: queue.Queue = queue.Queue()
         self._worker: threading.Thread | None = None
@@ -259,6 +264,7 @@ class BioleadsGUI:
         self.citations_var = tk.BooleanVar(value=Config.do_citation_network)
         self.mindeg_paper_var = tk.IntVar(value=Config.min_paper_degree)
         self.mindeg_author_var = tk.IntVar(value=Config.min_author_degree)
+        self.min_author_papers_var = tk.IntVar(value=Config.min_author_papers)
         self.nclusters_var = tk.IntVar(value=Config.n_clusters)
         self.expand_var = tk.IntVar(value=Config.expand_rounds)
         self.expand_link_var = tk.StringVar(value=Config.expand_link)
@@ -392,10 +398,20 @@ class BioleadsGUI:
                     "graph: each node is one lab, and a productive lab absorbs "
                     "several of the corpus's papers along with all of their "
                     "links, so the two degree distributions differ.")
+        self._field(card, 3, "Min papers — paper-count network",
+                    self._spin(card, self.min_author_papers_var, 0, 10000),
+                    "The floor for the senior-author paper-count network, "
+                    "counted in corpus papers rather than in citations. It is "
+                    "not a degree threshold on purpose: a lab publishing "
+                    "steadily that nothing in your corpus happens to cite has "
+                    "a citation degree of 0, and that lab is precisely what "
+                    "this network is for — a degree floor would delete its "
+                    "subject. Set 2 to see only authors with more than one "
+                    "paper here. Filters the picture and the ranking alike.")
         note = ttk.Label(card, style="Help.TLabel", wraplength=FORM_WIDTH - 60,
                          text="One node per lab, not per byline — each paper is "
                               "represented by its last author.")
-        note.grid(row=3, column=0, columnspan=3, sticky="w", padx=(12, 14),
+        note.grid(row=4, column=0, columnspan=3, sticky="w", padx=(12, 14),
                   pady=(0, 10))
 
         # --- where it lands --------------------------------------------------
@@ -685,6 +701,7 @@ class BioleadsGUI:
             do_citation_network=self.citations_var.get(),
             min_paper_degree=int(self.mindeg_paper_var.get()),
             min_author_degree=int(self.mindeg_author_var.get()),
+            min_author_papers=int(self.min_author_papers_var.get()),
             expand_rounds=int(self.expand_var.get()),
             expand_link=self.expand_link_var.get(),
             expand_source=self.expand_source_var.get(),

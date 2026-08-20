@@ -99,6 +99,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "distinct authors cited or citing. Separate because the "
                         "author graph is a projection, so its degrees run an "
                         "order of magnitude higher than the paper graph's")
+    p.add_argument("--min-author-papers", type=int,
+                   default=Config.min_author_papers, metavar="N",
+                   help="floor for the senior-author paper-count network, "
+                        "counted in corpus papers rather than citation degree "
+                        "— a lab nothing in the corpus cites has degree 0, and "
+                        "that lab is what this view is for")
     p.add_argument("--cluster", action="store_true",
                    help="cluster ranked terms with PubMedBERT: writes "
                         "term_clusters.csv and colors the graph by cluster "
@@ -108,7 +114,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top-terms", type=int, default=200)
     p.add_argument("--min-doc-freq", type=int, default=2)
     p.add_argument("--scispacy-model", default="en_core_sci_sm")
-    p.add_argument("--retmax", type=int, default=500, help="max PubMed records")
+    p.add_argument("--retmax", type=int, default=Config.pubmed_retmax,
+                   help="max PubMed records")
     p.add_argument("--email", default="disom.biophysics@gmail.com",
                    help="Entrez contact email")
     p.add_argument("--api-key", default=None, help="NCBI API key (optional)")
@@ -133,6 +140,7 @@ def main(argv=None) -> int:
         do_citation_network=args.citations,
         min_paper_degree=args.min_paper_degree,
         min_author_degree=args.min_author_degree,
+        min_author_papers=args.min_author_papers,
         n_clusters=args.n_clusters,
         expand_rounds=args.expand,
         expand_link=args.expand_link,

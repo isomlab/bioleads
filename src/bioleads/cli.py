@@ -2,25 +2,22 @@
 
 Examples
 --------
-# From local PDFs, log-odds vs a background, write all outputs:
-bioleads --pdf ./papers --background bg_counts.json --out ./results
-
-# From a PubMed query:
+# From a PubMed query, writing all outputs:
 bioleads --pubmed "GPCR allosteric modulation cardiac" --out ./results
 
+# From a list of PMIDs, growing the corpus along citations first:
+bioleads --pmids @seeds.txt --expand 1 --out ./results
+
 # Open ABC discovery seeded from specific concepts:
-bioleads --pdf ./papers --anchors "trpv1,inflammation" --out ./results
+bioleads --pmids @seeds.txt --anchors "trpv1,inflammation" --out ./results
 """
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
 import sys
-from collections import Counter
 
 from .config import Config
-from .enrichment import load_background
 from .pipeline import run_pipeline
 
 
@@ -46,7 +43,6 @@ def build_parser() -> argparse.ArgumentParser:
                     "co-occurrence networks, and Swanson ABC hypothesis leads.",
     )
     src = p.add_argument_group("inputs")
-    src.add_argument("--pdf", metavar="PATH", help="PDF file or directory of PDFs")
     src.add_argument("--pubmed", metavar="QUERY", help="PubMed search query")
     src.add_argument("--pmids", metavar="IDS",
                      help="explicit PubMed IDs: comma/space-separated list, "
@@ -55,14 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
                      help="reference-manager export to seed from: RIS (.ris) "
                           "or EndNote XML (.xml), auto-detected")
 
-    p.add_argument("--fulltext", action="store_true",
-                   help="upgrade open-access PMC articles to full body text "
-                        "(falls back to abstract otherwise)")
     p.add_argument("--out", default="./bioleads_out", help="output directory")
-    p.add_argument("--background", metavar="JSON",
-                   help="background term->count JSON for enrichment")
-    p.add_argument("--method", choices=["log_odds", "hypergeometric", "tfidf"],
-                   default="log_odds", help="enrichment scoring method")
     p.add_argument("--anchors", help="comma-separated seed concepts for ABC discovery")
     p.add_argument("--expand", type=int, default=0, metavar="ROUNDS",
                    help="grow the corpus by following citations from the seed "
@@ -127,21 +116,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    if not args.pdf and not args.pubmed and not args.pmids and not args.refs:
-        print("error: provide --pdf, --pubmed, --pmids, and/or --refs",
+    if not args.pubmed and not args.pmids and not args.refs:
+        print("error: provide --pubmed, --pmids, and/or --refs",
               file=sys.stderr)
         return 2
 
     cfg = Config(
         scispacy_model=args.scispacy_model,
-        enrichment_method=args.method,
         top_terms=args.top_terms,
         min_doc_freq=args.min_doc_freq,
-        background_path=args.background,
         pubmed_retmax=args.retmax,
         entrez_email=args.email,
         entrez_api_key=args.api_key,
-        pubmed_fulltext=args.fulltext,
         do_clustering=args.cluster,
         do_citation_network=args.citations,
         min_paper_degree=args.min_paper_degree,
@@ -155,13 +141,11 @@ def main(argv=None) -> int:
         expand_max=args.expand_max,
     )
 
-    background: Counter | None = load_background(args.background) if args.background else None
     anchors = [a.strip() for a in args.anchors.split(",")] if args.anchors else None
 
     result = run_pipeline(
-        pdf_path=args.pdf, pubmed_query=args.pubmed, pmids=args.pmids,
-        refs=args.refs, cfg=cfg,
-        background=background, anchors=anchors, out_dir=args.out,
+        pubmed_query=args.pubmed, pmids=args.pmids, refs=args.refs, cfg=cfg,
+        anchors=anchors, out_dir=args.out,
     )
 
     print(result.summary())

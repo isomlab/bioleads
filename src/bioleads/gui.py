@@ -5,7 +5,7 @@ background thread so the window stays responsive; results stream back to the UI
 through a queue polled on the Tk event loop.
 
 Only the standard library is needed for the GUI itself — Tkinter ships with
-CPython. The pipeline's own optional extras (pubmed, pdf, ...) still apply.
+CPython. The pipeline's own optional extras (pubmed, ner, ...) still apply.
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ import sys
 import threading
 import traceback
 import webbrowser
-from collections import Counter
 from dataclasses import replace
 
 import tkinter as tk
@@ -31,7 +30,6 @@ from .embeddings import (
     write_cluster_scatter,
     to_dataframe as clusters_df,
 )
-from .enrichment import load_background
 from .pipeline import PipelineResult, run_pipeline
 from .sources import PipelineCancelled
 
@@ -94,15 +92,11 @@ class BioleadsGUI:
         frm.pack(fill="x", padx=10, pady=(10, 6))
         frm.columnconfigure(1, weight=1)
 
-        self.pdf_var = tk.StringVar()
         self.pubmed_var = tk.StringVar()
         self.pmids_var = tk.StringVar()
         self.refs_var = tk.StringVar()
-        self.background_var = tk.StringVar()
         self.out_var = tk.StringVar(value=os.path.abspath("./bioleads_out"))
         self.anchors_var = tk.StringVar()
-        self.method_var = tk.StringVar(value="log_odds")
-        self.fulltext_var = tk.BooleanVar(value=False)
         self.citations_var = tk.BooleanVar(value=Config.do_citation_network)
         self.mindeg_paper_var = tk.IntVar(value=Config.min_paper_degree)
         self.mindeg_author_var = tk.IntVar(value=Config.min_author_degree)
@@ -116,92 +110,49 @@ class BioleadsGUI:
         self.retmax_var = tk.IntVar(value=Config.pubmed_retmax)
 
         r = 0
-        self._row_entry(frm, r, "PDF file/folder:", self.pdf_var,
-                        ("Browse…", self._pick_pdf),
-                        hint="Stage 1 · Collect documents. A single PDF, or a "
-                             "folder of PDFs, read as full extracted text. PDFs "
-                             "carry no PMID, so they cannot seed citation "
-                             "expansion (stage 2) or appear in the citation "
-                             "networks (stage 8)."); r += 1
         self._row_entry(frm, r, "PubMed query:", self.pubmed_var,
-                        hint='Stage 1 · Collect documents. An Entrez search '
-                             '(e.g. "CFTR AND chloride channel"). Fetches title '
-                             "+ abstract for each hit, up to Max records. Tick "
-                             "PMC full text to upgrade open-access articles to "
-                             "their full body."); r += 1
+                        hint='An Entrez search (e.g. "CFTR AND chloride '
+                             'channel"). Fetches title + abstract for each '
+                             "hit, up to Max query hits."); r += 1
         self._row_entry(frm, r, "PubMed IDs:", self.pmids_var,
                         ("Load file…", self._pick_pmid_file),
-                        hint="Stage 1 · Collect documents. Specific records by "
-                             "PMID: comma/space-separated, or load a file of "
-                             "IDs. These are the seeds citation expansion "
-                             "(stage 2) follows."); r += 1
+                        hint="Specific records by PMID: "
+                             "comma/space-separated, or load a file of IDs. "
+                             "These are the seeds citation expansion follows."); r += 1
         self._row_entry(frm, r, "References file:", self.refs_var,
                         ("Browse…", self._pick_refs),
-                        hint="Stage 1 · Collect documents. An EndNote/Zotero "
-                             "export: RIS (.ris) or EndNote XML (.xml), "
-                             "auto-detected. Title + abstract are used as "
-                             "written; PMIDs found in the file can seed "
-                             "expansion and be upgraded to full text."); r += 1
-        self._row_entry(frm, r, "Background JSON:", self.background_var,
-                        ("Browse…", self._pick_background),
-                        hint="Stage 4 · Rank distinctive terms. A term→count "
-                             "baseline saying what is ordinary in biomedicine, "
-                             "so scoring can surface what is distinctive about "
-                             "this corpus. There is NO built-in background: "
-                             "leave this empty and log_odds / hypergeometric "
-                             "silently fall back to TF-IDF."); r += 1
+                        hint="An EndNote/Zotero export: RIS (.ris) or EndNote "
+                             "XML (.xml), auto-detected. Title + abstract are "
+                             "used as written; PMIDs found in the file are "
+                             "what seed expansion and the citation networks."); r += 1
         self._row_entry(frm, r, "Output folder:", self.out_var,
                         ("Browse…", self._pick_out),
-                        hint="Stage 9 · Write outputs. Where the CSVs and "
-                             "interactive HTML land; they are also listed, with "
-                             "Open buttons, in the Outputs tab."); r += 1
+                        hint="Where the CSVs and interactive HTML land; they "
+                             "are also listed, with Open buttons, in the "
+                             "Outputs tab."); r += 1
         self._row_entry(frm, r, "ABC anchors:", self.anchors_var,
-                        hint="Stage 6 · Propose hypotheses. Comma-separated "
-                             "concepts to use as A in the Swanson ABC search — "
-                             "open discovery from a starting point you care "
-                             "about. Leave empty to try every term in the "
-                             "network (exhaustive)."); r += 1
+                        hint="Comma-separated concepts to use as A in the "
+                             "Swanson ABC search — open discovery from a "
+                             "starting point you care about. Leave empty to "
+                             "try every term in the network (exhaustive)."); r += 1
 
         opts = ttk.Frame(frm)
         opts.grid(row=r, column=0, columnspan=3, sticky="ew", padx=6, pady=4)
-        ttk.Label(opts, text="Method:").pack(side="left")
-        method_menu = ttk.OptionMenu(opts, self.method_var, self.method_var.get(),
-                                     "log_odds", "hypergeometric", "tfidf")
-        method_menu.pack(side="left", padx=(4, 16))
-        self._add_tooltip(
-            method_menu,
-            "Stage 4 · Rank distinctive terms. log_odds = weighted log-odds "
-            "vs. background as a z-score (robust; the usual choice); "
-            "hypergeometric = over-representation test as −log10(p); tfidf = "
-            "corpus-internal, needs no background. log_odds and hypergeometric "
-            "require a Background JSON — without one, all three run as TF-IDF.")
-        fulltext_chk = ttk.Checkbutton(opts, text="PMC full text (fall back to abstract)",
-                                       variable=self.fulltext_var)
-        fulltext_chk.pack(side="left", padx=(0, 16))
-        self._add_tooltip(
-            fulltext_chk,
-            "Stage 1 · Collect documents. Upgrade articles that are "
-            "open-access in PubMed Central to their full body text "
-            "(intro/methods/results); articles that are not fall back to the "
-            "abstract. Richer, and materially slower — one extra fetch per "
-            "article.")
-        ttk.Label(opts, text="Max records:").pack(side="left")
+        ttk.Label(opts, text="Max query hits:").pack(side="left")
         retmax_spin = ttk.Spinbox(opts, from_=1, to=100000, width=8,
                                   textvariable=self.retmax_var)
         retmax_spin.pack(side="left", padx=(4, 16))
         self._add_tooltip(
             retmax_spin,
-            "Stage 1 · Collect documents. Cap on how many records a PubMed "
-            "query may fetch.")
+            "Cap on how many hits a PubMed search may fetch.")
         ttk.Label(opts, text="Clusters:").pack(side="left")
         nclusters_spin = ttk.Spinbox(opts, from_=2, to=200, width=5,
                                      textvariable=self.nclusters_var)
         nclusters_spin.pack(side="left", padx=(4, 0))
         self._add_tooltip(
             nclusters_spin,
-            "Stage 7 · Cluster terms. Target number of KMeans groups in "
-            "PubMedBERT space. Applied by the Cluster terms button, not by Run "
-            "pipeline.")
+            "Target number of KMeans groups in PubMedBERT space. Applied by "
+            "the Cluster terms button, not by Run pipeline.")
 
         exp = ttk.Frame(frm)
         exp.grid(row=r + 1, column=0, columnspan=3, sticky="ew", padx=6, pady=(0, 4))
@@ -211,39 +162,39 @@ class BioleadsGUI:
         expand_spin.pack(side="left", padx=(4, 16))
         self._add_tooltip(
             expand_spin,
-            "Stage 2 · Grow the corpus. Follow citation links out from the "
-            "PMID seeds this many rounds (0 = off); each round chases what the "
-            "previous round found. Drives the bfs strategy only — relevance "
-            "always runs one round in each direction, even with this set to 0.")
+            "Follow citation links out from the PMID seeds this many rounds "
+            "(0 = off); each round chases what the previous round found. "
+            "Drives the bfs strategy only — relevance always runs one round "
+            "in each direction, even with this set to 0.")
         ttk.Label(exp, text="Follow:").pack(side="left")
         follow_menu = ttk.OptionMenu(exp, self.expand_link_var, self.expand_link_var.get(),
                                      "references", "cited_by", "both")
         follow_menu.pack(side="left", padx=(4, 16))
         self._add_tooltip(
             follow_menu,
-            "Stage 2 · Grow the corpus. references = papers your seeds cite "
-            "(backward, into the foundations); cited_by = papers that cite your "
-            "seeds (forward, into the follow-up work); both = the union. "
-            "Ignored by the relevance strategy, which always does both, gating "
-            "each.")
+            "Which direction to follow: references = papers your seeds cite "
+            "(backward, into the foundations); cited_by = papers that cite "
+            "your seeds (forward, into the follow-up work); both = the union. "
+            "Ignored by the relevance strategy, which always does both, "
+            "gating each.")
         ttk.Label(exp, text="Source:").pack(side="left")
         source_menu = ttk.OptionMenu(exp, self.expand_source_var, self.expand_source_var.get(),
                                      "all", "ncbi", "icite")
         source_menu.pack(side="left", padx=(4, 16))
         self._add_tooltip(
             source_menu,
-            "Stage 2 · Grow the corpus. Which backend supplies citation "
-            "links: ncbi (Entrez ELink, PMC-derived), icite (NIH iCite / Open "
-            "Citation Collection), or all (the union — broadest coverage, and "
-            "it still works if one backend is down).")
-        ttk.Label(exp, text="Max records:").pack(side="left")
+            "Which backend supplies citation links: ncbi (Entrez ELink, "
+            "PMC-derived), icite (NIH iCite / Open Citation Collection), or "
+            "all (the union — broadest coverage, and it still works if one "
+            "backend is down).")
+        ttk.Label(exp, text="Max corpus size:").pack(side="left")
         expand_max_spin = ttk.Spinbox(exp, from_=1, to=100000, width=8,
                                       textvariable=self.expand_max_var)
         expand_max_spin.pack(side="left", padx=(4, 0))
         self._add_tooltip(
             expand_max_spin,
-            "Stage 2 · Grow the corpus. Hard cap on the total PMIDs (seeds + "
-            "discovered) after expansion.")
+            "Hard cap on the total PMIDs (seeds + discovered) after "
+            "expansion.")
 
         exp2 = ttk.Frame(frm)
         exp2.grid(row=r + 2, column=0, columnspan=3, sticky="ew", padx=6, pady=(0, 6))
@@ -253,9 +204,9 @@ class BioleadsGUI:
         strategy_menu.pack(side="left", padx=(4, 16))
         self._add_tooltip(
             strategy_menu,
-            "Stage 2 · Grow the corpus. bfs snowballs along Follow, adding "
-            "every linked paper — exhaustive, and it drifts off topic because a "
-            "reference list spans every field the seed touched. relevance "
+            "How candidates are chosen: bfs snowballs along Follow, adding "
+            "every linked paper — exhaustive, and it drifts off topic because "
+            "a reference list spans every field the seed touched. relevance "
             "trusts neither direction: it builds a topic profile from your "
             "seeds alone, then keeps only the top-K papers most similar to it "
             "in each direction. Benchmarked far cleaner than bfs at equal "
@@ -266,14 +217,14 @@ class BioleadsGUI:
         topk_spin.pack(side="left", padx=(4, 0))
         self._add_tooltip(
             topk_spin,
-            "Stage 2 · Grow the corpus. Relevance strategy only (ignored by "
-            "bfs). Candidates in each direction are scored against the seed "
-            "profile and only the top-K are kept — so this is the main control "
-            "over corpus size and cleanliness. Benchmarked: K=25 is sharpest, "
-            "K=50 the best all-round (the default), and K~100–200 keeps 76–92% "
-            "of bfs's reach at 2–3x its precision — prefer that range when you "
-            "want ABC hypotheses, which need the linking concepts present at "
-            "all. Max records still caps the total.")
+            "Relevance strategy only (ignored by bfs). Candidates in each "
+            "direction are scored against the seed profile and only the top-K "
+            "are kept — so this is the main control over corpus size and "
+            "cleanliness. Benchmarked: K=25 is sharpest, K=50 the best "
+            "all-round (the default), and K~100–200 keeps 76–92% of bfs's "
+            "reach at 2–3x its precision — prefer that range when you want "
+            "ABC hypotheses, which need the linking concepts present at all. "
+            "Max corpus size still caps the total.")
 
         # Stage 8 sits on its own row: the options row above is already full,
         # and the senior-author note has to be readable without hovering.
@@ -285,46 +236,44 @@ class BioleadsGUI:
         citations_chk.pack(side="left", padx=(0, 16))
         self._add_tooltip(
             citations_chk,
-            "Stage 8 · Map the citations. Builds the paper→paper AND "
-            "senior-author→senior-author citation networks from NIH iCite, "
-            "ranking each by in-corpus citations (how foundational within your "
-            "set) and global citations (across all of PubMed). Each paper is "
-            "represented by its LAST author — the senior author, i.e. the lab "
-            "the work came from; first and middle authors do not appear. Only "
-            "PMID-bearing documents can appear, so a PDF-only corpus produces "
-            "neither.")
+            "Builds the paper→paper AND senior-author→senior-author citation "
+            "networks from NIH iCite, ranking each by in-corpus citations "
+            "(how foundational within your set) and global citations (across "
+            "all of PubMed). Each paper is represented by its LAST author — "
+            "the senior author, i.e. the lab the work came from; first and "
+            "middle authors do not appear. Only PMID-bearing documents can "
+            "appear; a reference record with no accession is skipped.")
         ttk.Label(cit, text="Min degree — papers:").pack(side="left")
         mindeg_paper_spin = ttk.Spinbox(cit, from_=0, to=10000, width=4,
                                         textvariable=self.mindeg_paper_var)
         mindeg_paper_spin.pack(side="left", padx=(4, 6))
         self._add_tooltip(
             mindeg_paper_spin,
-            "Stage 8 · Map the citations. Keep only papers with at least this "
-            "many connections in the network — citations they receive from the "
-            "corpus plus citations they make to it. 0 keeps everything; 1 drops "
-            "the papers with no intra-corpus link at all, which in a sparse "
-            "corpus is most of them. Filters the ranking and the picture alike.")
+            "Keep only papers with at least this many connections in the "
+            "network — citations they receive from the corpus plus citations "
+            "they make to it. 0 keeps everything; 1 drops the papers with no "
+            "intra-corpus link at all, which in a sparse corpus is most of "
+            "them. Filters the ranking and the picture alike.")
         ttk.Label(cit, text="senior authors:").pack(side="left")
         mindeg_author_spin = ttk.Spinbox(cit, from_=0, to=10000, width=4,
                                          textvariable=self.mindeg_author_var)
         mindeg_author_spin.pack(side="left", padx=(4, 16))
         self._add_tooltip(
             mindeg_author_spin,
-            "Stage 8 · Map the citations. The same threshold for the "
-            "senior-author network, counted in distinct senior authors cited or "
-            "citing. It is a separate number because that graph is not the "
-            "paper graph: each node is one lab, and a productive lab absorbs "
-            "several of the corpus's papers along with all of their links, so "
-            "the two degree distributions differ.")
+            "The same threshold for the senior-author network, counted in "
+            "distinct senior authors cited or citing. It is a separate number "
+            "because that graph is not the paper graph: each node is one lab, "
+            "and a productive lab absorbs several of the corpus's papers "
+            "along with all of their links, so the two degree distributions "
+            "differ.")
         note = ttk.Label(cit, foreground="#6b7280",
                          text="authors = each paper's last (senior) author")
         note.pack(side="left")
         self._add_tooltip(
             note,
-            "Stage 8 · Map the citations. One node per lab, not per byline: "
-            "first and middle authors are not in the author network, and "
-            "author_ranking.csv counts the corpus papers each senior author "
-            "led.")
+            "One node per lab, not per byline: first and middle authors are "
+            "not in the author network, and author_ranking.csv counts the "
+            "corpus papers each senior author led.")
 
     def _row_entry(self, parent, row, label, var, button=None, hint=None) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=6, pady=3)
@@ -375,26 +324,26 @@ class BioleadsGUI:
         self.run_btn.pack(side="left")
         self._add_tooltip(
             self.run_btn,
-            "Runs stages 1–6 — collect documents, grow the corpus, extract "
-            "entities, rank distinctive terms, build the term network, propose "
-            "hypotheses — plus stage 8 if Citation network is ticked. Runs in a "
-            "background thread; progress streams to the Log tab.")
+            "Collects the documents, grows the corpus, extracts entities, "
+            "ranks the terms, builds the term network and proposes hypotheses "
+            "— plus the citation networks if Citation network is ticked. Runs "
+            "in a background thread; progress streams to the Log tab.")
         self.stop_btn = ttk.Button(bar, text="Stop", command=self._on_stop,
                                    state="disabled")
         self.stop_btn.pack(side="left", padx=6)
         self._add_tooltip(
             self.stop_btn,
-            "Halts after the current step finishes — an in-flight network fetch "
-            "cannot be interrupted mid-call. No results are written.")
+            "Halts after the current step finishes — an in-flight network "
+            "fetch cannot be interrupted mid-call. No results are written.")
         self.cluster_btn = ttk.Button(bar, text="Cluster terms",
                                       command=self._on_cluster, state="disabled")
         self.cluster_btn.pack(side="left", padx=6)
         self._add_tooltip(
             self.cluster_btn,
-            "Stage 7 · Cluster terms. Groups the ranked terms in PubMedBERT "
-            "space, fills the Clusters tab, recolors the co-occurrence graph by "
-            "cluster, and writes the embedding scatter. Available after a run; "
-            "the first use downloads the model.")
+            "Groups the ranked terms in PubMedBERT space, fills the Clusters "
+            "tab, recolors the co-occurrence graph by cluster, and writes the "
+            "embedding scatter. Available after a run; the first use "
+            "downloads the model.")
 
     def _build_statusbar(self) -> None:
         """A dedicated bottom strip for status text + the progress indicator.
@@ -424,8 +373,8 @@ class BioleadsGUI:
 
         self.terms_tree = self._make_tree(
             nb, "Ranked terms",
-            [("term", 280), ("score", 100), ("corpus_count", 110),
-             ("doc_freq", 90), ("bg_count", 90)])
+            [("term", 320), ("score", 110), ("corpus_count", 120),
+             ("doc_freq", 100)])
         self.cand_tree = self._make_tree(
             nb, "Hypotheses",
             [("a", 180), ("c", 180), ("score", 90),
@@ -569,15 +518,6 @@ class BioleadsGUI:
         return tree
 
     # -------------------------------------------------------------- file pickers --
-    def _pick_pdf(self) -> None:
-        path = filedialog.askdirectory(title="Select folder of PDFs")
-        if not path:
-            path = filedialog.askopenfilename(
-                title="…or select a single PDF",
-                filetypes=[("PDF", "*.pdf"), ("All files", "*.*")])
-        if path:
-            self.pdf_var.set(path)
-
     def _pick_pmid_file(self) -> None:
         path = filedialog.askopenfilename(
             title="Select a file of PubMed IDs",
@@ -593,13 +533,6 @@ class BioleadsGUI:
         if path:
             self.refs_var.set(path)
 
-    def _pick_background(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Select background term-count JSON",
-            filetypes=[("JSON", "*.json"), ("All files", "*.*")])
-        if path:
-            self.background_var.set(path)
-
     def _pick_out(self) -> None:
         path = filedialog.askdirectory(title="Select output folder")
         if path:
@@ -609,11 +542,10 @@ class BioleadsGUI:
     def _on_run(self) -> None:
         if self._worker and self._worker.is_alive():
             return
-        pdf = self.pdf_var.get().strip() or None
         pubmed = self.pubmed_var.get().strip() or None
         pmids = self.pmids_var.get().strip() or None
         refs = self.refs_var.get().strip() or None
-        if not (pdf or pubmed or pmids or refs):
+        if not (pubmed or pmids or refs):
             messagebox.showwarning(
                 "No input",
                 "Provide at least one of: PDF path, PubMed query, PubMed IDs, "
@@ -621,14 +553,11 @@ class BioleadsGUI:
             return
 
         out_dir = self.out_var.get().strip() or "./bioleads_out"
-        bg_path = self.background_var.get().strip() or None
         anchors_raw = self.anchors_var.get().strip()
         anchors = [a.strip() for a in anchors_raw.split(",") if a.strip()] or None
 
         cfg = Config(
-            enrichment_method=self.method_var.get(),
             pubmed_retmax=int(self.retmax_var.get()),
-            pubmed_fulltext=self.fulltext_var.get(),
             do_citation_network=self.citations_var.get(),
             min_paper_degree=int(self.mindeg_paper_var.get()),
             min_author_degree=int(self.mindeg_author_var.get()),
@@ -638,7 +567,6 @@ class BioleadsGUI:
             expand_strategy=self.expand_strategy_var.get(),
             expand_top_k=int(self.expand_topk_var.get()),
             expand_max=int(self.expand_max_var.get()),
-            background_path=bg_path,
         )
 
         self._cancel.clear()
@@ -650,23 +578,18 @@ class BioleadsGUI:
         self._cfg = cfg
         self._log(f"Starting pipeline → {out_dir}")
         self.status_var.set("Starting…")
-        relevance = cfg.expand_strategy == "relevance"
-        if (relevance or cfg.expand_rounds > 0) and pdf and not (pubmed or pmids or refs):
-            self._log("Note: citation expansion needs PMID seeds; a PDF-only "
-                      "run has none, so nothing will be expanded.")
         self._worker = threading.Thread(
             target=self._run_worker,
-            args=(pdf, pubmed, pmids, refs, cfg, bg_path, anchors, out_dir),
+            args=(pubmed, pmids, refs, cfg, anchors, out_dir),
             daemon=True,
         )
         self._worker.start()
 
-    def _run_worker(self, pdf, pubmed, pmids, refs, cfg, bg_path, anchors, out_dir) -> None:
+    def _run_worker(self, pubmed, pmids, refs, cfg, anchors, out_dir) -> None:
         try:
-            background: Counter | None = load_background(bg_path) if bg_path else None
             result = run_pipeline(
-                pdf_path=pdf, pubmed_query=pubmed, pmids=pmids, refs=refs, cfg=cfg,
-                background=background, anchors=anchors, out_dir=out_dir,
+                pubmed_query=pubmed, pmids=pmids, refs=refs, cfg=cfg,
+                anchors=anchors, out_dir=out_dir,
                 cancel=self._cancel, progress=self._emit_progress,
             )
             self._queue.put(("done", result, out_dir))
@@ -811,10 +734,6 @@ class BioleadsGUI:
         self._log(result.summary())
         for label, path in result.outputs.items():
             self._log(f"  {label:14s} -> {path}")
-        n_full = sum(1 for d in result.documents if d.meta.get("fulltext"))
-        if n_full:
-            self._log(f"  full text retrieved for {n_full} of "
-                      f"{len(result.documents)} documents")
         n_exp = sum(1 for d in result.documents if d.meta.get("expanded"))
         expansion_requested = (int(self.expand_var.get()) > 0
                                or self.expand_strategy_var.get() == "relevance")
@@ -833,7 +752,7 @@ class BioleadsGUI:
         for t in sorted(result.ranked_terms, key=lambda r: r.score, reverse=True):
             self.terms_tree.insert(
                 "", "end",
-                values=(t.term, f"{t.score:.4g}", t.corpus_count, t.doc_freq, t.bg_count))
+                values=(t.term, f"{t.score:.4g}", t.corpus_count, t.doc_freq))
         for c in result.candidates:
             self.cand_tree.insert(
                 "", "end",

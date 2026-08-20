@@ -51,10 +51,11 @@ nothing.
 
 ## Use it
 
-1. **Point it at your papers** — local PDFs, a PubMed query, or both.
+1. **Point it at your papers** — a PubMed query, a list of PMIDs, or a
+   reference-manager export.
 2. **Run the pipeline.** It extracts entities (genes, diseases, chemicals,
-   phenotypes), ranks the terms that are over-represented against a background
-   corpus, and builds a co-occurrence network.
+   phenotypes), ranks the terms that carry the most weight in the corpus, and
+   builds a co-occurrence network.
 3. **Explore the output** — ranked term tables, the co-occurrence graph, and
    Swanson-style ABC hypothesis leads.
 

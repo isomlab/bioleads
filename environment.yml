@@ -23,4 +23,4 @@ dependencies:
   - python=3.11   # 3.10+ required; 3.11 is the scispaCy-compatible sweet spot
   - pip
   - pip:
-      - "-e .[pdf,pubmed,viz,dev]"
+      - "-e .[pubmed,viz,dev]"

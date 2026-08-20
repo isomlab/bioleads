@@ -16,12 +16,8 @@ class Config:
     normalize_entities: bool = True
 
     # --- Enrichment ---
-    # Scoring method for term ranking against the background corpus.
-    #   "log_odds"      -> Monroe et al. informative Dirichlet log-odds (robust)
-    #   "hypergeometric"-> classic over-representation p-value
-    #   "tfidf"         -> simple corpus-level TF-IDF (no background needed)
-    enrichment_method: str = "log_odds"
-    log_odds_prior: float = 0.01
+    # Terms are scored by corpus-level TF-IDF; there is no other method and no
+    # background corpus (see enrichment.py for what was removed and why).
     min_doc_freq: int = 2          # term must appear in >= this many docs
     top_terms: int = 200           # how many ranked terms to keep
 
@@ -56,7 +52,6 @@ class Config:
     pubmed_retmax: int = 500
     # Upgrade open-access PubMed Central articles to full body text (intro/
     # methods/results) when available; others fall back to title + abstract.
-    pubmed_fulltext: bool = False
 
     # --- Citation expansion (snowballing) ---
     # Grow the corpus from the PMID-bearing seeds by following citation links
@@ -148,6 +143,5 @@ class Config:
     min_author_degree: int = 0
 
     # --- Misc ---
-    background_path: str | None = None  # path to background term-freq json
     seed: int = 0
     stopwords: set[str] = field(default_factory=set)

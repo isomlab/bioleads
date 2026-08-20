@@ -5,6 +5,7 @@ back to the regex extractor and enrichment falls back to TF-IDF when no
 background is supplied.
 """
 import os
+import warnings
 from collections import Counter
 
 import networkx as nx
@@ -412,7 +413,7 @@ def test_relevance_guided_expand_gates_both_directions(monkeypatch):
         "201": "mitochondria glycolysis oxidative phosphorylation",  # bwd, off-topic
     }
 
-    def fake_fetch(ids, *, email=None, api_key=None, fulltext=False, cancel=None,
+    def fake_fetch(ids, *, email=None, api_key=None, cancel=None,
                    progress=None):
         return [Document(doc_id=f"PMID:{i}", text=texts[i], source="pubmed") for i in ids]
 
@@ -464,7 +465,7 @@ def test_relevance_profile_is_the_seeds_alone(monkeypatch):
     texts["200"] = "trpv1 vasodilation channel calcium artery"
     texts["201"] = "crystallography detector calibration synchrotron optics"
 
-    def fake_fetch(ids, *, email=None, api_key=None, fulltext=False, cancel=None,
+    def fake_fetch(ids, *, email=None, api_key=None, cancel=None,
                    progress=None):
         return [Document(doc_id=f"PMID:{i}", text=texts[i], source="pubmed") for i in ids]
 
@@ -496,12 +497,63 @@ def test_run_pipeline_with_refs(tmp_path):
     assert res.entities
 
 
-def test_log_odds_with_background():
-    cfg = _cfg()
-    cfg.enrichment_method = "log_odds"
-    bg = Counter({"the": 1000, "patients": 800, "tissue": 50, "trpv1": 1})
-    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=cfg, background=bg)
-    assert res.ranked_terms  # distinctive terms should outrank generic ones
+def test_cli_requires_a_pmid_bearing_source(capsys):
+    """PDF input is gone, so every source the CLI accepts carries accessions."""
+    from bioleads.cli import build_parser, main
+
+    assert main([]) == 2
+    assert "--pubmed, --pmids, and/or --refs" in capsys.readouterr().err
+    assert not any(a.dest == "pdf" for a in build_parser()._actions)
+    assert not any(a.dest == "background" for a in build_parser()._actions)
+
+
+def test_pmc_full_text_is_gone_end_to_end():
+    """Full text was removed because ~28% open-access coverage skewed everything.
+
+    Those documents ran ~30x longer than abstracts, so they supplied 87% of term
+    mentions and 99% of co-occurrence pairs: stages 4-6 described the
+    open-access subset, not the corpus. Pinned here so no path quietly grows a
+    `fulltext=` argument back.
+    """
+    import inspect
+
+    from bioleads import expansion, sources
+
+    assert not hasattr(Config(), "pubmed_fulltext")
+    for gone in ("_fetch_pmc_body", "_upgrade_refs_fulltext", "_pmid_to_pmcid"):
+        assert not hasattr(sources, gone), gone
+    for fn in (sources.fetch_pubmed, sources.fetch_pubmed_by_ids,
+               sources.load_refs, sources.load_documents,
+               expansion.relevance_guided_expand, run_pipeline):
+        assert "fulltext" not in inspect.signature(fn).parameters, fn.__name__
+
+    from bioleads.cli import build_parser
+    assert not any(a.dest == "fulltext" for a in build_parser()._actions)
+
+
+def test_ranking_is_tfidf_only_and_needs_nothing_external():
+    """Background scoring is gone: no file to load, no method to pick, no warning.
+
+    What is left has to run clean on a bare Config, since that is now the only
+    way it is ever called.
+    """
+    import inspect
+
+    from bioleads import enrichment
+
+    for gone in ("background_path", "enrichment_method", "log_odds_prior"):
+        assert not hasattr(Config(), gone), gone
+    for gone in ("load_background", "_log_odds", "_hypergeometric"):
+        assert not hasattr(enrichment, gone), gone
+    assert "background" not in inspect.signature(rank_terms).parameters
+    assert "background" not in inspect.signature(run_pipeline).parameters
+
+    entities = {"d1": ["trpv1", "artery"], "d2": ["trpv1", "vasodilation"]}
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")          # any fallback notice fails here
+        ranked = rank_terms(entities, Config())
+    assert [r.term for r in ranked]
+    assert set(ranked[0].as_row()) == {"term", "score", "corpus_count", "doc_freq"}
 
 
 # --------------------------------------------------------------------------- #
@@ -1055,39 +1107,6 @@ def test_embedder_is_loaded_once_and_reused(monkeypatch):
         assert loads["tok"] == 2
     finally:
         emb._load_embedder.cache_clear()
-
-
-def test_tfidf_fallback_is_announced_on_the_progress_log(recwarn):
-    """A silent method switch changes what the scores mean, so it must reach the
-    GUI's log — not just stdout, which the launcher discards."""
-    entities = {"d1": ["trpv1", "artery"], "d2": ["trpv1", "artery"]}
-    msgs: list[str] = []
-
-    ranked = rank_terms(entities, Config(enrichment_method="log_odds"),
-                        background=None, progress=msgs.append)
-
-    assert ranked, "should still produce a ranking"
-    blob = " ".join(msgs).lower()
-    assert "tf-idf" in blob, f"fallback not announced: {msgs}"
-    assert "log_odds" in blob, "the notice should name the method that was asked for"
-    # and API/CLI callers, who pass no progress, still get a warning
-    assert any("TF-IDF" in str(w.message) for w in recwarn), "no warning raised"
-
-
-def test_no_fallback_notice_when_a_background_is_given():
-    entities = {"d1": ["trpv1", "artery"], "d2": ["trpv1", "artery"]}
-    msgs: list[str] = []
-    rank_terms(entities, Config(enrichment_method="log_odds"),
-               background=Counter({"trpv1": 3, "artery": 900}), progress=msgs.append)
-    assert not any("tf-idf" in m.lower() for m in msgs), msgs
-
-
-def test_no_fallback_notice_when_tfidf_was_actually_requested():
-    entities = {"d1": ["trpv1", "artery"], "d2": ["trpv1", "artery"]}
-    msgs: list[str] = []
-    rank_terms(entities, Config(enrichment_method="tfidf"), background=None,
-               progress=msgs.append)
-    assert not any("fell back" in m.lower() for m in msgs), msgs
 
 
 def test_centring_recovers_signal_the_shared_direction_hides(monkeypatch):

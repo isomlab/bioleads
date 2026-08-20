@@ -23,13 +23,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pdf = ["pymupdf>=1.23"]
 pubmed = ["biopython>=1.81", "requests>=2.31"]
 ner = ["scispacy>=0.5.4", "spacy>=3.7"]
 embed = ["transformers>=4.40", "torch>=2.2"]
 viz = ["pyvis>=0.3.2", "plotly>=5.18", "umap-learn>=0.5"]
 all = [
-    "pymupdf>=1.23",
     "biopython>=1.81",
     "requests>=2.31",
     "scispacy>=0.5.4",

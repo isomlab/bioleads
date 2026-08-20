@@ -36,8 +36,6 @@ requirements:
     - networkx >=3.1
     - pandas >=2.0
     - tqdm >=4.65
-    # PDF input
-    - pymupdf >=1.23
     # PubMed / PMC fetching
     - biopython >=1.81
     - requests >=2.31

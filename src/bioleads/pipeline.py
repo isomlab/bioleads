@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-from collections import Counter
 from dataclasses import dataclass, field
 
 import networkx as nx
@@ -69,13 +68,11 @@ class PipelineResult:
 
 def run_pipeline(
     *,
-    pdf_path: str | None = None,
     pubmed_query: str | None = None,
     pmids: str | list[str] | None = None,
     refs: str | None = None,
     texts=None,
     cfg: Config | None = None,
-    background: Counter | None = None,
     anchors: list[str] | None = None,
     out_dir: str | None = None,
     documents: list[Document] | None = None,
@@ -84,7 +81,7 @@ def run_pipeline(
 ) -> PipelineResult:
     """Run the full bioleads pipeline and optionally write outputs to `out_dir`.
 
-    Provide documents directly, or any combination of pdf_path / pubmed_query /
+    Provide documents directly, or any combination of pubmed_query /
     pmids / refs / texts to load them.
 
     Pass `cancel` (a threading.Event) to support cooperative cancellation: the
@@ -107,9 +104,8 @@ def run_pipeline(
     else:
         say("Loading documents…")
         docs = load_documents(
-            pdf_path=pdf_path, pubmed_query=pubmed_query, pmids=pmids, refs=refs,
+            pubmed_query=pubmed_query, pmids=pmids, refs=refs,
             texts=texts,
-            fulltext=cfg.pubmed_fulltext,
             expand_rounds=0 if relevance_mode else cfg.expand_rounds,
             expand_link=cfg.expand_link,
             expand_source=cfg.expand_source, expand_max=cfg.expand_max,
@@ -126,7 +122,7 @@ def run_pipeline(
         from .expansion import relevance_guided_expand
         docs += relevance_guided_expand(
             docs, cfg, email=cfg.entrez_email, api_key=cfg.entrez_api_key,
-            fulltext=cfg.pubmed_fulltext, cancel=cancel, log=progress,
+            cancel=cancel, log=progress,
         )
         say(f"Corpus after expansion: {len(docs)} document(s).")
 
@@ -135,8 +131,8 @@ def run_pipeline(
     entities = extract_entities(docs, cfg, progress=progress, cancel=cancel)
     say(f"  {sum(len(v) for v in entities.values())} entity mention(s) extracted.")
     _check_cancel(cancel)
-    say("Ranking distinctive terms vs. background…")
-    ranked = rank_terms(entities, cfg, background=background, progress=progress)
+    say("Ranking distinctive terms…")
+    ranked = rank_terms(entities, cfg)
     say(f"  {len(ranked)} ranked term(s).")
     keep = {r.term for r in ranked}
     say("Building co-occurrence network…")

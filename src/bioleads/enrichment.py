@@ -1,36 +1,32 @@
-"""Rank terms by how distinctive they are to the corpus.
+"""Rank terms by how much weight they carry in the corpus.
 
-Raw frequency just surfaces generic words ("cell", "patient"). We instead
-score each term against a *background* distribution so that what rises to the
-top is what's over-represented in the topic corpus.
+Raw frequency just surfaces generic words ("cell", "patient"), so terms are
+scored by corpus-level TF-IDF: total count damped by how many documents the
+term appears in, which pushes down anything that shows up everywhere.
 
-Methods
--------
-log_odds       Monroe, Colaresi & Quinn (2008) informative-Dirichlet
-               log-odds-ratio with a z-score. Robust to frequency; the field
-               standard for "distinctive terms" comparisons.
-hypergeometric Classic over-representation test (Fisher/hypergeometric tail).
-tfidf          Corpus-internal TF-IDF; needs no background corpus.
+This used to offer two other methods — Monroe et al. weighted log-odds and a
+hypergeometric over-representation test — that scored the corpus against a
+*background* term-count distribution over some neutral reference collection.
+Both are gone, along with the background itself. Nothing shipped a background,
+nothing could load one, so in every real run they fell back to TF-IDF while
+labelling the output as z-scores or p-values. Restoring them means restoring a
+background worth scoring against, not just the arithmetic.
 """
 from __future__ import annotations
 
-import json
 import math
-import warnings
 from collections import Counter
 from dataclasses import dataclass
 
 from .config import Config
-from .sources import _sayer
 
 
 @dataclass
 class TermScore:
     term: str
-    score: float          # method-specific (z, -log10 p, or tfidf weight)
+    score: float          # mean TF-IDF weight
     corpus_count: int
     doc_freq: int
-    bg_count: int = 0
 
     def as_row(self) -> dict:
         return {
@@ -38,7 +34,6 @@ class TermScore:
             "score": round(self.score, 4),
             "corpus_count": self.corpus_count,
             "doc_freq": self.doc_freq,
-            "bg_count": self.bg_count,
         }
 
 
@@ -52,27 +47,14 @@ def _corpus_counts(entities: dict[str, list[str]]) -> tuple[Counter, Counter]:
     return total, docfreq
 
 
-def load_background(path: str) -> Counter:
-    """Load a background term->count map (JSON). E.g. counts over all PubMed."""
-    with open(path) as f:
-        return Counter(json.load(f))
-
-
 def rank_terms(
     entities: dict[str, list[str]],
     cfg: Config | None = None,
-    background: Counter | None = None,
     *,
     progress=None,
 ) -> list[TermScore]:
-    """Score and rank terms. Returns a list sorted by descending score.
-
-    Pass `progress` (a callable taking one str) to receive the fallback notice
-    below in the caller's own log — without it a GUI run silently reports
-    TF-IDF weights under a log_odds label.
-    """
+    """Score and rank terms by TF-IDF. Returns a list sorted by descending score."""
     cfg = cfg or Config()
-    say = _sayer(progress)
     total, docfreq = _corpus_counts(entities)
 
     # frequency floor
@@ -80,34 +62,10 @@ def rank_terms(
     if not terms:
         return []
 
-    if background is None and cfg.background_path:
-        background = load_background(cfg.background_path)
-
-    method = cfg.enrichment_method
-    if method == "tfidf" or background is None:
-        scores = _tfidf(entities, terms)
-        if background is None and method != "tfidf":
-            # A silent switch of scoring method changes what the numbers *are*
-            # (TF-IDF weights, not z-scores or p-values), so say so on every
-            # channel the caller might be watching: the progress log a GUI
-            # shows, and a warning for CLI and API callers.
-            msg = (f"enrichment_method={method!r} needs a background corpus and "
-                   "none was given — ranking fell back to TF-IDF. The scores "
-                   "are TF-IDF weights, not "
-                   + ("log-odds z-scores." if method == "log_odds"
-                      else "hypergeometric p-values."))
-            say(f"  NOTE: {msg}")
-            warnings.warn(msg, stacklevel=2)
-    elif method == "log_odds":
-        scores = _log_odds(total, background, terms, cfg.log_odds_prior)
-    elif method == "hypergeometric":
-        scores = _hypergeometric(total, background, terms)
-    else:
-        raise ValueError(f"unknown enrichment_method: {method}")
-
+    scores = _tfidf(entities, terms)
     ranked = [
         TermScore(term=t, score=scores[t], corpus_count=total[t],
-                  doc_freq=docfreq[t], bg_count=(background or {}).get(t, 0))
+                  doc_freq=docfreq[t])
         for t in terms
     ]
     ranked.sort(key=lambda r: r.score, reverse=True)
@@ -115,52 +73,8 @@ def rank_terms(
 
 
 # --------------------------------------------------------------------------- #
-# Scoring methods
+# Scoring
 # --------------------------------------------------------------------------- #
-def _log_odds(corpus: Counter, bg: Counter, terms, prior: float) -> dict[str, float]:
-    """Monroe et al. weighted log-odds with informative Dirichlet prior.
-
-    z_w = delta_w / sqrt(var(delta_w)), where delta is the difference in
-    log-odds of word w between corpus and background, smoothed by `prior`.
-    """
-    n_corpus = sum(corpus.values())
-    n_bg = sum(bg.values())
-    a0 = prior * max(len(set(corpus) | set(bg)), 1)
-
-    z = {}
-    for w in terms:
-        y_i = corpus.get(w, 0)
-        y_j = bg.get(w, 0)
-        a_i = prior
-        l_i = math.log((y_i + a_i) / (n_corpus + a0 - y_i - a_i))
-        l_j = math.log((y_j + a_i) / (n_bg + a0 - y_j - a_i))
-        delta = l_i - l_j
-        var = 1.0 / (y_i + a_i) + 1.0 / (y_j + a_i)
-        z[w] = delta / math.sqrt(var)
-    return z
-
-
-def _hypergeometric(corpus: Counter, bg: Counter, terms) -> dict[str, float]:
-    """Over-representation as -log10(survival prob) under hypergeometric."""
-    try:
-        from scipy.stats import hypergeom
-    except ImportError as e:  # pragma: no cover
-        raise ImportError("hypergeometric scoring needs scipy") from e
-
-    n_corpus = sum(corpus.values())
-    n_bg = sum(bg.values())
-    M = n_corpus + n_bg            # population
-    N = n_corpus                   # draws (corpus size)
-    out = {}
-    for w in terms:
-        k = corpus.get(w, 0)       # successes observed in corpus
-        n = corpus.get(w, 0) + bg.get(w, 0)  # total successes in population
-        # P(X >= k)
-        p = hypergeom.sf(k - 1, M, n, N)
-        out[w] = -math.log10(max(p, 1e-300))
-    return out
-
-
 def _tfidf(entities: dict[str, list[str]], terms) -> dict[str, float]:
     """Corpus-level TF-IDF: mean tf-idf weight of each term across documents."""
     n_docs = len(entities)

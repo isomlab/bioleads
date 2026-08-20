@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from .sources import (
     Document,
-    load_pdfs,
     fetch_pubmed,
     fetch_pubmed_by_ids,
     parse_pmid_input,
@@ -37,7 +36,6 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Document",
-    "load_pdfs",
     "fetch_pubmed",
     "fetch_pubmed_by_ids",
     "parse_pmid_input",

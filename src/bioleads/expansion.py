@@ -49,7 +49,6 @@ def relevance_guided_expand(
     *,
     email: str | None = None,
     api_key: str | None = None,
-    fulltext: bool = False,
     log=None,
     cancel=None,
 ) -> list[Document]:
@@ -89,7 +88,7 @@ def relevance_guided_expand(
         new = [i for i in ids if i not in seeds and f"PMID:{i}" not in seen]
         docs = (
             fetch_pubmed_by_ids(new, email=email, api_key=api_key,
-                                fulltext=fulltext, cancel=cancel, progress=log)
+                                cancel=cancel, progress=log)
             if new else []
         )
         if not docs:

@@ -1,13 +1,14 @@
-"""Input sources: local PDFs and PubMed records (by query or explicit IDs).
+"""Input sources: PubMed records (by query or explicit IDs) and reference files.
 
-PubMed records carry title + abstract by default; with `fulltext=True`,
-open-access PubMed Central articles are upgraded to full body text and the rest
-fall back to the abstract. All sources are normalized to a list of `Document`
-objects so the rest of the pipeline is source-agnostic.
+Every record is title + abstract. Pulling open-access PMC full text was offered
+and removed: only ~28% of a typical corpus is open-access, and those documents
+run ~30x longer, so they contributed 87% of term mentions and 99% of
+co-occurrence pairs — the later stages ended up describing the open-access
+subset rather than the corpus. All sources are normalized to a list of
+`Document` objects so the rest of the pipeline is source-agnostic.
 """
 from __future__ import annotations
 
-import glob
 import os
 import re
 import warnings
@@ -54,57 +55,6 @@ def _sayer(progress):
 
 
 # --------------------------------------------------------------------------- #
-# Local PDFs
-# --------------------------------------------------------------------------- #
-def load_pdfs(path: str, recursive: bool = True) -> list[Document]:
-    """Load every PDF under `path` (a file or directory) into Documents.
-
-    Requires the `pdf` extra: pip install "bioleads[pdf]"
-    """
-    try:
-        import fitz  # PyMuPDF
-    except ImportError as e:  # pragma: no cover
-        raise ImportError(
-            'PDF support needs PyMuPDF. Install with: pip install "bioleads[pdf]"'
-        ) from e
-
-    paths: list[str]
-    if os.path.isdir(path):
-        pattern = "**/*.pdf" if recursive else "*.pdf"
-        paths = sorted(glob.glob(os.path.join(path, pattern), recursive=recursive))
-    else:
-        paths = [path]
-
-    docs: list[Document] = []
-    for p in paths:
-        try:
-            with fitz.open(p) as pdf:
-                pages = [pg.get_text("text") for pg in pdf]
-                title = (pdf.metadata or {}).get("title") or _stem(p)
-            text = _clean_pdf_text("\n".join(pages))
-        except Exception as exc:  # noqa: BLE001 - skip unreadable PDFs, keep going
-            print(f"[bioleads] skipping {p}: {exc}")
-            continue
-        docs.append(
-            Document(doc_id=_stem(p), text=text, title=title, source="pdf",
-                     meta={"path": os.path.abspath(p)})
-        )
-    return docs
-
-
-def _stem(p: str) -> str:
-    return os.path.splitext(os.path.basename(p))[0]
-
-
-def _clean_pdf_text(text: str) -> str:
-    """De-hyphenate line breaks and collapse whitespace from PDF extraction."""
-    text = re.sub(r"-\n(\w)", r"\1", text)      # join hyphenated line wraps
-    text = re.sub(r"\s*\n\s*", " ", text)        # newlines -> spaces
-    text = re.sub(r"\s{2,}", " ", text)          # collapse runs of spaces
-    return text.strip()
-
-
-# --------------------------------------------------------------------------- #
 # PubMed / Europe PMC
 # --------------------------------------------------------------------------- #
 DEFAULT_ENTREZ_EMAIL = "disom.biophysics@gmail.com"
@@ -115,13 +65,12 @@ def fetch_pubmed(
     retmax: int = 500,
     email: str = DEFAULT_ENTREZ_EMAIL,
     api_key: str | None = None,
-    fulltext: bool = False,
     cancel=None,
     progress=None,
 ) -> list[Document]:
     """Fetch records for a PubMed query via Entrez (Biopython).
 
-    By default each Document holds title + abstract. With `fulltext=True`,
+    Each Document holds title + abstract.
     open-access articles in PubMed Central are upgraded to their full body
     text (intro/methods/results); the rest fall back to the abstract.
 
@@ -138,22 +87,20 @@ def fetch_pubmed(
     if not pmids:
         return []
     return fetch_pubmed_by_ids(pmids, email=email, api_key=api_key,
-                               fulltext=fulltext, cancel=cancel, progress=progress)
+                               cancel=cancel, progress=progress)
 
 
 def fetch_pubmed_by_ids(
     pmids: Iterable[str],
     email: str = DEFAULT_ENTREZ_EMAIL,
     api_key: str | None = None,
-    fulltext: bool = False,
     cancel=None,
     progress=None,
 ) -> list[Document]:
     """Fetch records for an explicit list of PubMed IDs via Entrez efetch.
 
     Order is preserved as given and empty/duplicate IDs should be removed by
-    the caller (see `parse_pmid_input`). With `fulltext=True`, open-access PMC
-    articles are upgraded to full body text, others fall back to the abstract.
+    the caller (see `parse_pmid_input`).
 
     Requires the `pubmed` extra: pip install "bioleads[pubmed]"
     """
@@ -169,14 +116,13 @@ def fetch_pubmed_by_ids(
     docs: list[Document] = []
     for start, batch in zip(range(0, total, 200), _chunks(ids, 200)):
         _check_cancel(cancel)
-        say(f"  fetching PubMed records {start + 1}–{start + len(batch)} of {total}"
-            + (" (with PMC full text)" if fulltext else "") + "…")
+        say(f"  fetching PubMed records {start + 1}–{start + len(batch)} of "
+            f"{total}…")
         with Entrez.efetch(
             db="pubmed", id=",".join(batch), rettype="medline", retmode="text"
         ) as h:
             records = list(Medline.parse(h))
-        docs += _build_pubmed_docs(records, fulltext=fulltext,
-                                   email=email, api_key=api_key)
+        docs += _build_pubmed_docs(records)
     say(f"  retrieved {len(docs)} document(s) with usable text")
     return docs
 
@@ -233,55 +179,15 @@ def _record_to_document(rec: dict) -> Document:
             "journal": rec.get("JT", ""),
             "year": rec.get("DP", "")[:4],
             "mesh": rec.get("MH", []),
-            "pmc": rec.get("PMC", ""),
             "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
         },
     )
 
 
-def _build_pubmed_docs(
-    records: list[dict], *, fulltext: bool, email: str, api_key: str | None
-) -> list[Document]:
-    docs: list[Document] = []
-    for rec in records:
-        doc = _record_to_document(rec)
-        if fulltext and doc.meta.get("pmc"):
-            body = _fetch_pmc_body(doc.meta["pmc"], email=email, api_key=api_key)
-            if body:
-                doc.text = body
-                doc.meta["fulltext"] = True
-        if not doc.text:  # no abstract and no retrievable full text
-            continue
-        docs.append(doc)
-    return docs
-
-
-def _fetch_pmc_body(
-    pmc_id: str, *, email: str, api_key: str | None = None
-) -> str | None:
-    """Fetch and flatten the JATS <body> of an open-access PMC article.
-
-    Returns None when the article isn't in PMC open-access, has no body, or the
-    request fails — callers fall back to the abstract.
-    """
-    from xml.etree import ElementTree as ET
-
-    numeric = re.sub(r"[^0-9]", "", str(pmc_id))
-    if not numeric:
-        return None
-    Entrez, _ = _entrez(email, api_key)
-    try:
-        with Entrez.efetch(db="pmc", id=numeric, retmode="xml") as h:
-            tree = ET.parse(h)
-    except Exception as exc:  # noqa: BLE001 - non-OA / network errors -> fall back
-        print(f"[bioleads] PMC full text unavailable for PMC{numeric}: {exc}")
-        return None
-
-    body = tree.getroot().find(".//body")
-    if body is None:
-        return None
-    text = _clean_pdf_text(" ".join(body.itertext()))
-    return text or None
+def _build_pubmed_docs(records: list[dict]) -> list[Document]:
+    """Records with no abstract carry no text and are dropped."""
+    docs = [_record_to_document(rec) for rec in records]
+    return [d for d in docs if d.text]
 
 
 def _chunks(seq: list, n: int) -> Iterable[list]:
@@ -483,7 +389,6 @@ def _seed_pmids(docs: list[Document]) -> list[str]:
 def load_refs(
     path: str,
     *,
-    fulltext: bool = False,
     email: str = DEFAULT_ENTREZ_EMAIL,
     api_key: str | None = None,
 ) -> list[Document]:
@@ -491,8 +396,7 @@ def load_refs(
 
     Format is auto-detected from content (falling back to file extension). Each
     record's title + abstract become the Document text. PMIDs are harvested into
-    `meta["pmid"]`; with `fulltext=True`, records whose PMID is open-access in
-    PMC are upgraded to full body text (others keep their file abstract).
+    `meta["pmid"]`.
     """
     with open(path, "rb") as f:
         data = f.read()
@@ -526,8 +430,6 @@ def load_refs(
             )
         )
 
-    if fulltext:
-        _upgrade_refs_fulltext(docs, email=email, api_key=api_key)
     return docs
 
 
@@ -618,44 +520,6 @@ def _xml_text(el) -> str:
     return re.sub(r"\s+", " ", "".join(el.itertext())).strip()
 
 
-def _upgrade_refs_fulltext(
-    docs: list[Document], *, email: str, api_key: str | None
-) -> None:
-    """In place: replace abstracts with PMC full text for PMIDs that have it."""
-    pmids = [d.meta["pmid"] for d in docs if d.meta.get("pmid")]
-    if not pmids:
-        return
-    pmc_map = _pmid_to_pmcid(pmids, email=email, api_key=api_key)
-    for d in docs:
-        pmcid = pmc_map.get(d.meta.get("pmid", ""))
-        if not pmcid:
-            continue
-        body = _fetch_pmc_body(pmcid, email=email, api_key=api_key)
-        if body:
-            d.text = body
-            d.meta["fulltext"] = True
-            d.meta["pmcid"] = pmcid
-
-
-def _pmid_to_pmcid(
-    pmids: Iterable[str], *, email: str, api_key: str | None
-) -> dict[str, str]:
-    Entrez, Medline = _entrez(email, api_key)
-    out: dict[str, str] = {}
-    for batch in _chunks(list(pmids), 200):
-        with Entrez.efetch(
-            db="pubmed", id=",".join(batch), rettype="medline", retmode="text"
-        ) as h:
-            for rec in Medline.parse(h):
-                pmid, pmc = rec.get("PMID", ""), rec.get("PMC", "")
-                if pmid and pmc:
-                    out[pmid] = pmc
-    return out
-
-
-# --------------------------------------------------------------------------- #
-# Convenience: build documents from text directly (and dispatcher)
-# --------------------------------------------------------------------------- #
 def documents_from_texts(texts: Iterable[str], prefix: str = "doc") -> list[Document]:
     """Wrap raw strings as Documents — handy for testing and notebooks."""
     return [Document(doc_id=f"{prefix}{i}", text=t, source="text")
@@ -664,12 +528,10 @@ def documents_from_texts(texts: Iterable[str], prefix: str = "doc") -> list[Docu
 
 def load_documents(
     *,
-    pdf_path: str | None = None,
     pubmed_query: str | None = None,
     pmids: str | Iterable[str] | None = None,
     refs: str | None = None,
     texts: Iterable[str] | None = None,
-    fulltext: bool = False,
     expand_rounds: int = 0,
     expand_link: str = "references",
     expand_source: str = "ncbi",
@@ -686,14 +548,9 @@ def load_documents(
     """
     say = _sayer(progress)
     docs: list[Document] = []
-    if pdf_path:
-        say(f"Reading PDFs from {pdf_path}…")
-        loaded = load_pdfs(pdf_path)
-        say(f"  loaded {len(loaded)} PDF document(s)")
-        docs += loaded
     if pubmed_query:
         _check_cancel(cancel)
-        docs += fetch_pubmed(pubmed_query, fulltext=fulltext, cancel=cancel,
+        docs += fetch_pubmed(pubmed_query, cancel=cancel,
                              progress=progress, **pubmed_kwargs)
     if pmids:
         ids = parse_pmid_input(pmids)
@@ -704,7 +561,6 @@ def load_documents(
                 ids,
                 email=pubmed_kwargs.get("email", DEFAULT_ENTREZ_EMAIL),
                 api_key=pubmed_kwargs.get("api_key"),
-                fulltext=fulltext,
                 cancel=cancel,
                 progress=progress,
             )
@@ -712,7 +568,6 @@ def load_documents(
         say(f"Parsing reference-manager export {refs}…")
         loaded = load_refs(
             refs,
-            fulltext=fulltext,
             email=pubmed_kwargs.get("email", DEFAULT_ENTREZ_EMAIL),
             api_key=pubmed_kwargs.get("api_key"),
         )
@@ -740,7 +595,7 @@ def load_documents(
             if new_ids:
                 say(f"  fetching {len(new_ids)} newly discovered record(s)…")
                 added = fetch_pubmed_by_ids(
-                    new_ids, email=email, api_key=api_key, fulltext=fulltext,
+                    new_ids, email=email, api_key=api_key,
                     cancel=cancel, progress=progress)
                 for d in added:
                     d.meta["expanded"] = True

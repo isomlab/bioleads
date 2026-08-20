@@ -1,14 +1,15 @@
 # bioleads
 
 Mine biomedical literature for candidate biological leads. Given a set of papers
-(local PDFs and/or a PubMed query), `bioleads`:
+(a PubMed query, a list of PMIDs, or a reference-manager export), `bioleads`:
 
 1. **Extracts entities** — genes, diseases, chemicals, phenotypes — with
    scispaCy biomedical NER (regex fallback if models aren't installed).
-2. **Ranks distinctive terms** — scores each term against a *background* corpus
-   so what surfaces is over-represented in your topic, not just frequent. Uses
-   weighted log-odds (Monroe et al.), a hypergeometric over-representation test,
-   or TF-IDF.
+2. **Ranks distinctive terms** — corpus-internal TF-IDF, so what surfaces is
+   what carries weight in your topic rather than what is merely frequent.
+   (Python callers that can supply a background term-count distribution can
+   switch to weighted log-odds (Monroe et al.) or a hypergeometric
+   over-representation test instead.)
 3. **Builds a co-occurrence network** — entities linked when they co-mention
    more than chance predicts (PMI-weighted), exported as an interactive HTML graph.
 4. **Generates hypothesis candidates** — Swanson-style literature-based discovery
@@ -54,10 +55,10 @@ bioleads --help          # or: bioleads-gui
 
 # or plain pip, from a clone:
 pip install -e .            # core (regex NER + TF-IDF)
-pip install -e ".[all]"     # PDF, PubMed, scispaCy NER, embeddings, viz
+pip install -e ".[all]"     # PubMed, scispaCy NER, embeddings, viz
 ```
 
-Extras: `pdf`, `pubmed`, `ner`, `embed`, `viz`, `dev`. For real NER also fetch a model:
+Extras: `pubmed`, `ner`, `embed`, `viz`, `dev`. For real NER also fetch a model:
 
 ```bash
 pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_sm-0.5.4.tar.gz
@@ -76,9 +77,9 @@ conda env create -f environment.yml
 conda activate bioleads
 ```
 
-This gives you Python 3.11 plus PDF input, PubMed/PMC fetching, citation
+This gives you Python 3.11 plus PubMed/PMC fetching, citation
 expansion, the interactive graph viz, the Tkinter GUI, and the test suite
-(`pdf,pubmed,viz,dev`). Tkinter ships with the conda-forge Python build, so
+(`pubmed,viz,dev`). Tkinter ships with the conda-forge Python build, so
 `bioleads-gui` works out of the box — no extra dependency beyond the pipeline's.
 
 Each extra unlocks a feature; install only what you need:
@@ -86,8 +87,7 @@ Each extra unlocks a feature; install only what you need:
 | Extra    | Enables                                                            |
 |----------|-------------------------------------------------------------------|
 | *(core)* | regex NER + TF-IDF ranking, co-occurrence, ABC discovery          |
-| `pdf`    | `--pdf` (PyMuPDF text extraction)                                 |
-| `pubmed` | `--pubmed`, `--pmids`, `--refs`, `--fulltext`, `--expand`         |
+| `pubmed` | `--pubmed`, `--pmids`, `--refs`, `--expand`                       |
 | `viz`    | interactive `cooccurrence.html` (pyvis) + `term_clusters.html` scatter (plotly; UMAP for layout, t-SNE/PCA fallback) |
 | `ner`    | scispaCy biomedical NER (real entities, not regex)                |
 | `embed`  | PubMedBERT term clustering / `--cluster` (torch + transformers)   |
@@ -103,22 +103,16 @@ pip install -e ".[embed]"    # PubMedBERT clustering — downloads on first use
 ## Use
 
 ```bash
-# From a folder of PDFs, with a background corpus, write all outputs:
-bioleads --pdf ./papers --background bg_counts.json --out ./results
-
-# From a PubMed query:
+# From a PubMed query, writing all outputs:
 bioleads --pubmed "GPCR allosteric modulation cardiac" --out ./results
 
 # From an explicit list of PubMed IDs (inline, or a file of IDs via @path):
 bioleads --pmids "29622564, 31515768, 30971826" --out ./results
 bioleads --pmids @my_pmids.txt --out ./results
 
-# Pull full text for open-access PMC articles (others fall back to abstract):
-bioleads --pmids @my_pmids.txt --fulltext --out ./results
-
 # Seed from a reference-manager export (RIS or EndNote XML, auto-detected):
 bioleads --refs my_library.ris --out ./results
-bioleads --refs my_library.xml --fulltext --out ./results
+bioleads --refs my_library.xml --out ./results
 
 # Snowball: grow the corpus by following citations from the seeds (2 rounds):
 bioleads --pmids @seeds.txt --expand 2 --out ./results
@@ -132,7 +126,7 @@ bioleads --pmids @seeds.txt --expand 1 --expand-link both --out ./results
 bioleads --pmids @seeds.txt --expand-strategy relevance --expand-top-k 50 --out ./results
 
 # Open discovery seeded from specific concepts:
-bioleads --pdf ./papers --anchors "trpv1,inflammation" --out ./results
+bioleads --pmids @seeds.txt --anchors "trpv1,inflammation" --out ./results
 
 # Cluster ranked terms (writes term_clusters.csv + colors the graph by cluster):
 bioleads --pubmed "trpv1 vasodilation" --cluster --n-clusters 10 --out ./results
@@ -195,8 +189,8 @@ one edge of weight 2). Read it as labs citing labs. It writes:
   2D / rotatable 3D graph, nodes labeled by senior author and sized by in-corpus
   citations, so the most-cited labs are the largest, hottest nodes.
 
-Only PMID-bearing documents can appear in either network; local PDFs or reference
-records without a PMID are skipped, as are records iCite has no author list for.
+Only PMID-bearing documents can appear in either network; reference records
+without a PMID are skipped, as are records iCite has no author list for.
 Names are matched as strings, so "Smith J" and "Smith JA" are two people. Pair it
 with `--expand` to first grow the corpus, then see which papers — and which labs
 — are most foundational.
@@ -222,17 +216,20 @@ bioleads --pmids @seeds.txt --citations \
 
 ### What gets processed
 
-PubMed inputs (`--pubmed` / `--pmids`) fetch the **title + abstract** of each
-record by default. Pass `--fulltext` to upgrade articles that are open-access in
-PubMed Central to their **full body text** (intro/methods/results); records
-without PMC full text fall back to the abstract. Local PDFs are always processed
-as full extracted text.
+Every document is a **title + abstract**. bioleads used to offer `--fulltext`,
+which upgraded open-access PubMed Central articles to their full body; it was
+removed because it quietly reweighted everything downstream. Only ~28% of a
+typical corpus is open-access, and those documents run ~30× longer, so they
+contributed 87% of all term mentions and — since co-occurrence pairs grow with
+the square of document length — **99% of the network's edges**. Stages 4–6 ended
+up describing the open-access subset rather than the corpus, and open access is
+not a random sample of the literature.
 
 Reference-manager exports (`--refs`) accept **RIS** (`.ris`) or **EndNote XML**
 (`.xml`), auto-detected from content. Each record's title + abstract is used as
 written, and PMIDs are harvested from the file (RIS `AN`, EndNote
-`<accession-num>`) so `--fulltext` can upgrade those records to PMC full text
-when available. BibTeX and styled/RTF bibliographies are intentionally not
+`<accession-num>`) so those records can seed expansion and appear in the
+citation networks. BibTeX and styled/RTF bibliographies are intentionally not
 supported (they often lack abstracts or aren't reliably structured).
 
 ### Citation expansion (snowballing)
@@ -242,8 +239,9 @@ supported (they often lack abstracts or aren't reliably structured).
 current frontier and then chases those in the next round, up to `--expand-max`
 total records. `--expand-link both` (the default) unions the two directions;
 `references` alone follows the papers each seed *cites* (backward), and
-`cited_by` alone follows papers that *cite* the seeds (forward). Newly discovered records are fetched from
-PubMed (honoring `--fulltext`) and tagged `expanded` in their metadata.
+`cited_by` alone follows papers that *cite* the seeds (forward). Newly
+discovered records are fetched from PubMed and tagged `expanded` in their
+metadata.
 
 `--expand-source` picks where the citation links come from. By default you
 don't have to choose — it **unions both backends** for the broadest recall:
@@ -261,8 +259,8 @@ don't have to choose — it **unions both backends** for the broadest recall:
 (Concretely, for PMID `34813650` — not in PMC — `ncbi` finds 0 backward
 references while `icite` finds 184; `all` gives the union.)
 
-Seeds without a PMID (raw PDFs, refs lacking an accession) can't be expanded by
-either source. Cycles are avoided: a record already seen is never re-queued.
+Seeds without a PMID (refs lacking an accession) can't be expanded by either
+source. Cycles are avoided: a record already seen is never re-queued.
 
 **Relevance-guided expansion** (`--expand-strategy relevance`) is a filtered
 alternative to the plain BFS snowball. Both citation directions are noisy, so
@@ -360,24 +358,32 @@ from bioleads.config import Config
 
 res = run_pipeline(
     pubmed_query="trpv1 vasodilation",
-    cfg=Config(enrichment_method="log_odds", top_terms=150),
+    cfg=Config(top_terms=150),
     out_dir="./results",
 )
 print(res.summary())
 ```
 
-## Background corpus
+## Ranking
 
-Enrichment is only as good as the background. Supply a JSON `{term: count}` map of
-term frequencies over a neutral reference (e.g. a random PubMed sample, or
-all-of-PubMed entity counts from PubTator3). Without one, `bioleads` falls back to
-TF-IDF and warns.
+Terms are scored by corpus-level TF-IDF: total count damped by how many
+documents the term appears in, so anything that shows up everywhere sinks.
+There is nothing to configure and nothing to supply.
+
+Two other methods used to exist — Monroe et al. weighted log-odds and a
+hypergeometric over-representation test — which asked the stronger question of
+whether a term is over-represented *relative to biomedicine at large*. Answering
+that needs a **background**: a `{term: count}` map over some neutral reference
+collection. bioleads never shipped one, so in practice every run fell back to
+TF-IDF while labelling its output as z-scores or p-values. Both methods and the
+background plumbing are gone; bringing them back means bringing back a
+background worth scoring against, not just the arithmetic.
 
 ## Layout
 
 ```
 src/bioleads/
-  sources.py       PDF + PubMed/PMC + RIS/EndNote loaders, citation links -> Document
+  sources.py       PubMed/PMC + RIS/EndNote loaders, citation links -> Document
   ner.py           scispaCy NER (regex fallback)
   enrichment.py    log-odds / hypergeometric / tf-idf ranking
   cooccurrence.py  PMI-weighted network + pyvis HTML

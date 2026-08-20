@@ -31,13 +31,13 @@ beats chance.
 ## The pipeline at a glance
 
 ```
-   ┌─ 1. Collect documents ──────── PDFs · PubMed query · PMIDs · RIS/EndNote
+   ┌─ 1. Collect documents ──────── PubMed query · PMIDs · RIS/EndNote
    │
    ├─ 2. Grow the corpus ────────── follow citations (optional)
    │
    ├─ 3. Extract entities ───────── scispaCy biomedical NER
    │
-   ├─ 4. Rank distinctive terms ─── score against a background corpus
+   ├─ 4. Rank distinctive terms ─── corpus-internal TF-IDF
    │
    ├─ 5. Build the term network ─── co-occurrence, PMI-filtered
    │
@@ -60,36 +60,44 @@ result usually traces to one specific step — the sections below say which.
 
 **What it does.** Loads every input you gave into one flat list of documents,
 each with a title, text body, and whatever metadata the source carried (PMID,
-year, journal, authors). Sources combine freely — a folder of PDFs *and* a
-PubMed query *and* an EndNote export all land in the same corpus.
+year, journal, authors). Sources combine freely — a PubMed query *and* a list
+of PMIDs *and* an EndNote export all land in the same corpus.
+
+Every input is PMID-bearing by design. That is what lets stage 2 follow
+citations and stage 8 build the citation networks, and it is why local PDFs are
+not an input: a PDF carries no accession, so a document from one can be counted
+and ranked but can never be expanded from or placed in a citation graph.
 
 | Input | What's read |
 |---|---|
-| **PDF file/folder** | full extracted text, de-hyphenated across line breaks |
 | **PubMed query** | an Entrez search; title + abstract of each hit |
 | **PubMed IDs** | specific records, inline or from a file |
 | **References file** | RIS or EndNote XML export; title + abstract as written |
 
-PubMed records give you the **abstract** by default. Turning on full text
-upgrades any article that's open-access in PubMed Central to its **full body**
-(introduction, methods, results); articles that aren't open-access quietly fall
-back to the abstract. Full text is far richer and materially slower — one extra
-fetch per article.
+Every document is a title and an abstract. Pulling **full text** for the
+articles that are open-access in PubMed Central was offered once and removed:
+on a 147-paper corpus only 28% could be upgraded, and those documents ran about
+30× longer than the abstracts around them. They then supplied 87% of all term
+mentions and — because a document's co-occurrence pairs grow with the *square*
+of its length — 99% of the network's edges. Stages 4 to 6 were describing the
+open-access subset rather than the corpus, and open access tracks funder,
+journal and recency rather than relevance. Uniform abstracts are the less
+informative input and the more honest one.
 
 **Why it matters downstream.** This is the only stage that decides what the
 corpus *is*. Every later stage describes this document set and nothing else, so
 a biased or too-small corpus produces confident, well-scored nonsense.
 
-**Controls.** PDF file/folder · PubMed query · PubMed IDs · References file ·
-PMC full text · Max records (caps how many hits a query fetches, default 500).
+**Controls.** PubMed query · PubMed IDs · References file · Max query hits
+(caps how many hits a PubMed search fetches, default 500).
 
 ---
 
 ## 2. Grow the corpus by following citations
 
 **What it does.** Optional. Starts from the documents that carry a PMID, walks
-the citation graph outward, and appends what it finds. Local PDFs without a PMID
-can't seed this — there is nothing to follow.
+the citation graph outward, and appends what it finds. A reference record with
+no accession can't seed this — there is nothing to follow.
 
 Before any of the mechanism, a map of the vocabulary. Everything in this stage is
 one idea — a list of numbers — used at four sizes, and every term below names a
@@ -809,7 +817,8 @@ topic-labelled benchmark would be the independent check.
   the gate becomes "papers like this one" rather than "papers about this topic".
 - **A weak pool.** $K$ is a rank, so exactly $K$ papers are kept even when none
   are close.
-- **No PMIDs, no expansion.** PDF-only corpora cannot seed this at all.
+- **No PMIDs, no expansion.** A corpus of reference records that carry no
+  accession cannot seed this at all.
 
 ### The other strategy: `bfs`
 
@@ -847,31 +856,36 @@ rather than biology, that line is the first thing to check.
 
 ## 4. Rank distinctive terms
 
-**What it does.** Counts every term across the corpus, then scores each one for
-how **over-represented** it is relative to a **background** distribution of term
-counts. Raw frequency is useless here — it just surfaces `cell`, `patient`,
-`expression`. Enrichment against a background is what separates "common in
-biomedicine" from "distinctive about *this* topic".
+**What it does.** Counts every term across the corpus and scores each one, so
+that what rises is what carries weight in the topic rather than what is merely
+frequent — raw counts just surface `cell`, `patient`, `expression`.
 
 Terms appearing in fewer than 2 documents are dropped first, and the top 200
 scoring terms are kept.
 
-**Three methods:**
+The score is **TF-IDF**: a term's total count damped by how many documents it
+appears in, so a term used once in every paper sinks below one used repeatedly
+in a few. It is corpus-internal — nothing outside the corpus is consulted.
 
-- **`log_odds`** — weighted log-odds with an informative Dirichlet prior
-  (Monroe, Colaresi & Quinn 2008), reported as a z-score. Robust across the
-  frequency range and the field standard for distinctive-term comparisons.
-- **`hypergeometric`** — classic over-representation test, reported as
-  −log₁₀(p). Familiar from enrichment analysis.
-- **`tfidf`** — corpus-internal TF-IDF. Needs **no background** at all.
+That is a deliberately weaker question than the one this stage used to ask.
+Two other methods existed, **`log_odds`** (Monroe, Colaresi & Quinn 2008,
+reported as a z-score) and **`hypergeometric`** (over-representation as
+−log₁₀ p), and both asked whether a term is over-represented *relative to
+biomedicine at large*. Answering that needs a **background** — a term→count
+distribution over a neutral reference collection — and bioleads never had one.
+No background shipped with it, and the file-picker that was supposed to supply
+one never had a file to point at, so every real run silently fell back to TF-IDF
+while labelling its output as z-scores. The methods, the background plumbing and
+the fallback are now all gone, which makes the output honest about what it is:
+`ranked_terms.csv` reports TF-IDF weights, and its columns are term, score,
+corpus count and document frequency.
 
-> **Without a background file, `log_odds` and `hypergeometric` cannot run.**
-> There is no bundled background corpus. If you leave the background empty,
-> ranking silently falls back to **TF-IDF** regardless of the method you picked.
-> The numbers you get are then TF-IDF weights, not z-scores or p-values — see
-> [Background corpus](../README.md#background-corpus) for how to build one.
+Getting the stronger question back means finding a background worth scoring
+against — all-of-PubMed entity counts from PubTator3, say — not restoring the
+arithmetic, which was never the hard part.
 
-**Controls.** Background JSON · Method.
+**Controls.** *(none — the two frequency floors, `min_doc_freq` and `top_terms`,
+are config-only.)*
 
 ---
 
@@ -1043,9 +1057,8 @@ same set. With a corpus larger than the cap, the threshold changes *which* nodes
 survive rather than how many: raising it trades breadth for density inside the
 same 150.
 
-**Limits.** Only PMID-bearing documents can appear — PDFs and reference records
-without a PMID are skipped entirely, so a PDF-only corpus produces no citation
-network. Senior-author matching is by name string, so name variants split
+**Limits.** Only PMID-bearing documents can appear — reference records without
+a PMID are skipped entirely. Senior-author matching is by name string, so name variants split
 ("Smith J" and "Smith JA" are two people) and common names collide. Pair this with stage 2: expand first, then see what the enlarged
 set is built on.
 
@@ -1066,7 +1079,7 @@ with an Open button.
 
 | File | What it holds |
 |---|---|
-| `ranked_terms.csv` | stage 4: term, score, corpus count, doc frequency, background count |
+| `ranked_terms.csv` | stage 4: term, TF-IDF score, corpus count, doc frequency |
 | `hypothesis_candidates.csv` | stage 6: A, C, intermediates, score, direct co-occurrence |
 | `cooccurrence.html` / `_3d.html` | stage 5: the term network |
 | `term_clusters.csv` / `.html` | stage 7: cluster membership and the embedding scatter |

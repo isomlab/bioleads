@@ -31,8 +31,7 @@ def app():
 
 def _finished_run():
     """Stand-in for a PipelineResult that produced one ranked term."""
-    term = SimpleNamespace(term="cftr", score=1.0, corpus_count=3,
-                           doc_freq=2, bg_count=1)
+    term = SimpleNamespace(term="cftr", score=1.0, corpus_count=3, doc_freq=2)
     return SimpleNamespace(ranked_terms=[term], candidates=[], outputs={},
                            graph=None, documents=[])
 
@@ -172,22 +171,17 @@ def test_display_path_is_home_relative_and_elided(app):
 
 # ------------------------------------------------- hover help vs. the docs --
 
-def test_tooltips_cite_stages_that_exist_in_the_docs(app, monkeypatch):
-    """Every "Stage N" in the hover help must be a real section of how_it_works.md.
+def test_tooltips_are_help_text_not_stage_labels(app, monkeypatch):
+    """Hover help explains the control; it no longer cites pipeline stages.
 
-    The tooltips are written to mirror that document stage for stage; this keeps
-    a renumbered or renamed stage from silently orphaning the GUI's help.
+    Every tooltip used to open with "Stage N · <section>.", mirroring
+    how_it_works.md. That made the help read as documentation cross-references
+    rather than as an answer to "what does this box do", so the labels were
+    removed — and the numbering is no longer a thing the GUI can get wrong.
     """
-    import pathlib
     import re
 
     from bioleads import gui as gui_mod
-
-    doc = pathlib.Path(__file__).resolve().parents[1] / "docs" / "how_it_works.md"
-    if not doc.exists():  # installed without the docs tree
-        pytest.skip("docs/how_it_works.md not present")
-    documented = {int(n) for n in re.findall(r"^## (\d+)\.", doc.read_text(), re.M)}
-    assert documented, "no numbered stages found in how_it_works.md"
 
     captured: list[str] = []
     original = gui_mod.BioleadsGUI._add_tooltip
@@ -201,11 +195,10 @@ def test_tooltips_cite_stages_that_exist_in_the_docs(app, monkeypatch):
 
     assert captured, "no tooltips were attached"
     assert all(t and t.strip() for t in captured), "an empty tooltip was attached"
-
-    cited = {int(n) for t in captured for n in re.findall(r"[Ss]tage (\d+)", t)}
-    assert cited, "no tooltip references a pipeline stage"
-    assert cited <= documented, (
-        f"tooltips cite stages missing from how_it_works.md: {sorted(cited - documented)}")
+    stagey = [t for t in captured if re.search(r"[Ss]tages? \d", t)]
+    assert not stagey, f"tooltips still cite stage numbers: {stagey}"
+    assert all(t[0].isupper() for t in captured), (
+        "a tooltip lost its opening capital when its stage label was stripped")
 
 
 def test_a_failing_handler_does_not_kill_the_event_pump(app, monkeypatch):

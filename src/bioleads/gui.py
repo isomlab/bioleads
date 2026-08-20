@@ -33,6 +33,26 @@ from .embeddings import (
 from .pipeline import PipelineResult, run_pipeline
 from .sources import PipelineCancelled
 
+# Visual language shared with the other lab tools (probelog, plasmidlog): a navy
+# header, a soft grey page, white cards holding the fields, and one green accent
+# for the primary action. Kept as module constants so a future restyle is one
+# edit here rather than a sweep through the widget code.
+BG = "#eef2f5"
+CARD = "#ffffff"
+HEADER_BG = "#1f3a5f"
+HEADER_FG = "#ffffff"
+SUBTITLE_FG = "#c3d0de"
+TEXT = "#1f2a36"
+MUTED = "#6b7a8d"
+BORDER = "#cfd8e0"
+ACCENT = "#2e7d32"
+ACCENT_ACTIVE = "#256628"
+
+# The form column is deliberately narrow. Every control in it is a short entry,
+# a spinbox or a dropdown, so stretching it across a 1120px window left the
+# fields metres from their labels and the eye with nowhere to land.
+FORM_WIDTH = 430
+
 # What the Outputs tab lists, in order: (group heading, [(row label, key)]),
 # where each key is a PipelineResult.outputs key. A group whose run produced
 # none of its files is hidden entirely; within a group that produced something,
@@ -68,8 +88,9 @@ class BioleadsGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("bioleads")
-        self.root.geometry("1120x760")
-        self.root.minsize(900, 600)
+        self.root.geometry("1240x800")
+        self.root.minsize(1000, 640)
+        self.root.configure(background=BG)
         self._queue: queue.Queue = queue.Queue()
         self._worker: threading.Thread | None = None
         self._cancel = threading.Event()
@@ -80,18 +101,156 @@ class BioleadsGUI:
         self._out_dir: str | None = None
         self._cfg: Config | None = None
 
-        self._build_inputs()
-        self._build_actions()
-        self._build_statusbar()   # pinned to the bottom edge before the notebook
-        self._build_results()
+        self._build_fonts()
+        self._build_style()
+        self._build_header()
+        self._build_statusbar()   # pinned to the bottom edge before the body
+        self._build_body()
         self.root.after(120, self._poll_queue)
 
     # ----------------------------------------------------------------- UI --
-    def _build_inputs(self) -> None:
-        frm = ttk.LabelFrame(self.root, text="Inputs")
-        frm.pack(fill="x", padx=10, pady=(10, 6))
-        frm.columnconfigure(1, weight=1)
+    def _build_fonts(self) -> None:
+        fam = tkfont.nametofont("TkDefaultFont").actual("family")
+        self.f_title = tkfont.Font(family=fam, size=19, weight="bold")
+        self.f_sub = tkfont.Font(family=fam, size=11)
+        self.f_section = tkfont.Font(family=fam, size=13, weight="bold")
+        self.f_label = tkfont.Font(family=fam, size=11)
+        self.f_help = tkfont.Font(family=fam, size=9)
 
+    def _build_style(self) -> None:
+        st = ttk.Style()
+        try:
+            st.theme_use("clam")          # the only stock theme that honours
+        except tk.TclError:               # background colour on every widget
+            pass
+        st.configure("TFrame", background=BG)
+        st.configure("Card.TFrame", background=CARD)
+        st.configure("Header.TFrame", background=HEADER_BG)
+        st.configure("Title.TLabel", background=HEADER_BG, foreground=HEADER_FG,
+                     font=self.f_title)
+        st.configure("Sub.TLabel", background=HEADER_BG, foreground=SUBTITLE_FG,
+                     font=self.f_sub)
+        st.configure("Section.TLabel", background=BG, foreground=HEADER_BG,
+                     font=self.f_section)
+        st.configure("Page.TLabel", background=BG, foreground=TEXT, font=self.f_label)
+        st.configure("PageHelp.TLabel", background=BG, foreground=MUTED,
+                     font=self.f_help)
+        st.configure("Field.TLabel", background=CARD, foreground=TEXT,
+                     font=self.f_label)
+        st.configure("Help.TLabel", background=CARD, foreground=MUTED,
+                     font=self.f_help)
+        st.configure("Card.TCheckbutton", background=CARD, font=self.f_label)
+        st.configure("Accent.TButton", font=self.f_label, foreground="#fff",
+                     background=ACCENT, padding=(16, 8), borderwidth=0)
+        st.map("Accent.TButton", background=[("active", ACCENT_ACTIVE),
+                                             ("disabled", "#a8c3aa")])
+        st.configure("TButton", font=self.f_label, padding=(10, 5))
+        st.configure("Treeview", background=CARD, fieldbackground=CARD,
+                     font=self.f_label, rowheight=22)
+        st.configure("Treeview.Heading", font=self.f_label)
+
+    def _build_header(self) -> None:
+        bar = ttk.Frame(self.root, style="Header.TFrame")
+        bar.pack(fill="x")
+        inner = ttk.Frame(bar, style="Header.TFrame")
+        inner.pack(fill="x", padx=20, pady=12)
+        ttk.Label(inner, text="bioleads", style="Title.TLabel").pack(side="left")
+        ttk.Label(inner, text="  literature mining for biological leads",
+                  style="Sub.TLabel").pack(side="left", padx=(8, 0))
+
+    # --- the two-column body: settings on the left, everything a run produces
+    # --- on the right, so a run's progress is visible without leaving the form.
+    def _build_body(self) -> None:
+        outer = ttk.Frame(self.root, style="TFrame")
+        outer.pack(fill="both", expand=True)
+
+        left = ttk.Frame(outer, style="TFrame", width=FORM_WIDTH)
+        left.pack(side="left", fill="y", padx=(18, 8), pady=14)
+        left.pack_propagate(False)        # honour FORM_WIDTH, don't fit content
+        self._build_form_column(left)
+
+        right = ttk.Frame(outer, style="TFrame")
+        right.pack(side="left", fill="both", expand=True, padx=(8, 18), pady=14)
+        ttk.Label(right, text="Results", style="Section.TLabel").pack(anchor="w")
+        self._build_results(right)
+
+    def _build_form_column(self, left) -> None:
+        ttk.Label(left, text="Set what you want to search, then run.",
+                  style="PageHelp.TLabel").pack(anchor="w", pady=(0, 6))
+        # Buttons pinned to the bottom; the form scrolls between them and the
+        # blurb, so a small window never hides Run behind a scroll.
+        self._build_actions(left)
+        wrap = ttk.Frame(left, style="TFrame")
+        wrap.pack(side="top", fill="both", expand=True)
+        self._build_inputs(self._scroll_body(wrap))
+
+    def _scroll_body(self, parent):
+        """A vertically scrolling page inside `parent`; returns the inner frame."""
+        canvas = tk.Canvas(parent, background=BG, highlightthickness=0)
+        sb = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        body = ttk.Frame(canvas, style="TFrame")
+        body.bind("<Configure>",
+                  lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        window = canvas.create_window((0, 0), window=body, anchor="nw")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self._bind_wheel(canvas)
+        return body
+
+    @staticmethod
+    def _bind_wheel(canvas) -> None:
+        """Scroll `canvas` while the pointer is over it, and only then.
+
+        Bound on Enter and dropped on Leave: a permanent bind_all would have
+        each scrolling region fighting the others for the wheel.
+        """
+        def wheel(event):
+            # macOS sends ±1 per notch; Windows sends multiples of 120.
+            step = -event.delta
+            if abs(event.delta) >= 120:
+                step = int(step / 120)
+            canvas.yview_scroll(step, "units")
+
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", wheel))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+
+    def _section(self, parent, title):
+        """A section heading over a white card; returns the card to fill."""
+        ttk.Label(parent, text=title, style="Section.TLabel").pack(
+            anchor="w", pady=(12, 6))
+        card = ttk.Frame(parent, style="Card.TFrame")
+        card.pack(fill="x")
+        card.columnconfigure(1, weight=1)
+        return card
+
+    def _field(self, card, row, label, widget, hint=None, button=None):
+        """One label + control row inside a card, with optional hover help."""
+        ttk.Label(card, text=label, style="Field.TLabel").grid(
+            row=row, column=0, sticky="w", padx=(14, 8), pady=(9, 9))
+        widget.grid(row=row, column=1, sticky="we", padx=(0, 14 if not button else 6),
+                    pady=(9, 9))
+        if hint:
+            self._add_tooltip(widget, hint)
+        if button:
+            text, cmd = button
+            ttk.Button(card, text=text, command=cmd, width=8).grid(
+                row=row, column=2, sticky="e", padx=(0, 12), pady=(9, 9))
+        return widget
+
+    def _entry(self, card):
+        return ttk.Entry(card, font=self.f_label)
+
+    def _spin(self, card, var, lo, hi, width=7):
+        return ttk.Spinbox(card, from_=lo, to=hi, width=width, textvariable=var,
+                           font=self.f_label)
+
+    def _combo(self, card, var, values, width=12):
+        return ttk.Combobox(card, textvariable=var, values=values, width=width,
+                            state="readonly", font=self.f_label)
+
+    def _build_inputs(self, page) -> None:
         self.pubmed_var = tk.StringVar()
         self.pmids_var = tk.StringVar()
         self.refs_var = tk.StringVar()
@@ -109,182 +268,143 @@ class BioleadsGUI:
         self.expand_max_var = tk.IntVar(value=Config.expand_max)
         self.retmax_var = tk.IntVar(value=Config.pubmed_retmax)
 
-        r = 0
-        self._row_entry(frm, r, "PubMed query:", self.pubmed_var,
-                        hint='An Entrez search (e.g. "CFTR AND chloride '
-                             'channel"). Fetches title + abstract for each '
-                             "hit, up to Max query hits."); r += 1
-        self._row_entry(frm, r, "PubMed IDs:", self.pmids_var,
-                        ("Load file…", self._pick_pmid_file),
-                        hint="Specific records by PMID: "
-                             "comma/space-separated, or load a file of IDs. "
-                             "These are the seeds citation expansion follows."); r += 1
-        self._row_entry(frm, r, "References file:", self.refs_var,
-                        ("Browse…", self._pick_refs),
-                        hint="An EndNote/Zotero export: RIS (.ris) or EndNote "
-                             "XML (.xml), auto-detected. Title + abstract are "
-                             "used as written; PMIDs found in the file are "
-                             "what seed expansion and the citation networks."); r += 1
-        self._row_entry(frm, r, "Output folder:", self.out_var,
-                        ("Browse…", self._pick_out),
-                        hint="Where the CSVs and interactive HTML land; they "
-                             "are also listed, with Open buttons, in the "
-                             "Outputs tab."); r += 1
-        self._row_entry(frm, r, "ABC anchors:", self.anchors_var,
-                        hint="Comma-separated concepts to use as A in the "
-                             "Swanson ABC search — open discovery from a "
-                             "starting point you care about. Leave empty to "
-                             "try every term in the network (exhaustive)."); r += 1
+        # --- what to search -------------------------------------------------
+        card = self._section(page, "Corpus")
+        e = self._entry(card)
+        e.configure(textvariable=self.pubmed_var)
+        self._field(card, 0, "PubMed query", e,
+                    'An Entrez search (e.g. "CFTR AND chloride channel"). '
+                    "Fetches title + abstract for each hit, up to Max query "
+                    "hits.")
+        e = self._entry(card)
+        e.configure(textvariable=self.pmids_var)
+        self._field(card, 1, "PubMed IDs", e,
+                    "Specific records by PMID: comma/space-separated, or load "
+                    "a file of IDs. These are the seeds citation expansion "
+                    "follows.",
+                    button=("Load…", self._pick_pmid_file))
+        e = self._entry(card)
+        e.configure(textvariable=self.refs_var)
+        self._field(card, 2, "References file", e,
+                    "An EndNote/Zotero export: RIS (.ris) or EndNote XML "
+                    "(.xml), auto-detected. Title + abstract are used as "
+                    "written; PMIDs found in the file are what seed expansion "
+                    "and the citation networks.",
+                    button=("Browse…", self._pick_refs))
+        self._field(card, 3, "Max query hits",
+                    self._spin(card, self.retmax_var, 1, 100000),
+                    "Cap on how many hits a PubMed search may fetch.")
 
-        opts = ttk.Frame(frm)
-        opts.grid(row=r, column=0, columnspan=3, sticky="ew", padx=6, pady=4)
-        ttk.Label(opts, text="Max query hits:").pack(side="left")
-        retmax_spin = ttk.Spinbox(opts, from_=1, to=100000, width=8,
-                                  textvariable=self.retmax_var)
-        retmax_spin.pack(side="left", padx=(4, 16))
-        self._add_tooltip(
-            retmax_spin,
-            "Cap on how many hits a PubMed search may fetch.")
-        ttk.Label(opts, text="Clusters:").pack(side="left")
-        nclusters_spin = ttk.Spinbox(opts, from_=2, to=200, width=5,
-                                     textvariable=self.nclusters_var)
-        nclusters_spin.pack(side="left", padx=(4, 0))
-        self._add_tooltip(
-            nclusters_spin,
-            "Target number of KMeans groups in PubMedBERT space. Applied by "
-            "the Cluster terms button, not by Run pipeline.")
+        # --- grow it --------------------------------------------------------
+        card = self._section(page, "Grow the corpus")
+        self._field(card, 0, "Strategy",
+                    self._combo(card, self.expand_strategy_var, ["bfs", "relevance"]),
+                    "How candidates are chosen: bfs snowballs along Follow, "
+                    "adding every linked paper — exhaustive, and it drifts off "
+                    "topic because a reference list spans every field the seed "
+                    "touched. relevance trusts neither direction: it builds a "
+                    "topic profile from your seeds alone, then keeps only the "
+                    "top-K papers most similar to it in each direction. "
+                    "Benchmarked far cleaner than bfs at equal reach — see "
+                    "docs/benchmark.md.")
+        self._field(card, 1, "Rounds",
+                    self._spin(card, self.expand_var, 0, 10),
+                    "Follow citation links out from the PMID seeds this many "
+                    "rounds (0 = off); each round chases what the previous "
+                    "round found. Drives the bfs strategy only — relevance "
+                    "always runs one round in each direction, even with this "
+                    "set to 0.")
+        self._field(card, 2, "Follow",
+                    self._combo(card, self.expand_link_var,
+                                ["references", "cited_by", "both"]),
+                    "Which direction to follow: references = papers your seeds "
+                    "cite (backward, into the foundations); cited_by = papers "
+                    "that cite your seeds (forward, into the follow-up work); "
+                    "both = the union. Ignored by the relevance strategy, "
+                    "which always does both, gating each.")
+        self._field(card, 3, "Source",
+                    self._combo(card, self.expand_source_var,
+                                ["all", "ncbi", "icite"]),
+                    "Which backend supplies citation links: ncbi (Entrez "
+                    "ELink, PMC-derived), icite (NIH iCite / Open Citation "
+                    "Collection), or all (the union — broadest coverage, and "
+                    "it still works if one backend is down).")
+        self._field(card, 4, "Relevance top-K",
+                    self._spin(card, self.expand_topk_var, 1, 100000),
+                    "Relevance strategy only (ignored by bfs). Candidates in "
+                    "each direction are scored against the seed profile and "
+                    "only the top-K are kept — so this is the main control "
+                    "over corpus size and cleanliness. Benchmarked: K=25 is "
+                    "sharpest, K=50 the best all-round (the default), and "
+                    "K~100–200 keeps 76–92% of bfs's reach at 2–3x its "
+                    "precision — prefer that range when you want ABC "
+                    "hypotheses, which need the linking concepts present at "
+                    "all. Max corpus size still caps the total.")
+        self._field(card, 5, "Max corpus size",
+                    self._spin(card, self.expand_max_var, 1, 100000),
+                    "Hard cap on the total PMIDs (seeds + discovered) after "
+                    "expansion.")
 
-        exp = ttk.Frame(frm)
-        exp.grid(row=r + 1, column=0, columnspan=3, sticky="ew", padx=6, pady=(0, 4))
-        ttk.Label(exp, text="Citation expansion rounds:").pack(side="left")
-        expand_spin = ttk.Spinbox(exp, from_=0, to=10, width=4,
-                                  textvariable=self.expand_var)
-        expand_spin.pack(side="left", padx=(4, 16))
-        self._add_tooltip(
-            expand_spin,
-            "Follow citation links out from the PMID seeds this many rounds "
-            "(0 = off); each round chases what the previous round found. "
-            "Drives the bfs strategy only — relevance always runs one round "
-            "in each direction, even with this set to 0.")
-        ttk.Label(exp, text="Follow:").pack(side="left")
-        follow_menu = ttk.OptionMenu(exp, self.expand_link_var, self.expand_link_var.get(),
-                                     "references", "cited_by", "both")
-        follow_menu.pack(side="left", padx=(4, 16))
-        self._add_tooltip(
-            follow_menu,
-            "Which direction to follow: references = papers your seeds cite "
-            "(backward, into the foundations); cited_by = papers that cite "
-            "your seeds (forward, into the follow-up work); both = the union. "
-            "Ignored by the relevance strategy, which always does both, "
-            "gating each.")
-        ttk.Label(exp, text="Source:").pack(side="left")
-        source_menu = ttk.OptionMenu(exp, self.expand_source_var, self.expand_source_var.get(),
-                                     "all", "ncbi", "icite")
-        source_menu.pack(side="left", padx=(4, 16))
-        self._add_tooltip(
-            source_menu,
-            "Which backend supplies citation links: ncbi (Entrez ELink, "
-            "PMC-derived), icite (NIH iCite / Open Citation Collection), or "
-            "all (the union — broadest coverage, and it still works if one "
-            "backend is down).")
-        ttk.Label(exp, text="Max corpus size:").pack(side="left")
-        expand_max_spin = ttk.Spinbox(exp, from_=1, to=100000, width=8,
-                                      textvariable=self.expand_max_var)
-        expand_max_spin.pack(side="left", padx=(4, 0))
-        self._add_tooltip(
-            expand_max_spin,
-            "Hard cap on the total PMIDs (seeds + discovered) after "
-            "expansion.")
+        # --- what to build from it ------------------------------------------
+        card = self._section(page, "Analysis")
+        e = self._entry(card)
+        e.configure(textvariable=self.anchors_var)
+        self._field(card, 0, "ABC anchors", e,
+                    "Comma-separated concepts to use as A in the Swanson ABC "
+                    "search — open discovery from a starting point you care "
+                    "about. Leave empty to try every term in the network "
+                    "(exhaustive).")
+        self._field(card, 1, "Clusters",
+                    self._spin(card, self.nclusters_var, 2, 200),
+                    "Target number of KMeans groups in PubMedBERT space. "
+                    "Applied by the Cluster terms button, not by Run pipeline.")
 
-        exp2 = ttk.Frame(frm)
-        exp2.grid(row=r + 2, column=0, columnspan=3, sticky="ew", padx=6, pady=(0, 6))
-        ttk.Label(exp2, text="Strategy:").pack(side="left")
-        strategy_menu = ttk.OptionMenu(exp2, self.expand_strategy_var, self.expand_strategy_var.get(),
-                                       "bfs", "relevance")
-        strategy_menu.pack(side="left", padx=(4, 16))
+        # --- citation networks ----------------------------------------------
+        card = self._section(page, "Citation networks")
+        chk = ttk.Checkbutton(card, text="Build them (NIH iCite)",
+                              variable=self.citations_var,
+                              style="Card.TCheckbutton")
+        chk.grid(row=0, column=0, columnspan=3, sticky="w", padx=(12, 14),
+                 pady=(10, 2))
         self._add_tooltip(
-            strategy_menu,
-            "How candidates are chosen: bfs snowballs along Follow, adding "
-            "every linked paper — exhaustive, and it drifts off topic because "
-            "a reference list spans every field the seed touched. relevance "
-            "trusts neither direction: it builds a topic profile from your "
-            "seeds alone, then keeps only the top-K papers most similar to it "
-            "in each direction. Benchmarked far cleaner than bfs at equal "
-            "reach — see docs/benchmark.md.")
-        ttk.Label(exp2, text="Relevance top-K:").pack(side="left")
-        topk_spin = ttk.Spinbox(exp2, from_=1, to=100000, width=6,
-                                textvariable=self.expand_topk_var)
-        topk_spin.pack(side="left", padx=(4, 0))
-        self._add_tooltip(
-            topk_spin,
-            "Relevance strategy only (ignored by bfs). Candidates in each "
-            "direction are scored against the seed profile and only the top-K "
-            "are kept — so this is the main control over corpus size and "
-            "cleanliness. Benchmarked: K=25 is sharpest, K=50 the best "
-            "all-round (the default), and K~100–200 keeps 76–92% of bfs's "
-            "reach at 2–3x its precision — prefer that range when you want "
-            "ABC hypotheses, which need the linking concepts present at all. "
-            "Max corpus size still caps the total.")
-
-        # Stage 8 sits on its own row: the options row above is already full,
-        # and the senior-author note has to be readable without hovering.
-        cit = ttk.Frame(frm)
-        cit.grid(row=r + 3, column=0, columnspan=3, sticky="ew", padx=6,
-                 pady=(0, 6))
-        citations_chk = ttk.Checkbutton(cit, text="Citation network (iCite)",
-                                        variable=self.citations_var)
-        citations_chk.pack(side="left", padx=(0, 16))
-        self._add_tooltip(
-            citations_chk,
+            chk,
             "Builds the paper→paper AND senior-author→senior-author citation "
-            "networks from NIH iCite, ranking each by in-corpus citations "
-            "(how foundational within your set) and global citations (across "
-            "all of PubMed). Each paper is represented by its LAST author — "
-            "the senior author, i.e. the lab the work came from; first and "
-            "middle authors do not appear. Only PMID-bearing documents can "
-            "appear; a reference record with no accession is skipped.")
-        ttk.Label(cit, text="Min degree — papers:").pack(side="left")
-        mindeg_paper_spin = ttk.Spinbox(cit, from_=0, to=10000, width=4,
-                                        textvariable=self.mindeg_paper_var)
-        mindeg_paper_spin.pack(side="left", padx=(4, 6))
-        self._add_tooltip(
-            mindeg_paper_spin,
-            "Keep only papers with at least this many connections in the "
-            "network — citations they receive from the corpus plus citations "
-            "they make to it. 0 keeps everything; 1 drops the papers with no "
-            "intra-corpus link at all, which in a sparse corpus is most of "
-            "them. Filters the ranking and the picture alike.")
-        ttk.Label(cit, text="senior authors:").pack(side="left")
-        mindeg_author_spin = ttk.Spinbox(cit, from_=0, to=10000, width=4,
-                                         textvariable=self.mindeg_author_var)
-        mindeg_author_spin.pack(side="left", padx=(4, 16))
-        self._add_tooltip(
-            mindeg_author_spin,
-            "The same threshold for the senior-author network, counted in "
-            "distinct senior authors cited or citing. It is a separate number "
-            "because that graph is not the paper graph: each node is one lab, "
-            "and a productive lab absorbs several of the corpus's papers "
-            "along with all of their links, so the two degree distributions "
-            "differ.")
-        note = ttk.Label(cit, foreground="#6b7280",
-                         text="authors = each paper's last (senior) author")
-        note.pack(side="left")
-        self._add_tooltip(
-            note,
-            "One node per lab, not per byline: first and middle authors are "
-            "not in the author network, and author_ranking.csv counts the "
-            "corpus papers each senior author led.")
+            "networks from NIH iCite, ranking each by in-corpus citations (how "
+            "foundational within your set) and global citations (across all of "
+            "PubMed). Each paper is represented by its LAST author — the "
+            "senior author, i.e. the lab the work came from; first and middle "
+            "authors do not appear. Only PMID-bearing documents can appear; a "
+            "reference record with no accession is skipped.")
+        self._field(card, 1, "Min degree — papers",
+                    self._spin(card, self.mindeg_paper_var, 0, 10000),
+                    "Keep only papers with at least this many connections in "
+                    "the network — citations they receive from the corpus plus "
+                    "citations they make to it. 0 keeps everything; 1 drops "
+                    "the papers with no intra-corpus link at all, which in a "
+                    "sparse corpus is most of them. Filters the ranking and "
+                    "the picture alike.")
+        self._field(card, 2, "Min degree — senior authors",
+                    self._spin(card, self.mindeg_author_var, 0, 10000),
+                    "The same threshold for the senior-author network, counted "
+                    "in distinct senior authors cited or citing. It is a "
+                    "separate number because that graph is not the paper "
+                    "graph: each node is one lab, and a productive lab absorbs "
+                    "several of the corpus's papers along with all of their "
+                    "links, so the two degree distributions differ.")
+        note = ttk.Label(card, style="Help.TLabel", wraplength=FORM_WIDTH - 60,
+                         text="One node per lab, not per byline — each paper is "
+                              "represented by its last author.")
+        note.grid(row=3, column=0, columnspan=3, sticky="w", padx=(12, 14),
+                  pady=(0, 10))
 
-    def _row_entry(self, parent, row, label, var, button=None, hint=None) -> None:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=6, pady=3)
-        entry = ttk.Entry(parent, textvariable=var)
-        entry.grid(row=row, column=1, sticky="ew", padx=6, pady=3)
-        if hint:
-            self._add_tooltip(entry, hint)
-        if button:
-            text, cmd = button
-            ttk.Button(parent, text=text, command=cmd).grid(
-                row=row, column=2, sticky="e", padx=6, pady=3)
+        # --- where it lands --------------------------------------------------
+        card = self._section(page, "Output")
+        e = self._entry(card)
+        e.configure(textvariable=self.out_var)
+        self._field(card, 0, "Folder", e,
+                    "Where the CSVs and interactive HTML land; they are also "
+                    "listed, with Open buttons, in the Outputs tab.",
+                    button=("Browse…", self._pick_out))
 
     def _add_tooltip(self, widget, text) -> None:
         # Lightweight hover tooltip — avoids cluttering the grid with help text.
@@ -299,8 +419,8 @@ class BioleadsGUI:
             win.wm_overrideredirect(True)
             win.wm_geometry(f"+{x}+{y}")
             ttk.Label(win, text=text, relief="solid", borderwidth=1,
-                      background="#ffffe0", padding=3,
-                      wraplength=360, justify="left").pack()
+                      background=CARD, foreground=TEXT, font=self.f_help,
+                      padding=(8, 6), wraplength=360, justify="left").pack()
             tip["win"] = win
 
         def hide(_):
@@ -311,16 +431,17 @@ class BioleadsGUI:
         widget.bind("<Enter>", show)
         widget.bind("<Leave>", hide)
 
-    def _build_actions(self) -> None:
-        """The run controls, and only those.
+    def _build_actions(self, parent) -> None:
+        """The run controls, pinned to the bottom of the form column.
 
-        Everything a run *produces* is listed in the Outputs tab instead, so this
-        row stays short enough to survive the 900px minimum window width.
+        Everything a run *produces* is listed in the Outputs tab instead, so
+        this row never competes with the settings above it for width.
         """
-        bar = ttk.Frame(self.root)
-        bar.pack(fill="x", padx=10, pady=4)
+        bar = ttk.Frame(parent, style="TFrame")
+        bar.pack(side="bottom", fill="x", pady=(10, 0))
 
-        self.run_btn = ttk.Button(bar, text="Run pipeline", command=self._on_run)
+        self.run_btn = ttk.Button(bar, text="Run pipeline", style="Accent.TButton",
+                                  command=self._on_run)
         self.run_btn.pack(side="left")
         self._add_tooltip(
             self.run_btn,
@@ -337,7 +458,7 @@ class BioleadsGUI:
             "fetch cannot be interrupted mid-call. No results are written.")
         self.cluster_btn = ttk.Button(bar, text="Cluster terms",
                                       command=self._on_cluster, state="disabled")
-        self.cluster_btn.pack(side="left", padx=6)
+        self.cluster_btn.pack(side="left")
         self._add_tooltip(
             self.cluster_btn,
             "Groups the ranked terms in PubMedBERT space, fills the Clusters "
@@ -351,21 +472,23 @@ class BioleadsGUI:
         Keeping these off the action row means the button count can grow without
         crowding the progress bar against the window edge.
         """
-        bar = ttk.Frame(self.root, relief="groove", padding=(8, 3))
+        bar = ttk.Frame(self.root, style="TFrame", padding=(18, 6))
         bar.pack(side="bottom", fill="x")
         self.progress = ttk.Progressbar(bar, mode="indeterminate", length=180)
         self.progress.pack(side="right")
         self.status_var = tk.StringVar(value="Ready.")
-        ttk.Label(bar, textvariable=self.status_var, anchor="w").pack(
-            side="left", fill="x", expand=True)
+        ttk.Label(bar, textvariable=self.status_var, anchor="w",
+                  style="PageHelp.TLabel").pack(side="left", fill="x", expand=True)
 
-    def _build_results(self) -> None:
-        nb = ttk.Notebook(self.root)
-        nb.pack(fill="both", expand=True, padx=10, pady=(4, 10))
+    def _build_results(self, parent) -> None:
+        nb = ttk.Notebook(parent)
+        nb.pack(fill="both", expand=True, pady=(6, 0))
 
         log_tab = ttk.Frame(nb)
-        nb.add(log_tab, text="Log")
-        self.log = tk.Text(log_tab, wrap="word", height=10, state="disabled")
+        nb.add(log_tab, text="  Log  ")
+        self.log = tk.Text(log_tab, wrap="word", height=10, state="disabled",
+                           font=self.f_label, background=CARD, foreground=TEXT,
+                           relief="flat", padx=10, pady=8)
         self.log.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(log_tab, command=self.log.yview)
         sb.pack(side="right", fill="y")
@@ -373,19 +496,19 @@ class BioleadsGUI:
 
         self.terms_tree = self._make_tree(
             nb, "Ranked terms",
-            [("term", 320), ("score", 110), ("corpus_count", 120),
-             ("doc_freq", 100)])
+            [("term", 240), ("score", 90), ("corpus_count", 110),
+             ("doc_freq", 90)])
         self.cand_tree = self._make_tree(
             nb, "Hypotheses",
-            [("a", 180), ("c", 180), ("score", 90),
-             ("direct", 70), ("shared_b", 320)])
+            [("a", 160), ("c", 160), ("score", 80),
+             ("direct", 60), ("shared_b", 240)])
 
         clu_tab = ttk.Frame(nb)
-        nb.add(clu_tab, text="Clusters")
+        nb.add(clu_tab, text="  Clusters  ")
         self.clusters_tree = ttk.Treeview(
             clu_tab, columns=("size",), show="tree headings")
         self.clusters_tree.heading("#0", text="Cluster / member terms")
-        self.clusters_tree.column("#0", width=520, anchor="w")
+        self.clusters_tree.column("#0", width=400, anchor="w")
         self.clusters_tree.heading("size", text="size")
         self.clusters_tree.column("size", width=80, anchor="e")
         self.clusters_tree.pack(side="left", fill="both", expand=True)
@@ -402,7 +525,7 @@ class BioleadsGUI:
         new pipeline output shows up here without any UI bookkeeping.
         """
         tab = ttk.Frame(nb)
-        nb.add(tab, text="Outputs")
+        nb.add(tab, text="  Outputs  ")
 
         self._heading_font = tkfont.nametofont("TkDefaultFont").copy()
         self._heading_font.configure(weight="bold")
@@ -506,7 +629,7 @@ class BioleadsGUI:
 
     def _make_tree(self, nb, title, columns) -> ttk.Treeview:
         tab = ttk.Frame(nb)
-        nb.add(tab, text=title)
+        nb.add(tab, text=f"  {title}  ")
         tree = ttk.Treeview(tab, columns=[c for c, _ in columns], show="headings")
         for col, width in columns:
             tree.heading(col, text=col)

@@ -316,24 +316,29 @@ reach at 2–3× its median precision.
 
 ### GUI
 
-A Tkinter desktop front-end wraps the same pipeline — point-and-click inputs,
-a live log, tables of ranked terms and hypothesis candidates, and an **Outputs**
-tab that opens everything the run wrote:
+A Tkinter desktop front-end wraps the same pipeline, laid out like the other
+lab tools (probelog, plasmidlog): a narrow settings column on the left, and
+everything the run produces on the right — a live log, tables of ranked terms
+and hypothesis candidates, and an **Outputs** tab that opens every file written:
 
 ```bash
 bioleads-gui          # installed entry point
 python -m bioleads.gui   # or run the module directly
 ```
 
-The action bar holds just the three run controls — **Run pipeline**, **Stop**,
-and **Cluster terms**. Everything a run *produces* is listed in the **Outputs**
-tab of the results notebook, grouped by what it describes (term co-occurrence,
-term clusters, paper citations, author citations, tables), each with its path
-and an **Open** button that hands the file to your default application. Files
-the run didn't produce stay listed but greyed, so it's visible what's missing
-and why — a `*_3d.html` row is empty when Plotly isn't installed, for example.
+The settings column groups every control into five cards — **Corpus**, **Grow
+the corpus**, **Analysis**, **Citation networks**, **Output** — and scrolls,
+with **Run pipeline**, **Stop** and **Cluster terms** pinned below it so they
+are always reachable. Each control explains itself on hover.
 
-Tick **Citation network (iCite)** before running to also build the paper→paper
+Everything a run *produces* is listed in the **Outputs** tab of the results
+notebook, grouped by what it describes (term co-occurrence, term clusters,
+paper citations, senior-author citations, tables), each with its path and an
+**Open** button that hands the file to your default application. Files the run
+didn't produce stay listed but greyed, so it's visible what's missing and why —
+a `*_3d.html` row is empty when Plotly isn't installed, for example.
+
+Tick **Build them (NIH iCite)** in the Citation networks card to also build the paper→paper
 citation graph *and* the senior-author→senior-author citation graph; `citation_ranking.csv`
 and `author_ranking.csv` land in the output folder alongside the graph files.
 Every network is written as both a 2D pyvis layout and a rotatable 3D Plotly

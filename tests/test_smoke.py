@@ -1067,17 +1067,23 @@ def test_layout_puts_the_highest_degree_node_at_the_centre():
     assert pos["hub"] == (0.0, 0.0, 0.0)
 
 
-def test_radius_is_distance_from_the_hub_in_hops():
-    """Radius has to mean something, which is the point of not using springs."""
+def test_radius_ranks_nodes_by_degree():
+    """Radius has to mean something, which is the point of not using springs.
+
+    Here it means connectedness: the root at the centre, then each degree
+    present in turn, out to the least connected nodes on the rim.
+    """
     from bioleads.graph3d import _isotropic_layout
 
-    pos = _isotropic_layout(_hub_and_spokes())
+    g = _hub_and_spokes()                       # hub 8, n0 2, far 2, rest 1
+    pos = _isotropic_layout(g)
     radius = {n: sum(c * c for c in p) ** 0.5 for n, p in pos.items()}
 
-    spokes = [radius[f"n{i}"] for i in range(8)]
-    assert max(spokes) - min(spokes) < 1e-9, "one shell, one radius"
-    assert radius["hub"] < spokes[0] < radius["far"] < radius["further"]
-    assert radius["further"] == pytest.approx(1.0), "outermost shell normalized"
+    assert radius["hub"] == 0.0
+    assert radius["n0"] == pytest.approx(radius["far"]), "degree 2 is one shell"
+    assert radius["n1"] == pytest.approx(radius["further"]), "degree 1 is one shell"
+    assert radius["hub"] < radius["n0"] < radius["n1"]
+    assert radius["n1"] == pytest.approx(1.0), "least connected reach the rim"
 
 
 def test_each_shell_is_spread_over_the_whole_sphere():
@@ -1088,8 +1094,11 @@ def test_each_shell_is_spread_over_the_whole_sphere():
     """
     from bioleads.graph3d import _isotropic_layout
 
-    pos = _isotropic_layout(_hub_and_spokes())
-    shell = [pos[f"n{i}"] for i in range(8)]
+    g = nx.Graph()
+    for i in range(12):                          # one root, twelve degree-1 nodes
+        g.add_edge("root", f"n{i}")
+    pos = _isotropic_layout(g)
+    shell = [pos[f"n{i}"] for i in range(12)]
     mean = [sum(p[axis] for p in shell) / len(shell) for axis in range(3)]
 
     assert sum(c * c for c in mean) ** 0.5 < 0.05, f"shell is lopsided: {mean}"
@@ -1124,42 +1133,47 @@ def test_detached_pieces_do_not_flatten_the_figure():
 
 
 def test_islands_do_not_shrink_the_graph_that_matters():
-    """The main component keeps the whole radius however many islands there are.
+    """Detached pieces cannot push the connected core toward the centre.
 
-    Pushing each island further out than the last squeezed a 150-node core into
-    6% of the figure and left it an unreadable speck.
+    An earlier version parked each island further out than the last, so twenty
+    of them squeezed the core into 6% of the figure. Ranking by degree bounds
+    the radius by construction: an island's nodes are simply poorly connected,
+    which puts them on the rim rather than beyond it.
     """
     from bioleads.graph3d import _isotropic_layout
 
     g = nx.Graph(nx.barabasi_albert_graph(60, 3, seed=2).edges())
-    main = set(g.nodes)
+    core = set(g.nodes)
     for i in range(20):
-        g.add_edge(f"x{i}a", f"x{i}b")
+        g.add_edge(f"x{i}a", f"x{i}b")          # degree 1: outermost shell
 
     pos = _isotropic_layout(g)
-    reach = max(sum(c * c for c in pos[n]) ** 0.5 for n in main)
+    radius = {n: sum(c * c for c in p) ** 0.5 for n, p in pos.items()}
 
-    assert reach == pytest.approx(1.0), f"core squashed to radius {reach:.3f}"
+    assert max(radius[n] for n in core) < 1.0, "core pushed out to the rim"
+    assert radius["x0a"] == pytest.approx(1.0), "islands are the least connected"
     assert _anisotropy(pos) < 2.0
 
 
-def test_direction_is_ignored_when_measuring_distance():
-    """A DiGraph laid out by arrows alone would strand most of the graph.
+def test_degree_counts_both_directions():
+    """Counting only outgoing arrows would rank a much-cited paper as isolated.
 
-    `cited` only points at the hub, so following edges forward never reaches it.
+    `cited` points *into* the hub and has no outgoing edge at all, so an
+    out-degree ranking would give it 0 and bury it past everything. It has one
+    connection, the same as `a`, and belongs on the same shell.
     """
     from bioleads.graph3d import _isotropic_layout
 
     g = nx.DiGraph()
     g.add_edge("hub", "a")
     g.add_edge("hub", "b")
-    g.add_edge("cited", "hub")       # points *into* the hub
+    g.add_edge("cited", "hub")
 
     pos = _isotropic_layout(g)
     radius = {n: sum(c * c for c in p) ** 0.5 for n, p in pos.items()}
 
-    assert pos["hub"] == (0.0, 0.0, 0.0)
-    assert radius["cited"] == pytest.approx(radius["a"]), "one hop is one hop"
+    assert pos["hub"] == (0.0, 0.0, 0.0), "3 connections: the root"
+    assert radius["cited"] == pytest.approx(radius["a"]), "one connection each"
 
 
 def test_the_layout_is_deterministic():

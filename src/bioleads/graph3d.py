@@ -39,22 +39,14 @@ def _hub(g: nx.Graph, nodes: list) -> object:
     return min(nodes, key=lambda n: (-g.degree(n), str(n)))
 
 
-# Detached components are parked on a sphere just outside the main one, at this
-# radius and this size relative to it. Bounded on purpose: an offset that grew
-# with the number of components would shrink the part of the graph that matters
-# until it was a dot at the centre.
-_ISLAND_ORBIT = 1.25
-_ISLAND_SCALE = 0.12
-
-
 def _shell_directions(m: int, phase: float, tilt: float) -> list[tuple]:
     """`m` unit vectors spread over the sphere, stepped by the golden angle.
 
     The tilt rotates the whole set about the x-axis. For a large shell that
     changes nothing -- a uniform set stays uniform under rotation -- but a shell
     holding a single node sits exactly on the equator without it, and a graph
-    made mostly of pairs and singletons would then put every one of them on the
-    same plane and render flat.
+    with many one-node shells would put every one of them on the same plane and
+    render flat.
     """
     out = []
     for i in range(m):
@@ -68,78 +60,56 @@ def _shell_directions(m: int, phase: float, tilt: float) -> list[tuple]:
     return out
 
 
-def _place_component(g, und, nodes, seed, scale, centre) -> dict:
-    """Lay one connected component out in shells around its own hub."""
-    hub = _hub(g, nodes)
-    depth = dict(nx.single_source_shortest_path_length(und, hub))
-    shells: dict[int, list] = {}
-    for n in nodes:
-        shells.setdefault(depth[n], []).append(n)
-
-    pos = {}
-    span = max(shells) or 1
-    for k, members in shells.items():
-        if k == 0:
-            for n in members:
-                pos[n] = centre
-            continue
-        # Sort by parent so a node's children land next to each other on the
-        # shell: the spread stays uniform, but a branch stays legible as one.
-        def parent(n, _k=k):
-            prev = [m for m in und.neighbors(n) if depth.get(m) == _k - 1]
-            return min((str(m) for m in prev), default="")
-        members = sorted(members, key=lambda n: (parent(n), str(n)))
-
-        r = scale * k / span
-        for n, d in zip(members, _shell_directions(
-                len(members), 0.7 * k + 0.1 * seed, 1.1 * k + 0.37 * seed)):
-            pos[n] = (centre[0] + r * d[0],
-                      centre[1] + r * d[1],
-                      centre[2] + r * d[2])
-    return pos
-
-
 def _isotropic_layout(g: nx.Graph, seed: int = 0) -> dict:
-    """Lay `g` out in 3D, growing outward from its highest-degree node.
+    """Lay `g` out in 3D, ranked outward from its highest-degree node.
 
-    The hub sits at the origin and every other node in its component is placed
-    on a shell whose radius is its distance from the hub in hops, so radius
-    reads directly as "how far from the centre of this network" -- which a
-    force-directed layout does not give you, since there distance is an artifact
-    of where the simulation happened to settle.
+    The highest-degree node is the root and sits at the origin. Every other node
+    is placed on a shell chosen by its degree: the next-highest degree present
+    forms the first shell, the one after that the second, and so on out to the
+    least connected nodes on the rim. Radius is therefore a rank, and reads
+    directly as "how well connected" -- the centre of the picture is the centre
+    of the network, and you can see the ranking fall away from it.
 
-    Within a shell the directions are spread by the golden angle, so the graph
-    grows evenly in every direction instead of flattening into the plane its
-    heaviest edges happen to pull it into.
+    Degree is total and undirected: a citation network is a DiGraph, and
+    counting only outgoing arrows would rank a much-cited paper as though it
+    had no connections at all. It is the same measure the Min degree filter
+    uses, so the two controls agree about what a connection is.
 
-    Direction is ignored when measuring distance -- a citation network is a
-    DiGraph, and following arrows only forward would strand most of the graph as
-    unreachable.
+    Ties share a shell, which is what makes this a ranking rather than a
+    spiral -- nodes of equal degree are equally central and are drawn that way.
+    Within a shell the directions are spread by the golden angle, so each is
+    covered evenly in every direction rather than bunching at the poles, and
+    members are ordered by their best-connected neighbour so the nodes hanging
+    off one hub stay together on the shell.
 
-    The main component always fills the unit ball. Anything detached from it is
-    parked on a sphere just outside, small and spread by the same golden angle,
-    so islands read as islands without deciding the scale of the figure: a
-    sparse corpus is mostly islands, and letting them push the radius outward
-    would leave the structure worth looking at as a speck in the middle.
+    Nothing is special-cased for detached pieces: an isolated paper has degree
+    zero, which puts it on the outermost shell, where it belongs.
 
     Fully deterministic: no simulation, no random start. `seed` only turns the
     whole figure, which is occasionally useful for a screenshot.
     """
     nodes = list(g.nodes)
     und = g.to_undirected(as_view=True) if g.is_directed() else g
+    root = _hub(g, nodes)
 
-    hub = _hub(g, nodes)
-    main = sorted(nx.node_connected_component(und, hub), key=str)
-    pos = _place_component(g, und, main, seed, 1.0, (0.0, 0.0, 0.0))
+    by_degree: dict[int, list] = {}
+    for n in nodes:
+        if n != root:
+            by_degree.setdefault(g.degree(n), []).append(n)
 
-    islands = [sorted(c, key=str) for c in nx.connected_components(und)
-               if hub not in c]
-    islands.sort(key=lambda c: (-len(c), str(c[0])))
-    for c, d in zip(islands, _shell_directions(
-            len(islands), 0.3 * seed, 0.9 + 0.2 * seed) if islands else []):
-        pos.update(_place_component(
-            g, und, c, seed, _ISLAND_SCALE,
-            (_ISLAND_ORBIT * d[0], _ISLAND_ORBIT * d[1], _ISLAND_ORBIT * d[2])))
+    def anchor(n):
+        """The node's best-connected neighbour: its handle on the shell inside."""
+        nb = [(-g.degree(m), str(m)) for m in und.neighbors(n) if m != n]
+        return min(nb)[1] if nb else ""
+
+    pos = {root: (0.0, 0.0, 0.0)}
+    ranks = sorted(by_degree, reverse=True)
+    for i, deg in enumerate(ranks, start=1):
+        members = sorted(by_degree[deg], key=lambda n: (anchor(n), str(n)))
+        r = i / len(ranks)
+        for n, d in zip(members, _shell_directions(
+                len(members), 0.7 * i + 0.1 * seed, 1.1 * i + 0.37 * seed)):
+            pos[n] = (r * d[0], r * d[1], r * d[2])
     return pos
 
 

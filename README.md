@@ -137,7 +137,7 @@ bioleads --pmids @seeds.txt --citations --out ./results
 
 Every network is written **twice**: an interactive 2D pyvis graph (drag nodes,
 physics layout) and a rotatable 3D Plotly graph (`*_3d.html` — drag to orbit,
-scroll to zoom; laid out in shells outward from the highest-degree node). So the citation network ships as `citation_network.html` +
+scroll to zoom; laid out in shells ranked by degree outward from the busiest node). So the citation network ships as `citation_network.html` +
 `citation_network_3d.html`, and the author network as `author_network.html` +
 `author_network_3d.html`.
 
@@ -360,13 +360,21 @@ and `author_ranking.csv` land in the output folder alongside the graph files.
 Every network is written as both a 2D pyvis layout and a rotatable 3D Plotly
 view, listed side by side in the Outputs tab.
 
-The 3D view is laid out **isotropically from the busiest node**: the
-highest-degree node sits at the centre and everything else is placed on a shell
-whose radius is its distance from that node in hops, spread evenly over the
-sphere. So distance from the centre means something — how far a paper or author
-sits from the hub of the network — rather than being wherever a force
-simulation happened to settle. It is deterministic: the same graph lays out the
-same way every time.
+The 3D view is **ranked outward from the busiest node**: the highest-degree
+node is the root at the centre, and every other node sits on a shell chosen by
+its own degree — next-highest degree on the first shell, out to the least
+connected on the rim — with each shell spread evenly over the sphere. So radius
+means connectedness rather than wherever a force simulation happened to settle,
+and the ranking is visible as you look outward. Nodes of equal degree share a
+shell, since they are equally central.
+
+Degree is counted in both directions, the same measure `--min-paper-degree`
+uses, so a much-cited paper is not treated as unconnected. Isolated papers have
+degree zero and land on the rim, which needs no special case. It is
+deterministic: the same graph lays out the same way every time.
+
+Note that the citation view *sizes* nodes by in-corpus citations, which is not
+the same measure as degree — the largest node need not be the central one.
 
 After a run, the **Cluster terms** button groups the ranked terms semantically
 with PubMedBERT and shows them in a collapsible **Clusters** tab (centroid term

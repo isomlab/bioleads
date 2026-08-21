@@ -131,6 +131,17 @@ class Config:
     # the NER term-overlap fallback ignores it.
     relevance_center: bool = False
 
+    # --- iCite cache ---
+    # Records fetched from iCite are kept under ~/.cache/bioleads/icite, one
+    # file per PMID, so a repeat run costs no network and works offline. This
+    # is the reason the citation networks were expensive to leave on.
+    #
+    # They expire because iCite's global citation_count keeps growing, and an
+    # entry that never expired would freeze the "cited across PubMed" half of
+    # the ranking at whatever it was the day you first looked. 0 disables the
+    # cache outright; a very large number pins it.
+    icite_cache_days: int = 30
+
     # --- Citation network ---
     # Build a directed paper-to-paper citation graph over the corpus's
     # PMID-bearing records (via NIH iCite) and rank papers by how often they're

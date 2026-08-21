@@ -698,6 +698,118 @@ def test_pipeline_writes_citation_outputs(tmp_path, monkeypatch):
         assert os.path.exists(res.outputs["citation_network_3d"])
 
 
+# --------------------------------------------------------------------------- #
+# iCite cache: a repeat run should cost no network
+# --------------------------------------------------------------------------- #
+def _fake_icite(monkeypatch, calls, *, known=()):
+    """Stand in for `requests`, recording each batch it is asked for."""
+    import sys
+    import types
+
+    class Resp:
+        def __init__(self, ids): self._ids = ids
+        def raise_for_status(self): pass
+        def json(self):
+            return {"data": [{"pmid": int(i), "title": f"P{i}", "citation_count": 7}
+                             for i in self._ids if not known or i in known]}
+
+    def get(url, params=None, timeout=None):
+        ids = params["pmids"].split(",")
+        calls.append(ids)
+        return Resp(ids)
+
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=get))
+
+
+def test_a_second_run_asks_icite_for_nothing(tmp_path, monkeypatch):
+    """The whole point: the first run pays, the rest are free and work offline."""
+    from bioleads.cache import RecordCache
+    from bioleads.citations import fetch_icite
+
+    calls = []
+    _fake_icite(monkeypatch, calls)
+    pmids = ["11", "22", "33"]
+
+    first = fetch_icite(pmids, cache=RecordCache(path=str(tmp_path)))
+    second = fetch_icite(pmids, cache=RecordCache(path=str(tmp_path)))
+
+    assert len(calls) == 1, f"the second run hit the network: {calls}"
+    assert second == first and sorted(second) == pmids
+
+
+def test_only_the_papers_not_already_held_are_fetched(tmp_path, monkeypatch):
+    """Cached per PMID, not per request, so a grown corpus reuses the old one."""
+    from bioleads.cache import RecordCache
+    from bioleads.citations import fetch_icite
+
+    calls = []
+    _fake_icite(monkeypatch, calls)
+    fetch_icite(["11", "22"], cache=RecordCache(path=str(tmp_path)))
+
+    out = fetch_icite(["11", "22", "33"], cache=RecordCache(path=str(tmp_path)))
+
+    assert calls[-1] == ["33"], f"refetched papers it already had: {calls[-1]}"
+    assert sorted(out) == ["11", "22", "33"]
+
+
+def test_a_paper_icite_knows_nothing_about_is_not_asked_for_twice(tmp_path, monkeypatch):
+    """A negative is a result too, and re-asking every run would waste the trip."""
+    from bioleads.cache import RecordCache
+    from bioleads.citations import fetch_icite
+
+    calls = []
+    _fake_icite(monkeypatch, calls, known={"11"})       # iCite has nothing for 22
+
+    fetch_icite(["11", "22"], cache=RecordCache(path=str(tmp_path)))
+    out = fetch_icite(["11", "22"], cache=RecordCache(path=str(tmp_path)))
+
+    assert len(calls) == 1, f"re-asked for the missing paper: {calls}"
+    assert sorted(out) == ["11"], "a blank record must not enter the corpus"
+
+
+def test_records_expire_so_citation_counts_do_not_freeze(tmp_path, monkeypatch):
+    """iCite's global count keeps growing; a permanent entry would pin it."""
+    import time
+
+    from bioleads.cache import RecordCache
+    from bioleads.citations import fetch_icite
+
+    calls = []
+    _fake_icite(monkeypatch, calls)
+    fetch_icite(["11"], cache=RecordCache(path=str(tmp_path), ttl_days=30))
+
+    aged = RecordCache(path=str(tmp_path), ttl_days=30)
+    later = time.time() + 31 * 86400
+    monkeypatch.setattr("bioleads.cache.time.time", lambda: later)
+    fetch_icite(["11"], cache=aged)
+
+    assert len(calls) == 2, "an expired record was served anyway"
+    assert aged.stale == 1
+
+
+def test_an_unusable_cache_slows_a_run_down_but_never_fails_it(tmp_path, monkeypatch):
+    """Best-effort by design: a read-only cache directory is not an error."""
+    from bioleads.cache import RecordCache
+    from bioleads.citations import fetch_icite
+
+    calls = []
+    _fake_icite(monkeypatch, calls)
+    blocked = tmp_path / "nope"
+    blocked.write_text("")              # a file where the directory should be
+
+    out = fetch_icite(["11"], cache=RecordCache(path=str(blocked)))
+
+    assert sorted(out) == ["11"], "the run should still produce its records"
+
+
+def test_zero_days_turns_the_cache_off(tmp_path, monkeypatch):
+    """The escape hatch, for when you want today's numbers whatever the cost."""
+    from bioleads.citations import _icite_cache
+
+    assert _icite_cache(Config(icite_cache_days=0)) is None
+    assert _icite_cache(Config(icite_cache_days=30)) is not None
+
+
 def test_write_citation_html(tmp_path, monkeypatch):
     pytest.importorskip("pyvis")
     from bioleads.citations import write_citation_html

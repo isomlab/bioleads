@@ -1017,6 +1017,15 @@ only give **217 nodes and 673 edges** where all authors gave 1,792 and 43,298.
 The cost is that a first author who never runs a lab is invisible here, and that
 a paper with no author list in iCite cannot be placed at all.
 
+**The fetch is cached.** Every record iCite returns is written to
+`~/.cache/bioleads/icite`, keyed per PMID, and reused for 30 days — so only the
+first run on a corpus costs a round-trip, and a run over a corpus that overlaps
+an earlier one pays only for the papers it adds. Papers iCite has nothing for are
+cached as such, or they would be re-requested every run. The age limit exists
+because `citation_count` is a live number: references and cited_by barely move,
+but the global count grows continuously, and a permanent cache would quietly
+report last year's. `--icite-cache-days` sets the window, `0` turns it off.
+
 **Thinning them out.** Most corpora are sparse: a large share of the papers cite
 nothing else in your set and are cited by nothing in it either, and they arrive
 as unconnected dots that carry no information and crowd out the structure that

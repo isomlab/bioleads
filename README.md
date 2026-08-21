@@ -207,6 +207,15 @@ drops the nodes with no intra-corpus link at all, which in a sparse corpus is
 most of them. The rankings are filtered alongside the pictures, so the CSV and
 the graph always agree.
 
+**Citation data is cached.** Records fetched from iCite are kept under
+`~/.cache/bioleads/icite`, one file per PMID, for 30 days. The first run on a
+corpus pays for the fetch; repeats cost nothing and work with no network at all,
+and growing a corpus re-reads everything it already had and fetches only what
+you added. Entries expire because iCite's *global* citation counts keep growing
+— an entry that never expired would freeze that half of the ranking at whatever
+it was the day you first looked. `--icite-cache-days 0` disables it and always
+fetches; a large value pins it.
+
 The filter settles rather than running once, so every node left really does
 clear the number — dropping a node lowers its neighbours' degree, and one pass
 would leave some of them under the bar. A high threshold can therefore cascade,

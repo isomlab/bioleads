@@ -88,6 +88,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "in-corpus + global citation count: writes "
                         "citation_ranking.csv / citation_network.html and "
                         "author_ranking.csv / author_network.html (+ _3d.html)")
+    p.add_argument("--icite-cache-days", type=int,
+                   default=Config.icite_cache_days, metavar="N",
+                   help="reuse iCite records cached under ~/.cache/bioleads for "
+                        "N days, so a repeat run costs no network and works "
+                        "offline (default 30). They expire because iCite's "
+                        "global citation counts keep growing; 0 disables the "
+                        "cache and always fetches")
     p.add_argument("--min-paper-degree", type=int,
                    default=Config.min_paper_degree, metavar="N",
                    help="keep only papers with at least N connections in the "
@@ -139,6 +146,7 @@ def main(argv=None) -> int:
         entrez_api_key=args.api_key,
         do_clustering=args.cluster,
         do_citation_network=args.citations,
+        icite_cache_days=args.icite_cache_days,
         min_paper_degree=args.min_paper_degree,
         min_author_degree=args.min_author_degree,
         min_author_papers=args.min_author_papers,

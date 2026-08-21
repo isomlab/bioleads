@@ -160,7 +160,7 @@ def run_pipeline(
         _check_cancel(cancel)
         say("Building citation network (iCite)…")
         # One iCite fetch feeds both the paper- and author-level graphs.
-        prefetched = _corpus_records(docs, cancel=cancel, progress=progress)
+        prefetched = _corpus_records(docs, cfg, cancel=cancel, progress=progress)
         citation_graph = build_citation_graph(
             docs, cfg, prefetched=prefetched, cancel=cancel, progress=progress)
         _check_cancel(cancel)

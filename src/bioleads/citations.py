@@ -83,11 +83,20 @@ def _parse_authors(val) -> list[str]:
     return out
 
 
-def _corpus_records(docs, *, cancel=None, progress=None):
+def _icite_cache(cfg: Config | None):
+    """The on-disk record cache `cfg` asks for, or None to always fetch."""
+    from .cache import RecordCache
+
+    days = (cfg or Config()).icite_cache_days
+    return RecordCache(ttl_days=days) if days else None
+
+
+def _corpus_records(docs, cfg: Config | None = None, *, cancel=None, progress=None):
     """Map corpus PMIDs to documents and fetch their iCite records once.
 
     Returns ``(pmid_to_doc, corpus, records)``. Shared by the paper- and
-    author-level citation graphs so a run hits iCite a single time.
+    author-level citation graphs so a run hits iCite a single time — and, via
+    ``cfg.icite_cache_days``, so a repeat run doesn't hit it at all.
     """
     say = _sayer(progress)
     pmid_to_doc: dict[str, Document] = {}
@@ -101,7 +110,8 @@ def _corpus_records(docs, *, cancel=None, progress=None):
     if not corpus:
         return pmid_to_doc, corpus, {}
     _check_cancel(cancel)
-    records = fetch_icite(corpus, cancel=cancel, progress=progress)
+    records = fetch_icite(corpus, cancel=cancel, progress=progress,
+                          cache=_icite_cache(cfg))
     return pmid_to_doc, corpus, records
 
 
@@ -125,26 +135,45 @@ def _corpus_paper_edges(records: dict, corpus: set) -> set:
 
 
 def fetch_icite(
-    pmids, *, timeout: int = 30, cancel=None, progress=None
+    pmids, *, timeout: int = 30, cancel=None, progress=None, cache=None
 ) -> dict[str, dict]:
     """Fetch iCite records for `pmids`, keyed by PMID string.
 
     Batched to be gentle on the API. Returns {} (with a warning) if `requests`
     isn't installed or every batch fails — callers degrade to whatever metadata
     the documents already carry.
+
+    With a :class:`~bioleads.cache.RecordCache`, only the PMIDs it does not
+    already hold are requested, so a repeat run costs nothing and works with no
+    network at all. Records come back in one dict either way; the caller cannot
+    tell which of them were fetched.
     """
     say = _sayer(progress)
     ids = [str(p).strip() for p in pmids if str(p).strip()]
     if not ids:
         return {}
+
+    out: dict[str, dict] = {}
+    if cache is not None:
+        wanted, ids = ids, []
+        for pmid in wanted:
+            record = cache.get(pmid)
+            if record is None:
+                ids.append(pmid)        # unknown or expired: fetch it
+            elif record:
+                out[pmid] = record      # {} is a cached "iCite has nothing"
+        note = cache.summary()
+        if note:
+            say(note)
+        if not ids:
+            return out
     try:
         import requests
     except ImportError:  # pragma: no cover - requests ships with the pubmed extra
         warnings.warn(
             'citation network needs requests. Install with: pip install "bioleads[pubmed]"')
-        return {}
+        return out
 
-    out: dict[str, dict] = {}
     total = len(ids)
     for start, batch in zip(range(0, total, 200), _chunks(ids, 200)):
         _check_cancel(cancel)
@@ -161,6 +190,12 @@ def fetch_icite(
                 pmid = str(rec.get("pmid", "")).strip()
                 if pmid:
                     out[pmid] = rec
+            if cache is not None:
+                # Written per batch, so a run interrupted halfway keeps what it
+                # already paid for. PMIDs the batch returned nothing for are
+                # stored empty, or they would be re-requested every run.
+                for pmid in batch:
+                    cache.put(pmid, out.get(pmid, {}))
         except Exception as exc:  # noqa: BLE001 - one bad batch shouldn't sink the rest
             warnings.warn(f"iCite request failed for a batch ({exc}); continuing")
     return out
@@ -241,7 +276,7 @@ def build_citation_graph(
 
     pmid_to_doc, corpus, records = (
         prefetched if prefetched is not None
-        else _corpus_records(docs, cancel=cancel, progress=progress))
+        else _corpus_records(docs, cfg, cancel=cancel, progress=progress))
     if not corpus:
         return nx.DiGraph()
 
@@ -340,7 +375,7 @@ def build_author_citation_graph(
 
     pmid_to_doc, corpus, records = (
         prefetched if prefetched is not None
-        else _corpus_records(docs, cancel=cancel, progress=progress))
+        else _corpus_records(docs, cfg, cancel=cancel, progress=progress))
     if not corpus:
         return nx.DiGraph()
 

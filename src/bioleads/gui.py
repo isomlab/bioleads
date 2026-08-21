@@ -96,6 +96,7 @@ OUTPUT_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Tables", [
         ("Ranked terms (CSV)", "ranked_terms"),
         ("Hypotheses (CSV)", "candidates"),
+        ("PMIDs (TXT)", "pmids"),
     ]),
 ]
 

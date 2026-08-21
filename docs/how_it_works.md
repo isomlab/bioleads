@@ -1085,6 +1085,7 @@ with an Open button.
 |---|---|
 | `ranked_terms.csv` | stage 4: term, TF-IDF score, corpus count, doc frequency |
 | `hypothesis_candidates.csv` | stage 6: A, C, intermediates, score, direct co-occurrence |
+| `pmids.txt` | the corpus as bare PMIDs, one per line — seeds plus whatever expansion added, deduplicated, records without one omitted |
 | `cooccurrence.html` / `_3d.html` | stage 5: the term network |
 | `term_clusters.csv` / `.html` | stage 7: cluster membership and the embedding scatter |
 | `citation_ranking.csv` | stage 8: papers by in-corpus and global citations |

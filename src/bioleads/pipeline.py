@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import networkx as nx
 
 from .config import Config
-from .sources import Document, load_documents, _check_cancel
+from .sources import Document, load_documents, document_pmids, _check_cancel
 from .ner import extract_entities
 from .enrichment import rank_terms, TermScore, to_dataframe as terms_df
 from .cooccurrence import build_cooccurrence, write_graph_html, write_graph_html_3d
@@ -183,6 +183,19 @@ def run_pipeline(
         cand_csv = os.path.join(out_dir, "hypothesis_candidates.csv")
         cand_df(candidates).to_csv(cand_csv, index=False)
         result.outputs["candidates"] = cand_csv
+
+        # The corpus as a plain PMID list: seeds and anything expansion added,
+        # one per line and nothing else, so it can be pasted straight into
+        # PubMed or fed to another tool with --pmids @file. Written only when
+        # the corpus actually has PMIDs -- a PDF-only run would otherwise get
+        # an empty file, which reads as a failure rather than as "not
+        # applicable". The Outputs tab greys the row instead.
+        pmids_out = document_pmids(docs)
+        if pmids_out:
+            pmids_txt = os.path.join(out_dir, "pmids.txt")
+            with open(pmids_txt, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(pmids_out) + "\n")
+            result.outputs["pmids"] = pmids_txt
 
         if clusters:
             clusters_csv = os.path.join(out_dir, "term_clusters.csv")

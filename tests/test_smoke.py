@@ -23,7 +23,7 @@ from bioleads.embeddings import (
 from bioleads.sources import (
     Document,
     _expand_bfs,
-    _seed_pmids,
+    document_pmids,
     documents_from_texts,
     expand_pmids,
     load_refs,
@@ -96,6 +96,35 @@ def test_outputs_written(tmp_path):
                        out_dir=str(tmp_path))
     assert (tmp_path / "ranked_terms.csv").exists()
     assert (tmp_path / "hypothesis_candidates.csv").exists()
+
+
+def test_pmid_list_is_one_bare_pmid_per_line(tmp_path):
+    """pmids.txt has to paste straight into PubMed, so nothing but the IDs.
+
+    No header, no `PMID:` prefix and no blank lines -- one of those would make
+    the file need editing before it could be used, which is the whole point of
+    writing it separately from the CSVs.
+    """
+    res = run_pipeline(documents=_citation_docs(), cfg=_cfg(),
+                       out_dir=str(tmp_path))
+
+    written = (tmp_path / "pmids.txt")
+    assert written.exists(), "a PMID-bearing corpus produced no pmids.txt"
+    assert res.outputs["pmids"] == str(written)
+    assert written.read_text() == "1\n2\n3\n"
+
+
+def test_no_pmid_list_when_nothing_in_the_corpus_has_one(tmp_path):
+    """A PDF-only run writes no file rather than an empty one.
+
+    An empty pmids.txt reads as a run that failed to find anything; the absent
+    key greys the row in the Outputs tab instead, which says "not applicable".
+    """
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
+                       out_dir=str(tmp_path))
+
+    assert not (tmp_path / "pmids.txt").exists()
+    assert "pmids" not in res.outputs
 
 
 def test_parse_pmid_input_string():
@@ -533,7 +562,7 @@ def test_seed_pmids_from_documents():
         Document(doc_id="ref:1", text="c", source="ris"),  # no PMID -> skipped
         Document(doc_id="PMID:111", text="dup", source="pubmed"),  # dedup
     ]
-    assert _seed_pmids(docs) == ["111", "222"]
+    assert document_pmids(docs) == ["111", "222"]
 
 
 def test_run_pipeline_with_refs(tmp_path):

@@ -371,8 +371,13 @@ def _elink_neighbors(Entrez, ids: list[str], linkname: str) -> list[str]:
     return out
 
 
-def _seed_pmids(docs: list[Document]) -> list[str]:
-    """Collect PMIDs already present on loaded documents (for expansion seeds)."""
+def document_pmids(docs: list[Document]) -> list[str]:
+    """The PMIDs carried by `docs`, in corpus order, deduplicated.
+
+    Records without one -- PDFs, and reference-manager entries that carry no
+    accession -- contribute nothing rather than a blank, so the result is the
+    PMID-bearing subset of the corpus and not a per-document row.
+    """
     out: list[str] = []
     for d in docs:
         pmid = d.meta.get("pmid", "")
@@ -580,7 +585,7 @@ def load_documents(
         _check_cancel(cancel)
         email = pubmed_kwargs.get("email", DEFAULT_ENTREZ_EMAIL)
         api_key = pubmed_kwargs.get("api_key")
-        seeds = _seed_pmids(docs)
+        seeds = document_pmids(docs)
         if seeds:
             say(f"Citation expansion: {expand_rounds} round(s) following "
                 f"{expand_link} via {expand_source} from {len(seeds)} seed PMID(s)…")

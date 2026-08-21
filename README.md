@@ -143,7 +143,10 @@ scroll to zoom). So co-occurrence ships as `cooccurrence.html` +
 `author_network_3d.html`.
 
 Outputs in `--out`: `ranked_terms.csv`, `hypothesis_candidates.csv`,
-`cooccurrence.html` (+ `cooccurrence_3d.html`), — with `--citations` —
+`pmids.txt` (every PMID in the corpus — seeds and anything expansion added —
+one per line, ready to paste into PubMed or feed back in as `--pmids @file`;
+written only if the corpus has PMIDs at all), `cooccurrence.html`
+(+ `cooccurrence_3d.html`), — with `--citations` —
 `citation_ranking.csv` + `citation_network.html` and `author_ranking.csv` +
 `author_network.html` (each with a `*_3d.html` alongside),
 and — with `--cluster` — `term_clusters.csv` (one row per

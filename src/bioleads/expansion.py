@@ -37,7 +37,7 @@ from .config import Config
 from .sources import (
     Document,
     _check_cancel,
-    _seed_pmids,
+    document_pmids,
     expand_pmids,
     fetch_pubmed_by_ids,
 )
@@ -64,7 +64,7 @@ def relevance_guided_expand(
     api_key = api_key if api_key is not None else cfg.entrez_api_key
     say = log or (lambda _msg: None)
 
-    seeds = _seed_pmids(seed_docs)
+    seeds = document_pmids(seed_docs)
     if not seeds:
         say("relevance expansion: no PMID-bearing seeds — nothing to expand.")
         return []

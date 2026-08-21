@@ -53,6 +53,17 @@ ACCENT_ACTIVE = "#256628"
 # fields metres from their labels and the eye with nowhere to land.
 FORM_WIDTH = 430
 
+# The window asks for this width and grows only in height to fit the form.
+WINDOW_WIDTH = 1240
+
+# The padding the form column packs around its three children (blurb, buttons,
+# scrolling page), which their requested heights do not include.
+FORM_COLUMN_PADDING = 18
+
+# Left free for the menu bar and the Dock when the window sizes itself to the
+# form at startup. Tk reports the whole screen, including both.
+SCREEN_MARGIN = 140
+
 # What the Outputs tab lists, in order: (group heading, [(row label, key)]),
 # where each key is a PipelineResult.outputs key. A group whose run produced
 # none of its files is hidden entirely; within a group that produced something,
@@ -93,7 +104,6 @@ class BioleadsGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("bioleads")
-        self.root.geometry("1240x960")
         self.root.minsize(1000, 700)
         self.root.configure(background=BG)
         self._queue: queue.Queue = queue.Queue()
@@ -111,7 +121,33 @@ class BioleadsGUI:
         self._build_header()
         self._build_statusbar()   # pinned to the bottom edge before the body
         self._build_body()
+        self._fit_to_form()
         self.root.after(120, self._poll_queue)
+
+    def _fit_to_form(self) -> None:
+        """Grow the window until the whole form is visible without scrolling.
+
+        The form's natural height is measured rather than assumed: it depends
+        on the fonts Tk resolves at runtime and on how many fields the sections
+        currently hold, so a field added later widens the gap and this still
+        closes it. The form stays scrollable because the growth is clamped to
+        the screen -- on a short display the fold is unavoidable, and then
+        scrolling is the fallback rather than the first experience.
+        """
+        self.root.update_idletasks()
+        # The form column holds FORM_WIDTH by switching geometry propagation
+        # off, which stops its children's heights reaching the toplevel too.
+        # Asking for the height its children need puts that back, for height
+        # only. Requested sizes are used throughout rather than realized ones:
+        # they are computed by Tk without the window having to be on screen.
+        column = self._form_column
+        column.configure(
+            height=sum(c.winfo_reqheight() for c in column.winfo_children())
+                   + FORM_COLUMN_PADDING)
+        self.root.update_idletasks()
+        limit = self.root.winfo_screenheight() - SCREEN_MARGIN
+        height = min(self.root.winfo_reqheight(), limit)
+        self.root.geometry(f"{WINDOW_WIDTH}x{height}")
 
     # ----------------------------------------------------------------- UI --
     def _build_fonts(self) -> None:
@@ -172,6 +208,7 @@ class BioleadsGUI:
         left = ttk.Frame(outer, style="TFrame", width=FORM_WIDTH)
         left.pack(side="left", fill="y", padx=(18, 8), pady=14)
         left.pack_propagate(False)        # honour FORM_WIDTH, don't fit content
+        self._form_column = left
         self._build_form_column(left)
 
         right = ttk.Frame(outer, style="TFrame")
@@ -187,15 +224,29 @@ class BioleadsGUI:
         self._build_actions(left)
         wrap = ttk.Frame(left, style="TFrame")
         wrap.pack(side="top", fill="both", expand=True)
-        self._build_inputs(self._scroll_body(wrap))
+        form = self._scroll_body(wrap, fit_height=True)
+        self._form_canvas = form.master   # the viewport the form scrolls inside
+        self._build_inputs(form)
 
-    def _scroll_body(self, parent):
-        """A vertically scrolling page inside `parent`; returns the inner frame."""
+    def _scroll_body(self, parent, fit_height: bool = False):
+        """A vertically scrolling page inside `parent`; returns the inner frame.
+
+        With `fit_height`, the viewport asks for its content's full height
+        instead of an arbitrary default. That is only a *requested* size, so
+        the page still scrolls once the window is smaller than it -- but it
+        makes the toplevel's own requested height include the whole page, which
+        is what lets the window open at a size that needs no scrolling.
+        """
         canvas = tk.Canvas(parent, background=BG, highlightthickness=0)
         sb = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         body = ttk.Frame(canvas, style="TFrame")
-        body.bind("<Configure>",
-                  lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        def resized(_e=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            if fit_height:
+                canvas.configure(height=body.winfo_reqheight())
+
+        body.bind("<Configure>", resized)
         window = canvas.create_window((0, 0), window=body, anchor="nw")
         canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
         canvas.configure(yscrollcommand=sb.set)

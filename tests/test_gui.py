@@ -276,3 +276,73 @@ def test_the_pump_keeps_draining_after_one_bad_message(app, monkeypatch):
     app._poll_queue()
 
     assert "still alive" in app.log.get("1.0", "end")
+
+
+def _form_content_height(app):
+    """Height the form wants, and the height the viewport actually gives it."""
+    canvas = app._form_canvas
+    body = canvas.nametowidget(canvas.itemcget(canvas.find_all()[0], "window"))
+    return body.winfo_reqheight(), canvas.winfo_height()
+
+
+# Tk reports whatever display the window is currently on, so these tests pin a
+# height instead of reading it. A laptop screen and an external monitor fall on
+# opposite sides of the clamp in _fit_to_form, and the guarantee differs across
+# it: the form fits outright when there is room, and stays reachable by
+# scrolling when there is not. Reading the ambient screen would silently test
+# only whichever of the two the machine happened to be on.
+TALL_SCREEN = 1600
+SHORT_SCREEN = 900
+
+
+def _fit_on_screen(app, screen_height):
+    """Re-fit the window as if the display were `screen_height` tall."""
+    app.root.winfo_screenheight = lambda: screen_height
+    app._fit_to_form()
+    app.root.update_idletasks()
+
+
+def test_the_whole_form_is_visible_when_the_screen_has_room(app):
+    """Given the room, opening the window shows every option at once.
+
+    The window sizes itself to the measured form rather than to a number
+    written here, so adding a field keeps this passing instead of silently
+    pushing the last section back under the fold.
+    """
+    _fit_on_screen(app, TALL_SCREEN)
+
+    wanted, viewport = _form_content_height(app)
+    assert viewport >= wanted, (
+        f"{wanted - viewport}px of the form is hidden below the fold")
+
+
+def test_the_window_never_grows_past_the_screen(app):
+    """On a display too short for the form, the window stops at the screen.
+
+    Growing past it would push the Run button off the bottom, which is worse
+    than the scroll it was trying to avoid.
+    """
+    from bioleads.gui import SCREEN_MARGIN
+
+    _fit_on_screen(app, SHORT_SCREEN)
+
+    height = app.root.winfo_height()
+    assert height <= SHORT_SCREEN - SCREEN_MARGIN, (
+        f"window is {height}px on a {SHORT_SCREEN}px screen")
+
+
+def test_the_form_stays_reachable_when_it_cannot_all_fit(app):
+    """What the fold costs on a short screen is a scroll, not a dead end.
+
+    This is the guarantee that makes the clamp above acceptable, so it is
+    asserted rather than assumed: the viewport really is too short here, and
+    the scrollregion really does still span the whole form.
+    """
+    _fit_on_screen(app, SHORT_SCREEN)
+
+    canvas = app._form_canvas
+    wanted, viewport = _form_content_height(app)
+    assert viewport < wanted, (
+        "form fits on a short screen -- this test no longer covers the clamp")
+    assert float(canvas.cget("scrollregion").split()[3]) >= wanted, (
+        "the hidden part of the form cannot be scrolled to")

@@ -463,13 +463,19 @@ class BioleadsGUI:
                  pady=(10, 2))
         self._add_tooltip(
             chk,
-            "Builds the paper→paper AND senior-author→senior-author citation "
-            "networks from NIH iCite, ranking each by in-corpus citations (how "
-            "foundational within your set) and global citations (across all of "
-            "PubMed). Each paper is represented by its LAST author — the "
-            "senior author, i.e. the lab the work came from; first and middle "
-            "authors do not appear. Only PMID-bearing documents can appear; a "
-            "reference record with no accession is skipped.")
+            "Almost everything a run draws comes from here: the paper→paper "
+            "network and both senior-author networks — one sized by citations "
+            "received within your corpus, one by papers published into it — "
+            "each with a 3D view and a ranking CSV. Leave it off and a run "
+            "writes only the ranked terms, the hypothesis candidates and the "
+            "PMID list.\n\n"
+            "The cost is one live fetch from NIH iCite, and nothing is cached, "
+            "so a run repeats it. Untick it when you are offline, or for a "
+            "quick terms-only pass over a large corpus.\n\n"
+            "Needs PMIDs: a PDF, or a reference with no accession, is skipped "
+            "— on a corpus with none this changes nothing either way. In the "
+            "author networks a paper stands for its LAST author, the lab the "
+            "work came from, so first and middle authors never appear.")
         self._field(card, 1, "Min degree — papers",
                     self._spin(card, self.mindeg_paper_var, 0, 10000),
                     "Keep only papers with at least this many connections in "

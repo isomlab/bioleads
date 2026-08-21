@@ -346,3 +346,49 @@ def test_the_form_stays_reachable_when_it_cannot_all_fit(app):
         "form fits on a short screen -- this test no longer covers the clamp")
     assert float(canvas.cget("scrollregion").split()[3]) >= wanted, (
         "the hidden part of the form cannot be scrolled to")
+
+
+# --------------------------------------------------- strategy-linked fields --
+
+def _states(app):
+    """(Follow, top-K) widget states, as strings."""
+    return (str(app._follow_field.cget("state")),
+            str(app._topk_field.cget("state")))
+
+
+def test_bfs_greys_out_the_control_it_ignores(app):
+    """top-K is a relevance-only knob, so bfs must not offer it."""
+    app.expand_strategy_var.set("bfs")
+
+    follow, topk = _states(app)
+    assert topk == "disabled", "bfs leaves the top-K it ignores editable"
+    assert follow == "readonly", "bfs walks Follow, so Follow must stay live"
+
+
+def test_relevance_greys_out_the_control_it_ignores(app):
+    """relevance always gates both directions, so Follow can't change anything."""
+    app.expand_strategy_var.set("relevance")
+
+    follow, topk = _states(app)
+    assert follow == "disabled", "relevance leaves the Follow it ignores editable"
+    assert topk == "normal", "relevance is sized by top-K, which must stay live"
+
+
+def test_switching_back_restores_the_dropdown_as_readonly(app):
+    """Re-enabling must not turn a fixed list of choices into a free text box.
+
+    A ttk.Combobox handed "normal" accepts typed input, which would let a
+    direction the pipeline has never heard of reach the config.
+    """
+    app.expand_strategy_var.set("relevance")   # disables Follow
+    app.expand_strategy_var.set("bfs")         # and back
+
+    assert str(app._follow_field.cget("state")) == "readonly"
+
+
+def test_the_greyed_field_takes_its_label_with_it(app):
+    """A full-contrast label over a dead control reads as merely broken."""
+    app.expand_strategy_var.set("bfs")
+
+    assert str(app._topk_field._field_label.cget("style")) == "FieldOff.TLabel"
+    assert str(app._follow_field._field_label.cget("style")) == "Field.TLabel"

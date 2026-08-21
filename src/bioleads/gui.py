@@ -178,6 +178,11 @@ class BioleadsGUI:
                      font=self.f_help)
         st.configure("Field.TLabel", background=CARD, foreground=TEXT,
                      font=self.f_label)
+        # The label half of a field the current strategy ignores. Greying the
+        # control alone leaves its label at full contrast, which reads as a
+        # live field that merely refuses to be clicked.
+        st.configure("FieldOff.TLabel", background=CARD, foreground=MUTED,
+                     font=self.f_label)
         st.configure("Help.TLabel", background=CARD, foreground=MUTED,
                      font=self.f_help)
         st.configure("Card.TCheckbutton", background=CARD, font=self.f_label)
@@ -283,8 +288,12 @@ class BioleadsGUI:
 
     def _field(self, card, row, label, widget, hint=None, button=None):
         """One label + control row inside a card, with optional hover help."""
-        ttk.Label(card, text=label, style="Field.TLabel").grid(
-            row=row, column=0, sticky="w", padx=(14, 8), pady=(9, 9))
+        lbl = ttk.Label(card, text=label, style="Field.TLabel")
+        lbl.grid(row=row, column=0, sticky="w", padx=(14, 8), pady=(9, 9))
+        # Carried on the widget so _set_field_enabled can grey the pair from
+        # the single handle callers keep, without _field's return type
+        # changing under the dozen callers that only want the control.
+        widget._field_label = lbl
         widget.grid(row=row, column=1, sticky="we", padx=(0, 14 if not button else 6),
                     pady=(9, 9))
         if hint:
@@ -294,6 +303,34 @@ class BioleadsGUI:
             ttk.Button(card, text=text, command=cmd, width=8).grid(
                 row=row, column=2, sticky="e", padx=(0, 12), pady=(9, 9))
         return widget
+
+    def _sync_strategy_fields(self) -> None:
+        """Grey the field the chosen strategy ignores.
+
+        The two strategies read disjoint controls, and the tooltips have long
+        said so in prose: bfs walks Follow and never looks at top-K, while
+        relevance always gates both directions and sizes the result by top-K
+        alone. Leaving both live invited the run that silently discards half
+        the settings someone just tuned.
+        """
+        relevance = self.expand_strategy_var.get() == "relevance"
+        self._set_field_enabled(self._follow_field, not relevance)
+        self._set_field_enabled(self._topk_field, relevance)
+
+    @staticmethod
+    def _set_field_enabled(widget, on: bool) -> None:
+        """Grey out a field, label included, when the run would ignore it.
+
+        Re-enabling restores the state the widget was built with rather than
+        a blanket "normal": a Combobox here is "readonly", and handing one
+        "normal" back would quietly turn a fixed list of choices into a free
+        text box that accepts values the pipeline has never heard of.
+        """
+        widget.configure(state=("normal" if on else "disabled")
+                         if not isinstance(widget, ttk.Combobox)
+                         else ("readonly" if on else "disabled"))
+        widget._field_label.configure(
+            style="Field.TLabel" if on else "FieldOff.TLabel")
 
     def _entry(self, card):
         return ttk.Entry(card, font=self.f_label)
@@ -372,7 +409,8 @@ class BioleadsGUI:
                     "many rounds; relevance runs one gated round in each "
                     "direction, so for it any value above 0 means the same "
                     "thing.")
-        self._field(card, 2, "Follow",
+        self._follow_field = self._field(
+                    card, 2, "Follow",
                     self._combo(card, self.expand_link_var,
                                 ["references", "cited_by", "both"]),
                     "Which direction to follow: references = papers your seeds "
@@ -387,7 +425,8 @@ class BioleadsGUI:
                     "ELink, PMC-derived), icite (NIH iCite / Open Citation "
                     "Collection), or all (the union — broadest coverage, and "
                     "it still works if one backend is down).")
-        self._field(card, 4, "Relevance top-K",
+        self._topk_field = self._field(
+                    card, 4, "Relevance top-K",
                     self._spin(card, self.expand_topk_var, 1, 100000),
                     "Relevance strategy only (ignored by bfs). Candidates in "
                     "each direction are scored against the seed profile and "
@@ -402,6 +441,9 @@ class BioleadsGUI:
                     self._spin(card, self.expand_max_var, 1, 100000),
                     "Hard cap on the total PMIDs (seeds + discovered) after "
                     "expansion.")
+        self.expand_strategy_var.trace_add(
+            "write", lambda *_: self._sync_strategy_fields())
+        self._sync_strategy_fields()
 
         # --- what to build from it ------------------------------------------
         card = self._section(page, "Analysis")

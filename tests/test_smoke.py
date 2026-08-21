@@ -1026,6 +1026,83 @@ def test_pyvis_heading_not_duplicated(tmp_path, monkeypatch):
         assert fh.read().count("<h1>bioleads citations</h1>") == 1
 
 
+# --------------------------------------------------------------------------- #
+# 3D layout: isotropic shells growing out from the highest-degree node
+# --------------------------------------------------------------------------- #
+def _hub_and_spokes():
+    """A hub, its 8 neighbours, and a tail three hops out."""
+    g = nx.Graph()
+    for i in range(8):
+        g.add_edge("hub", f"n{i}")
+    g.add_edge("n0", "far")          # hop 2
+    g.add_edge("far", "further")     # hop 3
+    return g
+
+
+def test_layout_puts_the_highest_degree_node_at_the_centre():
+    from bioleads.graph3d import _isotropic_layout
+
+    pos = _isotropic_layout(_hub_and_spokes())
+
+    assert pos["hub"] == (0.0, 0.0, 0.0)
+
+
+def test_radius_is_distance_from_the_hub_in_hops():
+    """Radius has to mean something, which is the point of not using springs."""
+    from bioleads.graph3d import _isotropic_layout
+
+    pos = _isotropic_layout(_hub_and_spokes())
+    radius = {n: sum(c * c for c in p) ** 0.5 for n, p in pos.items()}
+
+    spokes = [radius[f"n{i}"] for i in range(8)]
+    assert max(spokes) - min(spokes) < 1e-9, "one shell, one radius"
+    assert radius["hub"] < spokes[0] < radius["far"] < radius["further"]
+    assert radius["further"] == pytest.approx(1.0), "outermost shell normalized"
+
+
+def test_each_shell_is_spread_over_the_whole_sphere():
+    """Isotropic means no axis is favoured -- otherwise it is a disc, not a ball.
+
+    Eight points pulled to one side would leave a mean vector near 1; spread
+    over a sphere they cancel out.
+    """
+    from bioleads.graph3d import _isotropic_layout
+
+    pos = _isotropic_layout(_hub_and_spokes())
+    shell = [pos[f"n{i}"] for i in range(8)]
+    mean = [sum(p[axis] for p in shell) / len(shell) for axis in range(3)]
+
+    assert sum(c * c for c in mean) ** 0.5 < 0.05, f"shell is lopsided: {mean}"
+
+
+def test_direction_is_ignored_when_measuring_distance():
+    """A DiGraph laid out by arrows alone would strand most of the graph.
+
+    `cited` only points at the hub, so following edges forward never reaches it.
+    """
+    from bioleads.graph3d import _isotropic_layout
+
+    g = nx.DiGraph()
+    g.add_edge("hub", "a")
+    g.add_edge("hub", "b")
+    g.add_edge("cited", "hub")       # points *into* the hub
+
+    pos = _isotropic_layout(g)
+    radius = {n: sum(c * c for c in p) ** 0.5 for n, p in pos.items()}
+
+    assert pos["hub"] == (0.0, 0.0, 0.0)
+    assert radius["cited"] == pytest.approx(radius["a"]), "one hop is one hop"
+
+
+def test_the_layout_is_deterministic():
+    """No simulation and no random start, so two runs place nodes identically."""
+    from bioleads.graph3d import _isotropic_layout
+
+    g = _hub_and_spokes()
+
+    assert _isotropic_layout(g) == _isotropic_layout(g)
+
+
 def test_write_citation_graph_3d(tmp_path, monkeypatch):
     pytest.importorskip("plotly")
     from bioleads.citations import write_citation_html_3d

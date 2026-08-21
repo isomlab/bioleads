@@ -970,14 +970,13 @@ long, and short strings are where the most heads idle.
 
 **Why.** The ranked list fragments across surface variants — `nmda receptor`,
 `nmdar`, and `glutamate receptor` compete as separate rows when they're one
-concept. Clustering groups them so you read concepts instead of strings, and
-recolors the co-occurrence graph by cluster so related regions become visible.
+concept. Clustering groups them so you read concepts instead of strings.
 
 In the GUI this is the **Cluster terms** button, run on demand after a pipeline
 run rather than as part of it — the first use downloads the model.
 
-**What it produces.** The **Clusters** tab, `term_clusters.csv`, a recolored
-co-occurrence graph, and `term_clusters.html` — a 2D scatter of the embedding
+**What it produces.** The **Clusters** tab, `term_clusters.csv`, and
+`term_clusters.html` — a 2D scatter of the embedding
 space, every term a point colored by cluster, laid out with UMAP (falling back
 to t-SNE, then PCA).
 

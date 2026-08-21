@@ -137,7 +137,7 @@ bioleads --pmids @seeds.txt --citations --out ./results
 
 Every network is written **twice**: an interactive 2D pyvis graph (drag nodes,
 physics layout) and a rotatable 3D Plotly graph (`*_3d.html` — drag to orbit,
-scroll to zoom). So the citation network ships as `citation_network.html` +
+scroll to zoom; laid out in shells outward from the highest-degree node). So the citation network ships as `citation_network.html` +
 `citation_network_3d.html`, and the author network as `author_network.html` +
 `author_network_3d.html`.
 
@@ -354,10 +354,18 @@ and `author_ranking.csv` land in the output folder alongside the graph files.
 Every network is written as both a 2D pyvis layout and a rotatable 3D Plotly
 view, listed side by side in the Outputs tab.
 
+The 3D view is laid out **isotropically from the busiest node**: the
+highest-degree node sits at the centre and everything else is placed on a shell
+whose radius is its distance from that node in hops, spread evenly over the
+sphere. So distance from the centre means something — how far a paper or author
+sits from the hub of the network — rather than being wherever a force
+simulation happened to settle. It is deterministic: the same graph lays out the
+same way every time.
+
 After a run, the **Cluster terms** button groups the ranked terms semantically
 with PubMedBERT and shows them in a collapsible **Clusters** tab (centroid term
-+ members). It also writes `term_clusters.csv` to the output folder, recolors
-the co-occurrence graph by cluster, and writes `term_clusters.html` — an
++ members). It also writes `term_clusters.csv` to the output folder and
+`term_clusters.html` — an
 interactive 2D embedding scatter (every term a point, colored by cluster) that
 appears under **Term clusters** in the Outputs tab. Clustering runs on demand
 in a background thread — the first use downloads the embedding model and needs the `embed`

@@ -567,9 +567,8 @@ class BioleadsGUI:
         self._add_tooltip(
             self.cluster_btn,
             "Groups the ranked terms in PubMedBERT space, fills the Clusters "
-            "tab, recolors the co-occurrence graph by cluster, and writes the "
-            "embedding scatter. Available after a run; the first use "
-            "downloads the model.")
+            "tab, and writes the cluster table and embedding scatter. "
+            "Available after a run; the first use downloads the model.")
 
     def _build_statusbar(self) -> None:
         """A dedicated bottom strip for status text + the progress indicator.

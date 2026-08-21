@@ -88,7 +88,7 @@ Each extra unlocks a feature; install only what you need:
 |----------|-------------------------------------------------------------------|
 | *(core)* | regex NER + TF-IDF ranking, co-occurrence, ABC discovery          |
 | `pubmed` | `--pubmed`, `--pmids`, `--refs`, `--expand`                       |
-| `viz`    | interactive `cooccurrence.html` (pyvis) + `term_clusters.html` scatter (plotly; UMAP for layout, t-SNE/PCA fallback) |
+| `viz`    | interactive citation/author networks (pyvis) + `term_clusters.html` scatter (plotly; UMAP for layout, t-SNE/PCA fallback) |
 | `ner`    | scispaCy biomedical NER (real entities, not regex)                |
 | `embed`  | PubMedBERT term clustering / `--cluster` (torch + transformers)   |
 | `dev`    | the pytest test suite                                             |
@@ -137,16 +137,17 @@ bioleads --pmids @seeds.txt --citations --out ./results
 
 Every network is written **twice**: an interactive 2D pyvis graph (drag nodes,
 physics layout) and a rotatable 3D Plotly graph (`*_3d.html` — drag to orbit,
-scroll to zoom). So co-occurrence ships as `cooccurrence.html` +
-`cooccurrence_3d.html`, the citation network as `citation_network.html` +
+scroll to zoom). So the citation network ships as `citation_network.html` +
 `citation_network_3d.html`, and the author network as `author_network.html` +
 `author_network_3d.html`.
+
+The term co-occurrence graph is **not** rendered. It is still built, and ABC
+discovery still runs over it — it is simply not written out as a network file.
 
 Outputs in `--out`: `ranked_terms.csv`, `hypothesis_candidates.csv`,
 `pmids.txt` (every PMID in the corpus — seeds and anything expansion added —
 one per line, ready to paste into PubMed or feed back in as `--pmids @file`;
-written only if the corpus has PMIDs at all), `cooccurrence.html`
-(+ `cooccurrence_3d.html`), — with `--citations` —
+written only if the corpus has PMIDs at all), — with `--citations` —
 `citation_ranking.csv` + `citation_network.html` and `author_ranking.csv` +
 `author_network.html` (each with a `*_3d.html` alongside),
 and — with `--cluster` — `term_clusters.csv` (one row per

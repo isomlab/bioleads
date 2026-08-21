@@ -916,9 +916,10 @@ the same paper are co-occurring, however far apart. (`Config.cooccurrence_window
 advertises a `"sentence"` option that is not implemented — the value is never
 read.)
 
-**What it produces.** `cooccurrence.html` — an interactive 2D network (drag
-nodes, hover for document frequency and PMI) — plus a rotatable 3D version.
-Nodes are sized by document frequency.
+**What it produces.** No file. The graph is an in-memory structure that stage 6
+consumes; it used to be rendered as `cooccurrence.html` plus a 3D version, and
+those outputs have been dropped. `PipelineResult.graph` still exposes it to the
+Python API.
 
 **Controls.** No GUI controls; adjust `Config.min_cooccurrence`, `min_pmi`, and
 `max_graph_nodes` via the Python API.
@@ -1086,7 +1087,6 @@ with an Open button.
 | `ranked_terms.csv` | stage 4: term, TF-IDF score, corpus count, doc frequency |
 | `hypothesis_candidates.csv` | stage 6: A, C, intermediates, score, direct co-occurrence |
 | `pmids.txt` | the corpus as bare PMIDs, one per line — seeds plus whatever expansion added, deduplicated, records without one omitted |
-| `cooccurrence.html` / `_3d.html` | stage 5: the term network |
 | `term_clusters.csv` / `.html` | stage 7: cluster membership and the embedding scatter |
 | `citation_ranking.csv` | stage 8: papers by in-corpus and global citations |
 | `citation_network.html` / `_3d.html` | stage 8: the paper network |

@@ -159,24 +159,25 @@ def test_outputs_tab_is_empty_before_a_run(app):
 
 
 def test_outputs_tab_hides_groups_the_run_didnt_produce(run_with_outputs, app):
-    run_with_outputs(graph="cooccurrence.html", ranked_terms="ranked_terms.csv")
+    run_with_outputs(cluster_scatter="term_clusters.html",
+                     ranked_terms="ranked_terms.csv")
     labels = _labels(app)
-    assert "Term co-occurrence network" in labels
+    assert "Term clusters" in labels
     assert "Tables" in labels
-    # Nothing clustered and no citation network this run.
-    assert "Term clusters" not in labels
+    # No citation network this run.
     assert "Paper citation network" not in labels
+    assert "Senior-author citation network" not in labels
 
 
 def test_outputs_tab_lists_keys_it_doesnt_know_about(run_with_outputs, app):
-    run_with_outputs(graph="cooccurrence.html", some_new_output="new.html")
+    run_with_outputs(cluster_scatter="term_clusters.html", some_new_output="new.html")
     assert "Other outputs" in _labels(app)
 
 
 def test_missing_sibling_is_listed_but_disabled(run_with_outputs, app):
     from tkinter import ttk
-    # 2D produced, 3D not (e.g. Plotly missing) — the row stays, greyed.
-    run_with_outputs(graph="cooccurrence.html")
+    # Scatter produced, the CSV beside it not — the row stays, greyed.
+    run_with_outputs(cluster_scatter="term_clusters.html")
     greyed = [r for r in _rows(app)
               if any(isinstance(k, ttk.Label) and "not produced" in k.cget("text")
                      for k in r.winfo_children())]
@@ -186,7 +187,7 @@ def test_missing_sibling_is_listed_but_disabled(run_with_outputs, app):
 
 
 def test_clearing_a_run_empties_the_outputs_tab(run_with_outputs, app):
-    run_with_outputs(graph="cooccurrence.html")
+    run_with_outputs(cluster_scatter="term_clusters.html")
     assert "No outputs yet" not in _labels(app)[0]
     app._clear_results()
     assert "No outputs yet" in _labels(app)[0]

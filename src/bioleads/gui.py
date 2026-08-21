@@ -22,11 +22,9 @@ import tkinter as tk
 from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from .config import Config
-from .cooccurrence import write_graph_html, write_graph_html_3d
 from .embeddings import (
     TermCluster,
     cluster_terms,
-    term_to_cluster,
     write_cluster_scatter,
     to_dataframe as clusters_df,
 )
@@ -70,10 +68,6 @@ SCREEN_MARGIN = 140
 # missing siblings stay listed but greyed, so it's visible what wasn't made.
 # Any outputs key not named here still appears, under "Other outputs".
 OUTPUT_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
-    ("Term co-occurrence network", [
-        ("2D", "graph"),
-        ("3D", "graph_3d"),
-    ]),
     ("Term clusters", [
         ("Scatter", "cluster_scatter"),
         ("Table (CSV)", "clusters"),
@@ -902,7 +896,7 @@ class BioleadsGUI:
         self._refresh_outputs()
 
     def _persist_clusters(self, clusters: list[TermCluster]) -> None:
-        """Write term_clusters.csv and recolor the co-occurrence graph by cluster."""
+        """Write term_clusters.csv for a clustering run started from the GUI."""
         out_dir = self._out_dir
         if not (clusters and out_dir and self._result):
             return
@@ -911,18 +905,6 @@ class BioleadsGUI:
             clusters_df(clusters).to_csv(csv_path, index=False)
             self._result.outputs["clusters"] = csv_path
             self._log(f"  clusters       -> {csv_path}")
-
-            graph_html = os.path.join(out_dir, "cooccurrence.html")
-            groups = term_to_cluster(clusters)
-            path = write_graph_html(self._result.graph, graph_html, groups=groups)
-            self._result.outputs["graph"] = path
-            self._log(f"  graph (colored)-> {path}")
-            path_3d = write_graph_html_3d(
-                self._result.graph, os.path.join(out_dir, "cooccurrence_3d.html"),
-                groups=groups)
-            if path_3d:
-                self._result.outputs["graph_3d"] = path_3d
-                self._log(f"  graph 3d       -> {path_3d}")
         except Exception as exc:  # noqa: BLE001 - persistence is best-effort
             self._log(f"  could not persist clusters: {exc}")
 

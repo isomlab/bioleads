@@ -17,7 +17,7 @@ from .sources import (
 )
 from .ner import extract_entities
 from .enrichment import rank_terms
-from .cooccurrence import build_cooccurrence, write_graph_html, write_graph_html_3d
+from .cooccurrence import build_cooccurrence
 from .citations import (
     build_citation_graph,
     build_author_citation_graph,
@@ -45,8 +45,6 @@ __all__ = [
     "extract_entities",
     "rank_terms",
     "build_cooccurrence",
-    "write_graph_html",
-    "write_graph_html_3d",
     "build_citation_graph",
     "build_author_citation_graph",
     "write_citation_html",

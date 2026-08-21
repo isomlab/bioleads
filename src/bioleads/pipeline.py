@@ -10,7 +10,7 @@ from .config import Config
 from .sources import Document, load_documents, document_pmids, _check_cancel
 from .ner import extract_entities
 from .enrichment import rank_terms, TermScore, to_dataframe as terms_df
-from .cooccurrence import build_cooccurrence, write_graph_html, write_graph_html_3d
+from .cooccurrence import build_cooccurrence
 from .citations import (
     build_citation_graph,
     build_author_citation_graph,
@@ -26,7 +26,6 @@ from .discovery import abc_candidates, Candidate, to_dataframe as cand_df
 from .embeddings import (
     TermCluster,
     cluster_terms,
-    term_to_cluster,
     write_cluster_scatter,
     to_dataframe as clusters_df,
 )
@@ -171,7 +170,6 @@ def run_pipeline(
 
     result = PipelineResult(docs, entities, ranked, graph, candidates, clusters,
                             citation_graph, author_graph)
-    groups = term_to_cluster(clusters) if clusters else None
 
     if out_dir:
         say(f"Writing outputs to {out_dir}…")
@@ -207,14 +205,6 @@ def run_pipeline(
             scatter = write_cluster_scatter(clusters, scatter_html, cfg)
             if scatter:
                 result.outputs["cluster_scatter"] = scatter
-
-        graph_html = os.path.join(out_dir, "cooccurrence.html")
-        result.outputs["graph"] = write_graph_html(graph, graph_html, groups=groups)
-        graph_3d = write_graph_html_3d(
-            graph, os.path.join(out_dir, "cooccurrence_3d.html"),
-            groups=groups, seed=cfg.seed)
-        if graph_3d:
-            result.outputs["graph_3d"] = graph_3d
 
         if citation_graph is not None and citation_graph.number_of_nodes():
             rank_csv = os.path.join(out_dir, "citation_ranking.csv")

@@ -453,6 +453,62 @@ def authors_to_dataframe(graph: nx.DiGraph, by: str = "in_corpus_citations"):
     )
 
 
+def _freeze_physics_after_stabilization(path: str) -> None:
+    """Stop the vis.js physics engine once the initial layout has stabilized.
+
+    pyvis leaves force-atlas physics running continuously, so a large 2D graph
+    keeps recomputing forces forever and pegs the CPU — the view feels like it's
+    'choking' and never settles. We append a small script that freezes physics
+    the moment the one-time stabilization finishes: the layout is laid out, then
+    it stops churning (the node positions are kept; you can still pan/zoom/drag).
+    """
+    snippet = (
+        '\n<script type="text/javascript">\n'
+        '  if (typeof network !== "undefined" && network) {\n'
+        '    network.on("stabilizationIterationsDone", function () {\n'
+        '      network.setOptions({ physics: false });\n'
+        '    });\n'
+        '  }\n'
+        '</script>\n'
+    )
+    try:
+        with open(path, encoding="utf-8") as f:
+            html = f.read()
+    except OSError:
+        return
+    if "stabilizationIterationsDone" in html:  # already injected
+        return
+    if "</body>" in html:
+        html = html.replace("</body>", snippet + "</body>", 1)
+    else:
+        html += snippet
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+
+def _collapse_duplicate_heading(path: str, title: str) -> None:
+    """Keep only the first ``<h1>{title}</h1>``.
+
+    pyvis 0.3.2's bundled template.html renders ``<h1>{{heading}}</h1>`` twice,
+    so every graph shows its title doubled. We strip the extra copies from the
+    written file (a no-op on pyvis releases that fix the template).
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            html = f.read()
+    except OSError:
+        return
+    needle = f"<h1>{title}</h1>"
+    first = html.find(needle)
+    if first == -1:
+        return
+    cut = first + len(needle)
+    deduped = html[:cut] + html[cut:].replace(needle, "")
+    if deduped != html:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(deduped)
+
+
 def write_citation_html(
     g: nx.DiGraph, path: str, title: str = "bioleads citation network"
 ) -> str:
@@ -497,8 +553,6 @@ def write_citation_html(
             net.add_edge(a, b, title="cites", arrows="to")
     net.force_atlas_2based(spring_length=120)
     net.write_html(path, notebook=False, open_browser=False)
-    from .cooccurrence import (_collapse_duplicate_heading,
-                               _freeze_physics_after_stabilization)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
     _freeze_physics_after_stabilization(path)
     return path
@@ -583,8 +637,6 @@ def write_author_html(
             net.add_edge(a, b, title=f"cites ×{ed.get('weight', 1)}", arrows="to")
     net.force_atlas_2based(spring_length=120)
     net.write_html(path, notebook=False, open_browser=False)
-    from .cooccurrence import (_collapse_duplicate_heading,
-                               _freeze_physics_after_stabilization)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
     _freeze_physics_after_stabilization(path)
     return path

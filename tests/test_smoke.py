@@ -12,7 +12,6 @@ import networkx as nx
 import pytest
 
 from bioleads.config import Config
-from bioleads.cooccurrence import write_graph_html
 from bioleads.enrichment import rank_terms
 from bioleads.embeddings import (
     TermCluster,
@@ -158,20 +157,6 @@ def test_clusters_to_dataframe_and_map():
     assert not df[df.term == "vasorelaxation"].is_centroid.iloc[0]
     assert term_to_cluster(clusters) == {
         "vasodilation": 0, "vasorelaxation": 0, "trpv1": 1}
-
-
-def test_graph_colored_by_cluster_group(tmp_path):
-    g = nx.Graph()
-    g.add_edge("a", "b", weight=2, pmi=0.5)
-    g.nodes["a"]["count"] = 3
-    g.nodes["b"]["count"] = 2
-    out = write_graph_html(g, str(tmp_path / "g.html"), groups={"a": 0, "b": 1})
-    assert os.path.exists(out)
-    # Without the viz extra this falls back to GraphML, where we persist the
-    # cluster id as a node attribute; assert it round-trips.
-    if out.endswith(".graphml"):
-        h = nx.read_graphml(out)
-        assert int(h.nodes["a"]["cluster"]) == 0
 
 
 RIS_SAMPLE = """\
@@ -710,7 +695,6 @@ def test_pipeline_writes_citation_outputs(tmp_path, monkeypatch):
     assert "citation net" in res.summary()
     import importlib.util
     if importlib.util.find_spec("plotly"):  # 3D views written alongside the 2D
-        assert os.path.exists(res.outputs["graph_3d"])
         assert os.path.exists(res.outputs["citation_network_3d"])
 
 
@@ -1029,26 +1013,17 @@ def test_write_author_html(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 # Graph rendering: 2D heading fix + 3D Plotly
 # --------------------------------------------------------------------------- #
-def test_pyvis_heading_not_duplicated(tmp_path):
+def test_pyvis_heading_not_duplicated(tmp_path, monkeypatch):
     pytest.importorskip("pyvis")
-    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
-                       out_dir=str(tmp_path))
-    html = (tmp_path / "cooccurrence.html").read_text()
+    from bioleads.citations import write_citation_html
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    g = build_citation_graph(_citation_docs(), Config())
+    path = write_citation_html(g, str(tmp_path / "citation_network.html"),
+                               title="bioleads citations")
+
     # pyvis 0.3.2 doubles the <h1>; our post-process collapses it to one.
-    assert html.count("<h1>bioleads co-occurrence</h1>") == 1
-    assert "graph" in res.outputs
-
-
-def test_write_graph_3d_cooccurrence(tmp_path):
-    pytest.importorskip("plotly")
-    from bioleads.cooccurrence import build_cooccurrence, write_graph_html_3d
-    from bioleads.ner import extract_entities
-    ents = extract_entities(documents_from_texts(CORPUS), _cfg())
-    g = build_cooccurrence(ents, _cfg())
-    out = tmp_path / "cooccurrence_3d.html"
-    path = write_graph_html_3d(g, str(out), seed=0)
-    assert path and os.path.exists(path)
-    assert "plotly" in out.read_text().lower()
+    with open(path, encoding="utf-8") as fh:
+        assert fh.read().count("<h1>bioleads citations</h1>") == 1
 
 
 def test_write_citation_graph_3d(tmp_path, monkeypatch):

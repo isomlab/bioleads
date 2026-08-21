@@ -207,14 +207,24 @@ drops the nodes with no intra-corpus link at all, which in a sparse corpus is
 most of them. The rankings are filtered alongside the pictures, so the CSV and
 the graph always agree.
 
-**Citation data is cached.** Records fetched from iCite are kept under
-`~/.cache/bioleads/icite`, one file per PMID, for 30 days. The first run on a
-corpus pays for the fetch; repeats cost nothing and work with no network at all,
-and growing a corpus re-reads everything it already had and fetches only what
-you added. Entries expire because iCite's *global* citation counts keep growing
-— an entry that never expired would freeze that half of the ranking at whatever
-it was the day you first looked. `--icite-cache-days 0` disables it and always
-fetches; a large value pins it.
+**Citation data is cached.** Everything fetched over the network to build or
+expand a citation graph is kept under `~/.cache/bioleads/citations` for 30 days:
+iCite records for the networks, and the link lookups `--expand` makes against
+iCite and NCBI ELink. The first run pays; repeats cost nothing and work with no
+network at all.
+
+Records are keyed per PMID, so growing a corpus re-reads everything it already
+had and fetches only what you added. Expansion lookups are keyed by the whole
+request instead — both backends answer a batch with one flat list and never say
+which paper each link came from, so the request is the largest thing that can be
+replayed with the result guaranteed identical. The walk is deterministic, so
+repeating one replays entirely from disk.
+
+Entries expire because two of the numbers are alive: iCite's *global* citation
+count grows continuously, and so does the set of papers citing any given one. An
+entry that never expired would freeze both at whatever they were the day you
+first looked. `--citation-cache-days 0` disables the cache and always fetches; a
+large value pins it.
 
 The filter settles rather than running once, so every node left really does
 clear the number — dropping a node lowers its neighbours' degree, and one pass

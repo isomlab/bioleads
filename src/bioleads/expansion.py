@@ -33,6 +33,7 @@ import math
 import warnings
 from collections import Counter
 
+from .citations import citation_cache
 from .config import Config
 from .sources import (
     Document,
@@ -83,7 +84,8 @@ def relevance_guided_expand(
         ids = expand_pmids(
             seeds, rounds=rounds, link=link,
             source=cfg.expand_source, max_records=cfg.expand_max,
-            email=email, api_key=api_key, cancel=cancel, progress=log,
+            email=email, api_key=api_key, cache=citation_cache(cfg),
+            cancel=cancel, progress=log,
         )
         new = [i for i in ids if i not in seeds and f"PMID:{i}" not in seen]
         docs = (

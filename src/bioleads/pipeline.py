@@ -12,6 +12,7 @@ from .ner import extract_entities
 from .enrichment import rank_terms, TermScore, to_dataframe as terms_df
 from .cooccurrence import build_cooccurrence
 from .citations import (
+    citation_cache,
     build_citation_graph,
     build_author_citation_graph,
     write_citation_html,
@@ -113,6 +114,7 @@ def run_pipeline(
             expand_rounds=0 if relevance_mode else cfg.expand_rounds,
             expand_link=cfg.expand_link,
             expand_source=cfg.expand_source, expand_max=cfg.expand_max,
+            expand_cache=citation_cache(cfg),
             retmax=cfg.pubmed_retmax, email=cfg.entrez_email,
             api_key=cfg.entrez_api_key,
             cancel=cancel, progress=progress,

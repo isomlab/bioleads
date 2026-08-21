@@ -1,13 +1,16 @@
-"""On-disk cache for the records bioleads fetches from NIH iCite.
+"""On-disk cache for the citation data bioleads fetches over the network.
 
 Without it every run re-fetches the whole corpus, which is the reason the
 citation networks are behind a checkbox at all: they cost a live round-trip.
 With it the first run on a corpus pays, and every run after it is free —
 including runs with no network at all.
 
-Entries are one JSON file per PMID rather than one per request, so batches
-compose: a corpus that overlaps a previous one pays only for the papers it
-adds, and expanding a corpus re-reads everything it already had.
+Two kinds of thing live here, keyed differently because they arrive
+differently. iCite *records* are keyed per PMID, so batches compose: a corpus
+overlapping a previous one pays only for the papers it adds. Expansion *link
+lookups* are keyed by the whole request, because both backends answer a batch
+with one flat list and do not say which paper each link came from — so the
+request is the smallest thing that can be replayed faithfully.
 
 Everything here is best-effort. A cache that cannot be read or written is a
 slow run, never a failed one, so every filesystem error degrades to a miss.
@@ -24,22 +27,24 @@ import time
 # clear. The benchmark keeps its own store under bioleads-benchmark, which is
 # deliberately separate -- it is pinned for reproducibility and never expires.
 DEFAULT_DIR = os.path.join(
-    os.path.expanduser("~"), ".cache", "bioleads", "icite")
+    os.path.expanduser("~"), ".cache", "bioleads", "citations")
 
 # iCite's global citation_count grows continuously, so an entry that never
 # expired would quietly freeze the "cited across PubMed" half of the ranking at
-# whatever it was the day you first looked. References and cited_by move far
-# more slowly; a month is short enough that the counts stay honest and long
-# enough that a working session never re-fetches.
+# whatever it was the day you first looked. The same applies to forward
+# expansion: a paper's reference list is fixed once published, but the list of
+# papers citing it is not. A month is short enough that both stay honest and
+# long enough that a working session never re-fetches.
 DEFAULT_TTL_DAYS = 30
 
 
-class RecordCache:
-    """Per-PMID JSON store with an age limit.
+class JsonCache:
+    """Keyed JSON store with an age limit.
 
-    `get` returns the record, `{}` for a PMID iCite has no data for (cached so
-    it is not re-requested every run), or None when there is nothing usable and
-    the caller should fetch.
+    `get` returns the stored value — which may legitimately be empty, as `{}`
+    for a PMID iCite has no data for or `[]` for a batch with no links, both
+    cached so they are not re-requested every run — or None when there is
+    nothing usable and the caller should fetch.
     """
 
     def __init__(self, path: str | None = None, ttl_days: int = DEFAULT_TTL_DAYS):
@@ -50,15 +55,15 @@ class RecordCache:
         self.stale = 0
         self.writes = 0
 
-    def _file(self, pmid: str) -> str:
-        # Hashed rather than named by PMID so the filename is a fixed length and
-        # a stray value can never escape the directory.
-        key = hashlib.sha1(f"icite:{pmid}".encode()).hexdigest()
-        return os.path.join(self.path, key + ".json")
+    def _file(self, key: str) -> str:
+        # Hashed rather than named by the key so the filename is a fixed length
+        # and a stray value can never escape the directory.
+        return os.path.join(
+            self.path, hashlib.sha1(key.encode()).hexdigest() + ".json")
 
-    def get(self, pmid: str):
+    def get(self, key: str):
         try:
-            with open(self._file(pmid), encoding="utf-8") as fh:
+            with open(self._file(key), encoding="utf-8") as fh:
                 entry = json.load(fh)
         except (OSError, ValueError):
             self.misses += 1
@@ -68,26 +73,27 @@ class RecordCache:
             self.misses += 1
             return None
         self.hits += 1
-        return entry.get("record") or {}
+        return entry.get("value")
 
-    def put(self, pmid: str, record: dict) -> None:
-        """Store `record` for `pmid`. A miss is stored as {} so it stays a miss."""
+    def put(self, key: str, value) -> None:
+        """Store `value`. An empty result is stored as such, so it stays empty."""
         try:
             os.makedirs(self.path, exist_ok=True)
-            final = self._file(pmid)
+            final = self._file(key)
             tmp = f"{final}.{os.getpid()}.tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({"fetched": time.time(), "record": record or {}}, fh)
+                json.dump({"fetched": time.time(), "value": value}, fh)
             os.replace(tmp, final)      # never leave a half-written entry
             self.writes += 1
         except OSError:
             pass                        # a cache miss next time is the worst case
 
-    def summary(self) -> str:
+    def summary(self, noun: str = "record") -> str:
         """One line for the run log, or "" when there was nothing to say."""
         if not (self.hits or self.misses):
             return ""
-        note = f"  iCite cache: {self.hits} hit(s), {self.misses} to fetch"
+        note = (f"  citation cache: {self.hits} {noun}(s) reused, "
+                f"{self.misses} to fetch")
         if self.stale:
             note += f" ({self.stale} expired)"
         return note + "."

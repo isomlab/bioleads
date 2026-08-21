@@ -425,7 +425,10 @@ class BioleadsGUI:
                     "Which backend supplies citation links: ncbi (Entrez "
                     "ELink, PMC-derived), icite (NIH iCite / Open Citation "
                     "Collection), or all (the union — broadest coverage, and "
-                    "it still works if one backend is down).")
+                    "it still works if one backend is down).\n\n"
+                    "Whichever you pick, the lookups are cached for a month "
+                    "under ~/.cache/bioleads, so repeating a walk costs no "
+                    "network.")
         self._topk_field = self._field(
                     card, 4, "Relevance top-K",
                     self._spin(card, self.expand_topk_var, 1, 100000),

@@ -83,12 +83,16 @@ def _parse_authors(val) -> list[str]:
     return out
 
 
-def _icite_cache(cfg: Config | None):
-    """The on-disk record cache `cfg` asks for, or None to always fetch."""
-    from .cache import RecordCache
+def citation_cache(cfg: Config | None):
+    """The on-disk cache `cfg` asks for, or None to always fetch.
 
-    days = (cfg or Config()).icite_cache_days
-    return RecordCache(ttl_days=days) if days else None
+    Shared by the citation networks and by citation expansion: one store, one
+    setting, so "cached citation data" means the same thing everywhere.
+    """
+    from .cache import JsonCache
+
+    days = (cfg or Config()).citation_cache_days
+    return JsonCache(ttl_days=days) if days else None
 
 
 def _corpus_records(docs, cfg: Config | None = None, *, cancel=None, progress=None):
@@ -96,7 +100,7 @@ def _corpus_records(docs, cfg: Config | None = None, *, cancel=None, progress=No
 
     Returns ``(pmid_to_doc, corpus, records)``. Shared by the paper- and
     author-level citation graphs so a run hits iCite a single time — and, via
-    ``cfg.icite_cache_days``, so a repeat run doesn't hit it at all.
+    ``cfg.citation_cache_days``, so a repeat run doesn't hit it at all.
     """
     say = _sayer(progress)
     pmid_to_doc: dict[str, Document] = {}
@@ -111,7 +115,7 @@ def _corpus_records(docs, cfg: Config | None = None, *, cancel=None, progress=No
         return pmid_to_doc, corpus, {}
     _check_cancel(cancel)
     records = fetch_icite(corpus, cancel=cancel, progress=progress,
-                          cache=_icite_cache(cfg))
+                          cache=citation_cache(cfg))
     return pmid_to_doc, corpus, records
 
 
@@ -143,7 +147,7 @@ def fetch_icite(
     isn't installed or every batch fails — callers degrade to whatever metadata
     the documents already carry.
 
-    With a :class:`~bioleads.cache.RecordCache`, only the PMIDs it does not
+    With a :class:`~bioleads.cache.JsonCache`, only the PMIDs it does not
     already hold are requested, so a repeat run costs nothing and works with no
     network at all. Records come back in one dict either way; the caller cannot
     tell which of them were fetched.
@@ -157,12 +161,12 @@ def fetch_icite(
     if cache is not None:
         wanted, ids = ids, []
         for pmid in wanted:
-            record = cache.get(pmid)
+            record = cache.get(f"icite:{pmid}")
             if record is None:
                 ids.append(pmid)        # unknown or expired: fetch it
             elif record:
                 out[pmid] = record      # {} is a cached "iCite has nothing"
-        note = cache.summary()
+        note = cache.summary("record")
         if note:
             say(note)
         if not ids:
@@ -195,7 +199,7 @@ def fetch_icite(
                 # already paid for. PMIDs the batch returned nothing for are
                 # stored empty, or they would be re-requested every run.
                 for pmid in batch:
-                    cache.put(pmid, out.get(pmid, {}))
+                    cache.put(f"icite:{pmid}", out.get(pmid, {}))
         except Exception as exc:  # noqa: BLE001 - one bad batch shouldn't sink the rest
             warnings.warn(f"iCite request failed for a batch ({exc}); continuing")
     return out

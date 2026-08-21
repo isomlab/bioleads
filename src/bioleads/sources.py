@@ -9,6 +9,7 @@ subset rather than the corpus. All sources are normalized to a list of
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import warnings
@@ -234,6 +235,7 @@ def expand_pmids(
     max_records: int = 1000,
     email: str = DEFAULT_ENTREZ_EMAIL,
     api_key: str | None = None,
+    cache=None,
     cancel=None,
     progress=None,
 ) -> list[str]:
@@ -250,6 +252,9 @@ def expand_pmids(
       - "ncbi"  — Entrez ELink only (PMC-derived).
       - "icite" — NIH iCite / Open Citation Collection only (broad backward
                   coverage, works regardless of PMC).
+
+    With a :class:`~bioleads.cache.JsonCache`, each backend request is read from
+    and written to disk, so repeating a walk costs no network.
     """
     if link not in _LINKNAMES:
         raise ValueError(
@@ -261,6 +266,7 @@ def expand_pmids(
     if not seed_ids or rounds <= 0:
         return list(dict.fromkeys(seed_ids))[:max_records]
 
+    say = _sayer(progress)
     use_ncbi = source in ("all", "ncbi")
     use_icite = source in ("all", "icite")
     tolerant = source == "all"  # don't let one backend's failure sink the other
@@ -296,16 +302,50 @@ def expand_pmids(
         for batch in _chunks(list(frontier), 200):
             _check_cancel(cancel)
             if use_ncbi:
-                out += _attempt(
-                    "ncbi",
-                    lambda b=batch: [n for ln in linknames
-                                     for n in _elink_neighbors(Entrez, b, ln)])
+                out += _attempt("ncbi", lambda b=batch: _cached_links(
+                    cache, f"elink:{'+'.join(linknames)}", b,
+                    lambda: [n for ln in linknames
+                             for n in _elink_neighbors(Entrez, b, ln)]))
             if use_icite:
-                out += _attempt("icite", lambda b=batch: _icite_neighbors(b, fields))
+                out += _attempt("icite", lambda b=batch: _cached_links(
+                    cache, f"icite:{'+'.join(fields)}", b,
+                    lambda: _icite_neighbors(b, fields)))
+        if cache is not None:
+            note = cache.summary("link lookup")
+            if note:
+                say(note)
         return out
 
     return _expand_bfs(seed_ids, neighbors, rounds=rounds,
                        max_records=max_records, progress=progress)
+
+
+def _cached_links(cache, kind: str, ids: list[str], produce):
+    """`produce()`, read from and written to `cache` when there is one.
+
+    Keyed by the whole request rather than per PMID, because both backends
+    answer a batch of ids with one flat list and never say which id each link
+    came from. Attributing them would mean changing how the fetch is issued,
+    and with it what expansion returns; the request is the largest thing that
+    can be replayed with the result guaranteed identical.
+
+    Batches are what makes that worth having: the walk is deterministic, so the
+    same seeds and rounds produce the same batches in the same order, and a
+    repeat run replays entirely from disk.
+
+    A backend that raises is not cached -- `produce` throws before we get here,
+    which leaves the failure for _attempt to absorb, exactly as before. An
+    empty list *is* cached: no links is an answer.
+    """
+    if cache is None:
+        return produce()
+    key = f"links:{kind}:" + hashlib.sha1(",".join(ids).encode()).hexdigest()
+    hit = cache.get(key)
+    if hit is not None:
+        return list(hit)
+    value = produce()
+    cache.put(key, value)
+    return value
 
 
 def _icite_neighbors(ids: list[str], fields: list[str], *, timeout: int = 30) -> list[str]:
@@ -541,6 +581,7 @@ def load_documents(
     expand_link: str = "references",
     expand_source: str = "ncbi",
     expand_max: int = 1000,
+    expand_cache=None,
     cancel=None,
     progress=None,
     **pubmed_kwargs,
@@ -593,7 +634,7 @@ def load_documents(
                 seeds, rounds=expand_rounds, link=expand_link,
                 source=expand_source,
                 max_records=expand_max, email=email, api_key=api_key,
-                cancel=cancel, progress=progress,
+                cache=expand_cache, cancel=cancel, progress=progress,
             )
             have = {d.doc_id for d in docs}
             new_ids = [i for i in expanded if f"PMID:{i}" not in have]

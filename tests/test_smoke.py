@@ -460,7 +460,7 @@ def test_relevance_guided_expand_gates_both_directions(monkeypatch):
                           source="pubmed")]
 
     def fake_expand(seeds, *, rounds, link, source, max_records, email, api_key,
-                    cancel=None, progress=None):
+                    cache=None, cancel=None, progress=None):
         if link == "cited_by":
             return list(seeds) + ["100", "101"]   # one on-topic citer, one not
         if link == "references":
@@ -515,7 +515,7 @@ def test_relevance_profile_is_the_seeds_alone(monkeypatch):
     citers = [str(300 + i) for i in range(12)]
 
     def fake_expand(seeds, *, rounds, link, source, max_records, email, api_key,
-                    cancel=None, progress=None):
+                    cache=None, cancel=None, progress=None):
         if link == "cited_by":
             return list(seeds) + citers
         if link == "references":
@@ -723,15 +723,15 @@ def _fake_icite(monkeypatch, calls, *, known=()):
 
 def test_a_second_run_asks_icite_for_nothing(tmp_path, monkeypatch):
     """The whole point: the first run pays, the rest are free and work offline."""
-    from bioleads.cache import RecordCache
+    from bioleads.cache import JsonCache
     from bioleads.citations import fetch_icite
 
     calls = []
     _fake_icite(monkeypatch, calls)
     pmids = ["11", "22", "33"]
 
-    first = fetch_icite(pmids, cache=RecordCache(path=str(tmp_path)))
-    second = fetch_icite(pmids, cache=RecordCache(path=str(tmp_path)))
+    first = fetch_icite(pmids, cache=JsonCache(path=str(tmp_path)))
+    second = fetch_icite(pmids, cache=JsonCache(path=str(tmp_path)))
 
     assert len(calls) == 1, f"the second run hit the network: {calls}"
     assert second == first and sorted(second) == pmids
@@ -739,14 +739,14 @@ def test_a_second_run_asks_icite_for_nothing(tmp_path, monkeypatch):
 
 def test_only_the_papers_not_already_held_are_fetched(tmp_path, monkeypatch):
     """Cached per PMID, not per request, so a grown corpus reuses the old one."""
-    from bioleads.cache import RecordCache
+    from bioleads.cache import JsonCache
     from bioleads.citations import fetch_icite
 
     calls = []
     _fake_icite(monkeypatch, calls)
-    fetch_icite(["11", "22"], cache=RecordCache(path=str(tmp_path)))
+    fetch_icite(["11", "22"], cache=JsonCache(path=str(tmp_path)))
 
-    out = fetch_icite(["11", "22", "33"], cache=RecordCache(path=str(tmp_path)))
+    out = fetch_icite(["11", "22", "33"], cache=JsonCache(path=str(tmp_path)))
 
     assert calls[-1] == ["33"], f"refetched papers it already had: {calls[-1]}"
     assert sorted(out) == ["11", "22", "33"]
@@ -754,14 +754,14 @@ def test_only_the_papers_not_already_held_are_fetched(tmp_path, monkeypatch):
 
 def test_a_paper_icite_knows_nothing_about_is_not_asked_for_twice(tmp_path, monkeypatch):
     """A negative is a result too, and re-asking every run would waste the trip."""
-    from bioleads.cache import RecordCache
+    from bioleads.cache import JsonCache
     from bioleads.citations import fetch_icite
 
     calls = []
     _fake_icite(monkeypatch, calls, known={"11"})       # iCite has nothing for 22
 
-    fetch_icite(["11", "22"], cache=RecordCache(path=str(tmp_path)))
-    out = fetch_icite(["11", "22"], cache=RecordCache(path=str(tmp_path)))
+    fetch_icite(["11", "22"], cache=JsonCache(path=str(tmp_path)))
+    out = fetch_icite(["11", "22"], cache=JsonCache(path=str(tmp_path)))
 
     assert len(calls) == 1, f"re-asked for the missing paper: {calls}"
     assert sorted(out) == ["11"], "a blank record must not enter the corpus"
@@ -771,14 +771,14 @@ def test_records_expire_so_citation_counts_do_not_freeze(tmp_path, monkeypatch):
     """iCite's global count keeps growing; a permanent entry would pin it."""
     import time
 
-    from bioleads.cache import RecordCache
+    from bioleads.cache import JsonCache
     from bioleads.citations import fetch_icite
 
     calls = []
     _fake_icite(monkeypatch, calls)
-    fetch_icite(["11"], cache=RecordCache(path=str(tmp_path), ttl_days=30))
+    fetch_icite(["11"], cache=JsonCache(path=str(tmp_path), ttl_days=30))
 
-    aged = RecordCache(path=str(tmp_path), ttl_days=30)
+    aged = JsonCache(path=str(tmp_path), ttl_days=30)
     later = time.time() + 31 * 86400
     monkeypatch.setattr("bioleads.cache.time.time", lambda: later)
     fetch_icite(["11"], cache=aged)
@@ -789,7 +789,7 @@ def test_records_expire_so_citation_counts_do_not_freeze(tmp_path, monkeypatch):
 
 def test_an_unusable_cache_slows_a_run_down_but_never_fails_it(tmp_path, monkeypatch):
     """Best-effort by design: a read-only cache directory is not an error."""
-    from bioleads.cache import RecordCache
+    from bioleads.cache import JsonCache
     from bioleads.citations import fetch_icite
 
     calls = []
@@ -797,17 +797,96 @@ def test_an_unusable_cache_slows_a_run_down_but_never_fails_it(tmp_path, monkeyp
     blocked = tmp_path / "nope"
     blocked.write_text("")              # a file where the directory should be
 
-    out = fetch_icite(["11"], cache=RecordCache(path=str(blocked)))
+    out = fetch_icite(["11"], cache=JsonCache(path=str(blocked)))
 
     assert sorted(out) == ["11"], "the run should still produce its records"
 
 
 def test_zero_days_turns_the_cache_off(tmp_path, monkeypatch):
     """The escape hatch, for when you want today's numbers whatever the cost."""
-    from bioleads.citations import _icite_cache
+    from bioleads.citations import citation_cache
 
-    assert _icite_cache(Config(icite_cache_days=0)) is None
-    assert _icite_cache(Config(icite_cache_days=30)) is not None
+    assert citation_cache(Config(citation_cache_days=0)) is None
+    assert citation_cache(Config(citation_cache_days=30)) is not None
+
+
+def _fake_icite_links(monkeypatch, net, fail_first=False):
+    """Stand in for `requests` on the expansion endpoint."""
+    import sys
+    import types
+
+    state = {"failed": not fail_first}
+
+    class Resp:
+        def __init__(s, ids): s.ids = ids
+        def raise_for_status(s): pass
+        def json(s):
+            return {"data": [{"pmid": int(i), "references": [int(i) * 10]}
+                             for i in s.ids]}
+
+    def get(url, params=None, timeout=None):
+        ids = params["pmids"].split(",")
+        net.append(ids)
+        if not state["failed"]:
+            state["failed"] = True
+            raise RuntimeError("iCite is down")
+        return Resp(ids)
+
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=get))
+
+
+def test_repeating_an_expansion_asks_for_nothing(tmp_path, monkeypatch):
+    """The walk is deterministic, so a repeat replays entirely from disk."""
+    from bioleads.cache import JsonCache
+    from bioleads.sources import expand_pmids
+
+    net = []
+    _fake_icite_links(monkeypatch, net)
+    kw = dict(rounds=2, link="references", source="icite", max_records=50)
+
+    first = expand_pmids(["1", "2"], cache=JsonCache(path=str(tmp_path)), **kw)
+    asked = len(net)
+    second = expand_pmids(["1", "2"], cache=JsonCache(path=str(tmp_path)), **kw)
+
+    assert len(net) == asked, f"the repeat hit the network: {net[asked:]}"
+    assert second == first
+
+
+def test_the_cache_cannot_change_what_expansion_returns(tmp_path, monkeypatch):
+    """Caching a request must be invisible: same walk, same ids, same order."""
+    from bioleads.cache import JsonCache
+    from bioleads.sources import expand_pmids
+
+    net = []
+    _fake_icite_links(monkeypatch, net)
+    kw = dict(rounds=2, link="references", source="icite", max_records=50)
+
+    uncached = expand_pmids(["1", "2"], cache=None, **kw)
+    cached = expand_pmids(["1", "2"], cache=JsonCache(path=str(tmp_path)), **kw)
+    replayed = expand_pmids(["1", "2"], cache=JsonCache(path=str(tmp_path)), **kw)
+
+    assert uncached == cached == replayed
+
+
+def test_a_backend_failure_is_not_cached(tmp_path, monkeypatch):
+    """A cached outage would turn one bad afternoon into a permanently empty walk."""
+    import bioleads.sources as S
+    from bioleads.cache import JsonCache
+    from bioleads.sources import expand_pmids
+
+    net = []
+    _fake_icite_links(monkeypatch, net, fail_first=True)
+    # 'all' is the tolerant source, but its other backend is a live NCBI call;
+    # stub it so this test exercises the failure path and not the network.
+    monkeypatch.setattr(S, "_elink_neighbors", lambda *a, **k: [])
+    kw = dict(rounds=1, link="references", source="all", max_records=50)
+
+    with pytest.warns(UserWarning):          # 'all' absorbs one backend failing
+        broke = expand_pmids(["1"], cache=JsonCache(path=str(tmp_path)), **kw)
+    recovered = expand_pmids(["1"], cache=JsonCache(path=str(tmp_path)), **kw)
+
+    assert broke == ["1"], "the failed round should have added nothing"
+    assert "10" in recovered, "the failure was cached and the walk stayed empty"
 
 
 def test_write_citation_html(tmp_path, monkeypatch):

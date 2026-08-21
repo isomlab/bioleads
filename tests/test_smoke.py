@@ -1095,6 +1095,54 @@ def test_each_shell_is_spread_over_the_whole_sphere():
     assert sum(c * c for c in mean) ** 0.5 < 0.05, f"shell is lopsided: {mean}"
 
 
+def _anisotropy(pos):
+    """Ratio of the largest to smallest spread across any axis of the figure.
+
+    1.0 is a ball; a large number means the layout has collapsed toward a plane
+    or a line, which is exactly what "not isotropic" looks like on screen.
+    """
+    import numpy as np
+
+    ev = np.linalg.eigvalsh(np.cov(np.array(list(pos.values())).T))
+    return float(ev.max() / max(ev.min(), 1e-12))
+
+
+def test_detached_pieces_do_not_flatten_the_figure():
+    """A graph that is mostly small islands still has to render as a ball.
+
+    Each island contributes shells of one node, and a single point on a shell
+    lands on the equator unless the shell is tilted -- so without the tilt every
+    island lands on one plane and the whole view is flat.
+    """
+    from bioleads.graph3d import _isotropic_layout
+
+    g = nx.Graph()
+    for i in range(10):
+        g.add_edge(f"p{i}a", f"p{i}b")
+
+    assert _anisotropy(_isotropic_layout(g)) < 2.0
+
+
+def test_islands_do_not_shrink_the_graph_that_matters():
+    """The main component keeps the whole radius however many islands there are.
+
+    Pushing each island further out than the last squeezed a 150-node core into
+    6% of the figure and left it an unreadable speck.
+    """
+    from bioleads.graph3d import _isotropic_layout
+
+    g = nx.Graph(nx.barabasi_albert_graph(60, 3, seed=2).edges())
+    main = set(g.nodes)
+    for i in range(20):
+        g.add_edge(f"x{i}a", f"x{i}b")
+
+    pos = _isotropic_layout(g)
+    reach = max(sum(c * c for c in pos[n]) ** 0.5 for n in main)
+
+    assert reach == pytest.approx(1.0), f"core squashed to radius {reach:.3f}"
+    assert _anisotropy(pos) < 2.0
+
+
 def test_direction_is_ignored_when_measuring_distance():
     """A DiGraph laid out by arrows alone would strand most of the graph.
 

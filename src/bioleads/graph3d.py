@@ -39,73 +39,107 @@ def _hub(g: nx.Graph, nodes: list) -> object:
     return min(nodes, key=lambda n: (-g.degree(n), str(n)))
 
 
+# Detached components are parked on a sphere just outside the main one, at this
+# radius and this size relative to it. Bounded on purpose: an offset that grew
+# with the number of components would shrink the part of the graph that matters
+# until it was a dot at the centre.
+_ISLAND_ORBIT = 1.25
+_ISLAND_SCALE = 0.12
+
+
+def _shell_directions(m: int, phase: float, tilt: float) -> list[tuple]:
+    """`m` unit vectors spread over the sphere, stepped by the golden angle.
+
+    The tilt rotates the whole set about the x-axis. For a large shell that
+    changes nothing -- a uniform set stays uniform under rotation -- but a shell
+    holding a single node sits exactly on the equator without it, and a graph
+    made mostly of pairs and singletons would then put every one of them on the
+    same plane and render flat.
+    """
+    out = []
+    for i in range(m):
+        y = 1.0 - 2.0 * (i + 0.5) / m
+        rho = math.sqrt(max(0.0, 1.0 - y * y))
+        theta = _GOLDEN_ANGLE * i + phase
+        x, z = rho * math.cos(theta), rho * math.sin(theta)
+        y, z = (y * math.cos(tilt) - z * math.sin(tilt),
+                y * math.sin(tilt) + z * math.cos(tilt))
+        out.append((x, y, z))
+    return out
+
+
+def _place_component(g, und, nodes, seed, scale, centre) -> dict:
+    """Lay one connected component out in shells around its own hub."""
+    hub = _hub(g, nodes)
+    depth = dict(nx.single_source_shortest_path_length(und, hub))
+    shells: dict[int, list] = {}
+    for n in nodes:
+        shells.setdefault(depth[n], []).append(n)
+
+    pos = {}
+    span = max(shells) or 1
+    for k, members in shells.items():
+        if k == 0:
+            for n in members:
+                pos[n] = centre
+            continue
+        # Sort by parent so a node's children land next to each other on the
+        # shell: the spread stays uniform, but a branch stays legible as one.
+        def parent(n, _k=k):
+            prev = [m for m in und.neighbors(n) if depth.get(m) == _k - 1]
+            return min((str(m) for m in prev), default="")
+        members = sorted(members, key=lambda n: (parent(n), str(n)))
+
+        r = scale * k / span
+        for n, d in zip(members, _shell_directions(
+                len(members), 0.7 * k + 0.1 * seed, 1.1 * k + 0.37 * seed)):
+            pos[n] = (centre[0] + r * d[0],
+                      centre[1] + r * d[1],
+                      centre[2] + r * d[2])
+    return pos
+
+
 def _isotropic_layout(g: nx.Graph, seed: int = 0) -> dict:
     """Lay `g` out in 3D, growing outward from its highest-degree node.
 
-    The hub sits at the origin and every other node is placed on a shell whose
-    radius is its distance from the hub in hops, so radius reads directly as
-    "how far from the centre of this network" -- which a force-directed layout
-    does not give you, since there distance is an artifact of where the
-    simulation happened to settle.
+    The hub sits at the origin and every other node in its component is placed
+    on a shell whose radius is its distance from the hub in hops, so radius
+    reads directly as "how far from the centre of this network" -- which a
+    force-directed layout does not give you, since there distance is an artifact
+    of where the simulation happened to settle.
 
     Within a shell the directions are spread by the golden angle, so the graph
     grows evenly in every direction instead of flattening into the plane its
-    heaviest edges happen to pull it into. Shells are counter-rotated against
-    each other so their points do not line up into spokes.
+    heaviest edges happen to pull it into.
 
     Direction is ignored when measuring distance -- a citation network is a
     DiGraph, and following arrows only forward would strand most of the graph as
-    unreachable and pile it into the outermost shells.
+    unreachable.
+
+    The main component always fills the unit ball. Anything detached from it is
+    parked on a sphere just outside, small and spread by the same golden angle,
+    so islands read as islands without deciding the scale of the figure: a
+    sparse corpus is mostly islands, and letting them push the radius outward
+    would leave the structure worth looking at as a speck in the middle.
 
     Fully deterministic: no simulation, no random start. `seed` only turns the
     whole figure, which is occasionally useful for a screenshot.
     """
     nodes = list(g.nodes)
     und = g.to_undirected(as_view=True) if g.is_directed() else g
+
     hub = _hub(g, nodes)
+    main = sorted(nx.node_connected_component(und, hub), key=str)
+    pos = _place_component(g, und, main, seed, 1.0, (0.0, 0.0, 0.0))
 
-    depth = dict(nx.single_source_shortest_path_length(und, hub))
-    # Anything in another component has no distance from the hub at all. Rather
-    # than dropping it on top of the centre, each extra component is pushed out
-    # past everything reachable and laid out from its own hub, so it reads as a
-    # separate island instead of contaminating the shells that mean something.
-    outer = max(depth.values(), default=0)
-    for n in nodes:
-        if n in depth:
-            continue
-        comp = [m for m in nx.node_connected_component(und, n)]
-        base = outer + 2
-        for m, d in nx.single_source_shortest_path_length(
-                und, _hub(g, sorted(comp, key=str))).items():
-            depth[m] = base + d
-        outer = max(depth.values())
-
-    shells: dict[int, list] = {}
-    for n in nodes:
-        shells.setdefault(depth[n], []).append(n)
-
-    pos = {}
-    span = max(shells) or 1        # normalize the outermost shell to radius 1
-    for k, members in shells.items():
-        if k == 0:
-            for n in members:
-                pos[n] = (0.0, 0.0, 0.0)
-            continue
-        # Sort by parent so a node's children land next to each other on the
-        # shell: the spread stays uniform, but a branch stays legible as one.
-        def parent(n):
-            prev = [m for m in und.neighbors(n) if depth.get(m) == k - 1]
-            return min((str(m) for m in prev), default="")
-        members = sorted(members, key=lambda n: (parent(n), str(n)))
-
-        m = len(members)
-        phase = 0.7 * k + 0.1 * seed
-        r = k / span
-        for i, n in enumerate(members):
-            y = 1.0 - 2.0 * (i + 0.5) / m
-            rho = math.sqrt(max(0.0, 1.0 - y * y))
-            theta = _GOLDEN_ANGLE * i + phase
-            pos[n] = (r * rho * math.cos(theta), r * y, r * rho * math.sin(theta))
+    islands = [sorted(c, key=str) for c in nx.connected_components(und)
+               if hub not in c]
+    islands.sort(key=lambda c: (-len(c), str(c[0])))
+    for c, d in zip(islands, _shell_directions(
+            len(islands), 0.3 * seed, 0.9 + 0.2 * seed) if islands else []):
+        pos.update(_place_component(
+            g, und, c, seed, _ISLAND_SCALE,
+            (_ISLAND_ORBIT * d[0], _ISLAND_ORBIT * d[1], _ISLAND_ORBIT * d[2])))
     return pos
 
 

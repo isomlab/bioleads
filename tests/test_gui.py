@@ -33,7 +33,8 @@ def _finished_run():
     """Stand-in for a PipelineResult that produced one ranked term."""
     term = SimpleNamespace(term="cftr", score=1.0, corpus_count=3, doc_freq=2)
     return SimpleNamespace(ranked_terms=[term], candidates=[], outputs={},
-                           graph=None, documents=[])
+                           graph=None, documents=[],
+                           summary=lambda: "1 document, 1 term")
 
 
 def test_run_state_starts_empty(app):
@@ -392,3 +393,28 @@ def test_the_greyed_field_takes_its_label_with_it(app):
 
     assert str(app._topk_field._field_label.cget("style")) == "FieldOff.TLabel"
     assert str(app._follow_field._field_label.cget("style")) == "Field.TLabel"
+
+
+def test_no_expansion_is_not_reported_as_a_failed_expansion(app):
+    """With Rounds at 0 nothing was asked for, so nothing is missing.
+
+    run_pipeline gates relevance on expand_rounds > 0 as well, so the old
+    "relevance always expands" assumption sent people chasing Source and
+    Follow settings over a round they never requested.
+    """
+    app.expand_var.set(0)
+    app.expand_strategy_var.set("relevance")
+
+    app._on_done(_finished_run(), "/tmp/out")
+
+    assert "citation expansion added 0 documents" not in app.log.get("1.0", "end")
+
+
+def test_a_requested_expansion_that_finds_nothing_still_says_so(app):
+    """The diagnostic has to survive: at Rounds > 0 an empty result is real."""
+    app.expand_var.set(1)
+    app.expand_strategy_var.set("relevance")
+
+    app._on_done(_finished_run(), "/tmp/out")
+
+    assert "citation expansion added 0 documents" in app.log.get("1.0", "end")

@@ -969,8 +969,12 @@ class BioleadsGUI:
         for label, path in result.outputs.items():
             self._log(f"  {label:14s} -> {path}")
         n_exp = sum(1 for d in result.documents if d.meta.get("expanded"))
-        expansion_requested = (int(self.expand_var.get()) > 0
-                               or self.expand_strategy_var.get() == "relevance")
+        # Rounds alone decides this, for both strategies -- run_pipeline gates
+        # relevance on expand_rounds > 0 too. This used to treat "relevance"
+        # as expansion in its own right, from back when choosing it did expand
+        # regardless; the run then reported nothing found and blamed the seeds,
+        # when in fact nothing had been asked for.
+        expansion_requested = int(self.expand_var.get()) > 0
         if n_exp:
             n_fwd = sum(1 for d in result.documents
                         if d.meta.get("expand_phase") == "forward")

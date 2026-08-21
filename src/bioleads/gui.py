@@ -382,20 +382,26 @@ class BioleadsGUI:
                     button=("Browse…", self._pick_refs))
         self._field(card, 3, "Max query hits",
                     self._spin(card, self.retmax_var, 1, 100000),
-                    "Cap on how many hits a PubMed search may fetch.")
+                    "Cap on how many records a PubMed query may fetch "
+                    "(default 1000). Applies to PubMed query only — PubMed IDs "
+                    "and References file bring their own records.")
 
         # --- grow it --------------------------------------------------------
         card = self._section(page, "Grow the corpus")
         self._field(card, 0, "Strategy",
                     self._combo(card, self.expand_strategy_var, ["bfs", "relevance"]),
-                    "How candidates are chosen: bfs snowballs along Follow, "
-                    "adding every linked paper — exhaustive, and it drifts off "
-                    "topic because a reference list spans every field the seed "
-                    "touched. relevance trusts neither direction: it builds a "
-                    "topic profile from your seeds alone, then keeps only the "
-                    "top-K papers most similar to it in each direction. "
-                    "Benchmarked far cleaner than bfs at equal reach — see "
-                    "docs/benchmark.md.")
+                    "Two ways to grow the corpus. bfs (the default) "
+                    "snowballs along Follow, adding every linked paper — "
+                    "exhaustive, and it drifts off topic, "
+                    "because a reference list spans every field the seed "
+                    "touched. relevance builds a topic profile from your seeds "
+                    "alone and keeps only the top-K papers closest to it in "
+                    "each direction; it measured far cleaner than bfs at equal "
+                    "reach (docs/benchmark.md).\n\n"
+                    "Which one you pick decides which field below is live: bfs "
+                    "reads Follow and ignores Relevance top-K, relevance the "
+                    "other way round. The greyed one is the one being "
+                    "ignored.")
         self._field(card, 1, "Rounds",
                     self._spin(card, self.expand_var, 0, 10),
                     "Follow citation links out from the PMID seeds this many "
@@ -423,15 +429,16 @@ class BioleadsGUI:
         self._topk_field = self._field(
                     card, 4, "Relevance top-K",
                     self._spin(card, self.expand_topk_var, 1, 100000),
-                    "Relevance strategy only (ignored by bfs). Candidates in "
-                    "each direction are scored against the seed profile and "
-                    "only the top-K are kept — so this is the main control "
-                    "over corpus size and cleanliness. Benchmarked: K=25 is "
-                    "sharpest, K=50 the best all-round (the default), and "
-                    "K~100–200 keeps 76–92% of bfs's reach at 2–3x its "
-                    "precision — prefer that range when you want ABC "
-                    "hypotheses, which need the linking concepts present at "
-                    "all. Max corpus size still caps the total.")
+                    "The main control over how big and how clean the corpus "
+                    "gets: candidates in each direction are scored against the "
+                    "seed profile and only the top-K survive.\n\n"
+                    "25 is sharpest, 50 (the default) the best all-round, and "
+                    "100–200 keeps 76–92% of bfs's reach at 2–3x its precision "
+                    "— use that range for ABC hypotheses, which need the "
+                    "linking concepts present at all. Max corpus size still "
+                    "caps the total.\n\n"
+                    "Relevance strategy only; under bfs it is ignored, and "
+                    "greyed out to say so.")
         self._field(card, 5, "Max corpus size",
                     self._spin(card, self.expand_max_var, 1, 100000),
                     "Hard cap on the total PMIDs (seeds + discovered) after "
@@ -478,32 +485,35 @@ class BioleadsGUI:
             "work came from, so first and middle authors never appear.")
         self._field(card, 1, "Min degree — papers",
                     self._spin(card, self.mindeg_paper_var, 0, 10000),
-                    "Keep only papers with at least this many connections in "
-                    "the network — citations they receive from the corpus plus "
-                    "citations they make to it. 0 keeps everything; 1 drops "
-                    "the papers with no intra-corpus link at all, which in a "
-                    "sparse corpus is most of them. Filters the ranking and "
-                    "the picture alike. Applied repeatedly until nothing more "
-                    "falls, so every paper left really does clear the number — "
-                    "which means a high value can cascade.")
+                    "How many connections a paper needs to stay in the "
+                    "network and in the ranking — citations it receives from "
+                    "the corpus plus citations it makes to it. 0 keeps "
+                    "everything; 1 drops the papers with no intra-corpus link "
+                    "at all, which in a sparse corpus is most of them.\n\n"
+                    "Re-applied until nothing more falls, so every paper you "
+                    "see really does clear the number. That is why a high "
+                    "value can cascade, and can empty the network outright "
+                    "when no group of papers that size cites only each other. "
+                    "The Log says so when it happens.")
         self._field(card, 2, "Min degree — senior authors",
                     self._spin(card, self.mindeg_author_var, 0, 10000),
-                    "The same threshold for the senior-author network, counted "
-                    "in distinct senior authors cited or citing. It is a "
-                    "separate number because that graph is not the paper "
-                    "graph: each node is one lab, and a productive lab absorbs "
+                    "The same, for the senior-author network, counted in "
+                    "distinct labs cited or citing.\n\n"
+                    "A separate number because it is a different graph: a node "
+                    "here is a lab, not a paper, and a productive lab absorbs "
                     "several of the corpus's papers along with all of their "
-                    "links, so the two degree distributions differ.")
+                    "links — so the same value cuts far less here than it does "
+                    "among papers.")
         self._field(card, 3, "Min papers — paper-count network",
                     self._spin(card, self.min_author_papers_var, 0, 10000),
-                    "The floor for the senior-author paper-count network, "
-                    "counted in corpus papers rather than in citations. It is "
-                    "not a degree threshold on purpose: a lab publishing "
-                    "steadily that nothing in your corpus happens to cite has "
-                    "a citation degree of 0, and that lab is precisely what "
-                    "this network is for — a degree floor would delete its "
-                    "subject. Set 2 to see only authors with more than one "
-                    "paper here. Filters the picture and the ranking alike.")
+                    "How many corpus papers a lab needs to appear in the "
+                    "paper-count network. Set 2 to drop the one-paper labs. "
+                    "Filters the picture and the ranking alike.\n\n"
+                    "Counted in papers rather than citations on purpose: a lab "
+                    "publishing steadily that nothing in your corpus happens "
+                    "to cite has a citation degree of 0, and that lab is "
+                    "exactly what this network exists to show — a degree floor "
+                    "would delete its own subject.")
         note = ttk.Label(card, style="Help.TLabel", wraplength=FORM_WIDTH - 60,
                          text="One node per lab, not per byline — each paper is "
                               "represented by its last author.")
@@ -558,10 +568,13 @@ class BioleadsGUI:
         self.run_btn.pack(side="left")
         self._add_tooltip(
             self.run_btn,
-            "Collects the documents, grows the corpus, extracts entities, "
-            "ranks the terms, builds the term network and proposes hypotheses "
-            "— plus the citation networks if Citation network is ticked. Runs "
-            "in a background thread; progress streams to the Log tab.")
+            "Runs everything set above: collects the documents, grows them by "
+            "citation if Rounds is above 0, extracts entities, ranks the terms "
+            "and proposes ABC hypotheses — plus the three citation networks if "
+            "Citation networks is ticked. Everything it writes lands in Folder "
+            "and is listed in the Outputs tab.\n\n"
+            "Runs in a background thread, so the window stays usable and "
+            "progress streams to the Log tab as it goes.")
         self.stop_btn = ttk.Button(bar, text="Stop", command=self._on_stop,
                                    state="disabled")
         self.stop_btn.pack(side="left", padx=6)

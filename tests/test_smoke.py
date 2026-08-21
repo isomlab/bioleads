@@ -798,8 +798,13 @@ def test_min_paper_degree_counts_citations_given_and_received(monkeypatch):
     assert "PMID:3" in g.nodes                             # ...but not isolated
 
 
-def test_min_paper_degree_prunes_once_not_as_a_k_core(monkeypatch):
-    """5 → 6 → 7: only 6 clears degree 2, and it survives its neighbours' loss."""
+def test_min_degree_settles_instead_of_pruning_once(monkeypatch):
+    """5 → 6 → 7: 6 clears degree 2 only while 5 and 7 are still there.
+
+    A single pass keeps 6 and shows it with one arrow, contradicting the
+    threshold that drew it. Settling drops it too: in this graph there is no
+    set of papers that all have two connections to each other.
+    """
     fake = {
         "5": {"pmid": 5, "title": "A", "authors": "Ann A",
               "references": ["6"], "cited_by": []},
@@ -813,7 +818,22 @@ def test_min_paper_degree_prunes_once_not_as_a_k_core(monkeypatch):
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
 
     g = build_citation_graph(docs, Config(min_paper_degree=2))
-    assert set(g.nodes) == {"PMID:6"}       # iterating would have emptied it
+    assert set(g.nodes) == set()
+
+
+def test_nothing_below_the_threshold_survives_the_filter(monkeypatch):
+    """The promise the control makes: every node you see clears the number.
+
+    Checked on a graph dense enough to leave a core behind, so this is about
+    the survivors clearing the bar rather than about an empty result.
+    """
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    docs = _citation_docs()
+
+    for k in (1, 2, 3):
+        g = build_citation_graph(docs, Config(min_paper_degree=k))
+        under = {n: d for n, d in g.degree() if d < k}
+        assert not under, f"min_paper_degree={k} left {under} in the graph"
 
 
 def test_min_author_degree_drops_isolated_authors(monkeypatch):

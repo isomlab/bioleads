@@ -477,7 +477,9 @@ class BioleadsGUI:
                     "citations they make to it. 0 keeps everything; 1 drops "
                     "the papers with no intra-corpus link at all, which in a "
                     "sparse corpus is most of them. Filters the ranking and "
-                    "the picture alike.")
+                    "the picture alike. Applied repeatedly until nothing more "
+                    "falls, so every paper left really does clear the number — "
+                    "which means a high value can cascade.")
         self._field(card, 2, "Min degree — senior authors",
                     self._spin(card, self.mindeg_author_var, 0, 10000),
                     "The same threshold for the senior-author network, counted "

@@ -1027,11 +1027,18 @@ threshold. `0` keeps everything; `1` keeps only nodes with at least one link,
 which is usually the setting worth having; higher values leave the densely
 connected core.
 
+The filter **settles** rather than running once. Dropping a node lowers its
+neighbours' degree, so one pass would leave nodes on screen showing fewer
+arrows than the threshold you set. Repeating until nothing more falls (the
+k-core) is what makes the number true of the picture. The consequence is that a
+high threshold can cascade — and can empty the network outright, when no set of
+nodes that size is connected only to each other. The log says so when it
+happens, and the answer is a lower threshold.
+
 **The two graphs take separate numbers.** Since each paper contributes one
 senior author, the two are now on comparable scales — on that 289-paper corpus,
 median degree 5 for papers against 4 for senior authors — so the same value is a
-sensible starting point for both, and degree 5 cuts 289 papers to 153 and 217
-senior authors to 102. They stay separate controls because they are still
+sensible starting point for both. They stay separate controls because they are still
 different objects: a node in one is a paper, in the other a lab, and a lab that
 contributed 21 of the corpus's papers inherits the links of all 21.
 

@@ -207,6 +207,12 @@ drops the nodes with no intra-corpus link at all, which in a sparse corpus is
 most of them. The rankings are filtered alongside the pictures, so the CSV and
 the graph always agree.
 
+The filter settles rather than running once, so every node left really does
+clear the number — dropping a node lowers its neighbours' degree, and one pass
+would leave some of them under the bar. A high threshold can therefore cascade,
+and can empty the network when nothing that size hangs together; the run log
+says so.
+
 They are two numbers because the two graphs are different objects — a node is a
 paper in one and a lab in the other, and a lab inherits the links of every corpus
 paper it led — though since each paper contributes one senior author, the two

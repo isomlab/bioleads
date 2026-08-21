@@ -180,18 +180,37 @@ def _prune_by_degree(g: nx.DiGraph, min_degree: int, noun: str, say) -> nx.DiGra
     keep the attributes they were built with, in_corpus_citations included: those
     describe the node's place in the corpus, not in the pruned picture.
 
-    One pass, not a k-core: removing a node lowers its neighbours' degree, and
-    iterating would cascade a threshold of 2 into an unpredictably small graph.
+    Repeated to a fixed point -- the k-core -- rather than run once. Removing a
+    node lowers its neighbours' degree, so a single pass leaves behind nodes
+    that are now under the threshold, and the picture then contradicts the
+    control that drew it: you ask for degree 5 and can still count 2 arrows on
+    a node. Settling is what makes "every node here has at least N connections"
+    true of what you are looking at.
+
+    The cost is that a high threshold can cascade, since each round can expose
+    more nodes to the next. That is the honest consequence of the setting, so
+    the log reports the rounds and the total rather than hiding it in one line.
     """
     if min_degree <= 0 or not g.number_of_nodes():
         return g
-    keep = [n for n, d in g.degree() if d >= min_degree]
-    if len(keep) == g.number_of_nodes():
-        return g
-    dropped = g.number_of_nodes() - len(keep)
-    g = g.subgraph(keep).copy()
-    say(f"  dropped {dropped} {noun}(s) below degree {min_degree}; "
-        f"{g.number_of_nodes()} left.")
+    before = g.number_of_nodes()
+    rounds = 0
+    while g.number_of_nodes():
+        keep = [n for n, d in g.degree() if d >= min_degree]
+        if len(keep) == g.number_of_nodes():
+            break
+        g = g.subgraph(keep).copy()
+        rounds += 1
+    dropped = before - g.number_of_nodes()
+    if dropped:
+        say(f"  dropped {dropped} {noun}(s) below degree {min_degree} "
+            f"in {rounds} round(s); {g.number_of_nodes()} left.")
+    if dropped and not g.number_of_nodes():
+        # Not a failure and not an empty corpus: there is simply no group of
+        # {noun}s this size all connected to each other. Said plainly, because
+        # otherwise it surfaces as a missing network with no explanation.
+        say(f"  no {noun} survives degree {min_degree} — every one of them "
+            f"loses connections as the others go. Try a lower threshold.")
     return g
 
 

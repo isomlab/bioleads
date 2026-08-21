@@ -405,7 +405,7 @@ def test_expansion_is_off_at_zero_rounds_for_either_strategy(monkeypatch):
                                       documents_from_texts(CORPUS))[1])
 
     cfg = _cfg()
-    assert cfg.expand_strategy == "relevance"      # the benchmarked default
+    assert cfg.expand_strategy == "bfs"            # the default strategy
     assert cfg.expand_rounds == 0                  # ...but off until asked
     run_pipeline(pmids="1", cfg=cfg, out_dir=None)
     assert called == ["load:0"], f"a plain run must not expand: {called}"
@@ -423,14 +423,16 @@ def test_relevance_expands_once_asked(monkeypatch):
 
     cfg = _cfg()
     cfg.expand_rounds = 1
-    run_pipeline(pmids="1", cfg=cfg, out_dir=None)
-    assert called == ["load:0", "relevance"], called
 
-    # bfs, in contrast, is expanded inside load_documents
-    called.clear()
-    cfg.expand_strategy = "bfs"
+    # bfs is the default, and expands inside load_documents
     run_pipeline(pmids="1", cfg=cfg, out_dir=None)
     assert called == ["load:1"], called
+
+    # relevance, in contrast, is a gated pass over a load that did not expand
+    called.clear()
+    cfg.expand_strategy = "relevance"
+    run_pipeline(pmids="1", cfg=cfg, out_dir=None)
+    assert called == ["load:0", "relevance"], called
 
 
 def test_relevance_guided_expand_gates_both_directions(monkeypatch):

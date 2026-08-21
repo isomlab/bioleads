@@ -70,11 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "Citation Collection only")
     p.add_argument("--expand-strategy", choices=["relevance", "bfs"],
                    default=Config.expand_strategy,
-                   help="'relevance' (default) = profile the topic from the "
-                        "seeds alone, then keep only the --expand-top-k most "
-                        "on-topic papers in each direction; 'bfs' = plain "
-                        "ungated snowball along --expand-link. Either way "
-                        "nothing is expanded until --expand is set")
+                   help="'bfs' (default) = plain ungated snowball along "
+                        "--expand-link; 'relevance' = profile the topic from "
+                        "the seeds alone, then keep only the --expand-top-k "
+                        "most on-topic papers in each direction (measured "
+                        "cleaner — see docs/benchmark.md). Either way nothing "
+                        "is expanded until --expand is set")
     p.add_argument("--expand-top-k", type=int, default=Config.expand_top_k,
                    metavar="K", help="relevance strategy: keep the K most "
                                      "on-topic papers per direction")

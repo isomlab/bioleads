@@ -731,7 +731,7 @@ failure in the embedding path falls back here rather than sinking the run.
 
 | control | symbol | default | what it changes |
 |---|---|---|---|
-| `expand_strategy` | | `relevance` | this gate, or `bfs` for an ungated snowball; **`relevance` is the default because it measured better** (below), and picking `bfs` bypasses everything else in this table |
+| `expand_strategy` | | `bfs` | an ungated snowball (the default), or `relevance` for this gate; **`relevance` measured better** (below), and the default `bfs` bypasses everything else in this table |
 | `expand_rounds` | | 0 | **expansion is off until this is ≥ 1**, whichever strategy is set. Above 0 `relevance` runs one gated round in each direction; `bfs` treats it as a depth |
 | `expand_top_k` | $K$ | 50 | papers kept **per direction**; the main control over corpus size and cleanliness |
 | `rocchio_gamma` | $\gamma$ | 0.25 | weight of the negative term — measured to change almost nothing |
@@ -824,8 +824,8 @@ topic-labelled benchmark would be the independent check.
 
 ### The other strategy: `bfs`
 
-Plain snowball, no gating — and no longer the default, since none of the
-machinery above applies to it: no profile, no negative term, no $K$. Each round
+Plain snowball, no gating — and the default, though none of the machinery
+above applies to it: no profile, no negative term, no $K$. Each round
 takes the current frontier, adds everything linked to it, and chases those next,
 up to the record cap. Direction is yours: `references`, `cited_by`, or `both`.
 Use it when you want exhaustive coverage of a small, tight seed set and intend to

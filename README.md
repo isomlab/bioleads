@@ -114,16 +114,16 @@ bioleads --pmids @my_pmids.txt --out ./results
 bioleads --refs my_library.ris --out ./results
 bioleads --refs my_library.xml --out ./results
 
-# Grow the corpus by following citations from the seeds. --expand 1 is enough:
-# the default strategy is `relevance`, which gates one round in each direction
-# against a profile built from the seeds, keeping the top-K of each.
-bioleads --pmids @seeds.txt --expand 1 --out ./results
-bioleads --pmids @seeds.txt --expand 1 --expand-top-k 100 --out ./results
+# Grow the corpus by following citations from the seeds. The default strategy
+# is `bfs`: a plain snowball, everything linked, ungated, for N rounds.
+bioleads --pmids @seeds.txt --expand 2 --out ./results
+bioleads --refs my_library.ris --expand 1 --expand-link cited_by --out ./results
 
-# Plain snowball instead — everything linked, ungated, for N rounds:
-bioleads --pmids @seeds.txt --expand 2 --expand-strategy bfs --out ./results
-bioleads --refs my_library.ris --expand 1 --expand-strategy bfs \
-         --expand-link cited_by --out ./results
+# Gated instead — one round in each direction against a profile built from the
+# seeds, keeping the top-K of each. Measured cleaner; --expand 1 is enough:
+bioleads --pmids @seeds.txt --expand 1 --expand-strategy relevance --out ./results
+bioleads --pmids @seeds.txt --expand 1 --expand-strategy relevance \
+         --expand-top-k 100 --out ./results
 
 # Open discovery seeded from specific concepts:
 bioleads --pmids @seeds.txt --anchors "trpv1,inflammation" --out ./results
@@ -236,10 +236,10 @@ supported (they often lack abstracts or aren't reliably structured).
 
 `--expand N` grows the corpus from the **PMID-bearing seeds** (from `--pmids`,
 `--pubmed`, or `--refs`). Nothing is expanded without it, whichever strategy is
-selected. What `N` means depends on the strategy: under the default
-`relevance` any `N > 0` means one gated round in each direction (see below);
-under `bfs` it is a depth, each round adding the papers linked from the current
-frontier and then chasing those in the next, up to `--expand-max` total records.
+selected. What `N` means depends on the strategy: under the default `bfs` it is
+a depth, each round adding the papers linked from the current frontier and then
+chasing those in the next, up to `--expand-max` total records; under `relevance`
+any `N > 0` means one gated round in each direction (see below).
 
 `--expand-link both` (the default) unions the two directions; `references`
 alone follows the papers each seed *cites* (backward), and `cited_by` alone
@@ -266,11 +266,11 @@ references while `icite` finds 184; `all` gives the union.)
 Seeds without a PMID (refs lacking an accession) can't be expanded by either
 source. Cycles are avoided: a record already seen is never re-queued.
 
-**Relevance-guided expansion** is what `--expand` does by default. It is the
-filtered alternative to the plain BFS snowball (`--expand-strategy bfs`), and it
-is the default because it measured better: at equal reach it beat `bfs` on F1 in
-35 of 40 reviews at K=50 and 38 of 40 at K=100, with about ten times the pooled
-precision. Both citation directions are noisy, so neither is trusted:
+**Relevance-guided expansion** (`--expand-strategy relevance`) is the filtered
+alternative to the plain BFS snowball that `--expand` does by default. It is not
+the default, but it is what the benchmark favours: at equal reach it beat `bfs`
+on F1 in 35 of 40 reviews at K=50 and 38 of 40 at K=100, with about ten times the
+pooled precision. Both citation directions are noisy, so neither is trusted:
 
 1. **Profile from the seeds alone.** Your seed documents are the only papers
    known to be on topic, so they — and nothing else — form the **topic profile**

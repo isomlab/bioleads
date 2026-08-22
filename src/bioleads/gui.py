@@ -30,6 +30,7 @@ from .embeddings import (
 )
 from .pipeline import PipelineResult, run_pipeline
 from .sources import PipelineCancelled
+from . import __version__
 
 # Visual language shared with the other lab tools (probelog, plasmidlog): a navy
 # header, a soft grey page, white cards holding the fields, and one green accent
@@ -98,7 +99,7 @@ OUTPUT_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
 class BioleadsGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("bioleads")
+        self.root.title(f"bioleads v{__version__}")
         self.root.minsize(1000, 700)
         self.root.configure(background=BG)
         self._queue: queue.Queue = queue.Queue()

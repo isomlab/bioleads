@@ -51,6 +51,49 @@ if ! "$CONDA" env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
     echo "Setup complete."
 fi
 
+# --- keep this copy current -------------------------------------------------
+# Best-effort throughout: an offline laptop, or a clone with local edits, still
+# launches on the code it already has.
+
+update_repo() {
+    command -v git >/dev/null 2>&1 || return 0
+    git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    git -C "$REPO" remote get-url origin >/dev/null 2>&1 || return 0
+    git -C "$REPO" symbolic-ref -q HEAD >/dev/null 2>&1 || return 0   # detached
+    if [ -n "$(git -C "$REPO" status --porcelain 2>/dev/null)" ]; then
+        echo "This copy has local changes — skipping update."
+        return 0
+    fi
+    echo "Checking for updates…"
+    local before after
+    before="$(git -C "$REPO" rev-parse HEAD 2>/dev/null)"
+    if ! git -C "$REPO" pull --ff-only --quiet 2>/dev/null; then
+        echo "  could not reach the server — launching the copy you have."
+        return 0
+    fi
+    after="$(git -C "$REPO" rev-parse HEAD 2>/dev/null)"
+    if [ "$before" = "$after" ]; then echo "  already up to date."; else echo "  updated."; fi
+}
+
+# The app is installed editable, so new code needs no reinstall — a new
+# dependency does. Rebuild only when environment.yml is newer than the env,
+# which also covers a pull done by hand outside this launcher.
+update_env() {
+    local prefix yml
+    yml="$REPO/environment.yml"
+    [ -f "$yml" ] || return 0
+    prefix="$("$CONDA" env list | awk -v n="$ENV_NAME" '$1 == n {print $NF}')"
+    [ -n "$prefix" ] && [ -f "$prefix/conda-meta/history" ] || return 0
+    if [ "$yml" -nt "$prefix/conda-meta/history" ]; then
+        echo "Dependencies changed — updating the '$ENV_NAME' environment…"
+        ( cd "$REPO" && "$CONDA" env update -f environment.yml ) \
+            || echo "  update failed — launching on the environment you have."
+    fi
+}
+
+update_repo
+update_env
+
 echo "Starting bioleads…"
 # Isolate from the user's Python environment: PYTHONPATH is cleared (entries there
 # take precedence over the env's site-packages and can shadow the app's package),

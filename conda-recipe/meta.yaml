@@ -1,5 +1,5 @@
 {% set name = "bioleads" %}
-{% set version = "0.1.0" %}
+{% set version = "0.2.0" %}
 
 package:
   name: {{ name|lower }}
@@ -7,7 +7,9 @@ package:
 
 source:
   url: https://github.com/isomlab/{{ name }}/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: e75615984d9fb4947d47f1161083718baf4e66fc30f67ecc95c3123d3d567e14
+  # TODO(0.2.0): refresh after the v0.2.0 tag is pushed — the tarball does not
+  # exist until then. `curl -sL <the url above> | shasum -a 256`
+  sha256: 0000000000000000000000000000000000000000000000000000000000000000
   # For a local `conda build` from this checkout instead, comment out the two lines
   # above and use:
   #   path: ..

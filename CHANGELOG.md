@@ -3,7 +3,7 @@
 Notable changes to bioleads. Versions follow [semantic versioning](https://semver.org);
 while the major version is 0, a minor bump may change defaults.
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-08-22
 
 ### Clustering
 

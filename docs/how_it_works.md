@@ -194,25 +194,10 @@ The middle band is the language model. bioleads does not touch it: it is used
 as-is and only ever asked for one thing, a vector per paper. Every decision the
 gate makes happens in the bottom band.
 
-Two phrases in that band are worth unpacking, because both are easy to read
-wrongly.
-
-**"A 64-wide slice"** does not mean the head is handed 64 of the token's numbers.
-Every head sees the token *whole*, all 768. What is cut into twelve is the
-**weights**: the layer holds a 768 × 768 block of them, head 4 uses columns
-192–255, and putting 768 numbers through 64 columns gives 64 numbers back. The
-other eleven heads use the other eleven blocks of columns, and their eleven
-answers join back up to 768. So the heads differ in *which weights they apply*,
-never in which part of the token they get.
-
-**"Rewritten twelve times over"** means the token's vector is replaced at every
-layer, each version built from the one before. No single step changes it much —
-consecutive versions stay above 0.79 cosine, and mostly above 0.95 — but the
-changes compound. By the final layer the vector retains a cosine of **0.403** to
-the one that entered layer 1. It never stops being `muscle`; it stops being
-`muscle` in general and becomes `muscle` in this sentence. What each of those
-twelve rounds contributes, and whether this stage needs all of them, is measured
-in step 1.
+Two labels on it are easy to read wrongly, and both are taken apart in step 1:
+**"a 64-wide slice"** is a slice of the *weights*, not of the token — every head
+sees all 768 numbers — and **"rewritten twelve times over"** means each layer
+adds a correction rather than replacing anything.
 
 ### Step 1 · Every paper becomes a vector
 
@@ -254,10 +239,9 @@ in "arterial smooth muscle" and "he lost muscle mass". That is the problem the
 twelve transformer layers exist to solve. In each layer, **every token looks at
 every other token** and is rewritten in light of them, twelve times over.
 
-**What "looks at" means.** That phrase is the load-bearing one in this whole
-section, so it is worth spending a paragraph on rather than leaving as a
-metaphor. Nothing is inspected, and no token can see inside another. Three short
-vectors are derived from each token, *from its own numbers alone*:
+**What "looks at" means.** Nothing is inspected, and no token can see inside
+another. Three short vectors are derived from each token, *from its own numbers
+alone*:
 
 | | the jargon | what it is for |
 |---|---|---|
@@ -265,26 +249,22 @@ vectors are derived from each token, *from its own numbers alone*:
 | an **offer** | key | what this word advertises about itself |
 | a **contribution** | value | what this word hands over if chosen |
 
-For one token, its request is multiplied against every token's offer. Each such
-multiplication collapses to **one number** — a match score, nothing more. Those
-scores are then squashed so they sum to 1, and *that* is the whole of the
-"looking": the numbers become **proportions**. The token's correction is those
-proportions applied to the other tokens' contributions — a weighted blend.
+One token's request is multiplied against every token's offer; each
+multiplication collapses to **one number**, a match score. Those scores are
+squashed so they sum to 1 — becoming **proportions** — and the token's
+correction is those proportions applied to the other tokens' contributions.
 
-So **"token A looks at token B"** means, exactly: *A's request was multiplied by
-B's offer, that one number became a proportion, and B's contribution was mixed
-into A in that amount.* A word given a proportion of 0.999 is being copied almost
-whole; one given 0.0005 is, for that round, ignored.
-
-The phrase is used throughout the rest of this section, and it always means that.
-It is worth keeping precisely because the alternative — "computes a
-softmax-weighted sum of value projections" — describes the arithmetic while
-hiding what it is for.
+So **"token A looks at token B"** means exactly: *A's request was multiplied by
+B's offer, that number became a proportion, and B's contribution was mixed into
+A in that amount.* A word given 0.999 is copied almost whole; one given 0.0005
+is, for that round, ignored. The phrase always means that below, and it is worth
+keeping over "computes a softmax-weighted sum of value projections", which
+describes the arithmetic while hiding what it is for.
 
 ![Figure 3 — the stored numbers are only a starting point](figures/03-token-in-context.svg)
 
-It is worth seeing how violent that rewrite is. Following the single token
-`muscle` through the model:
+How violent that rewrite is, following the single token `muscle` through the
+model:
 
 | compared | cosine |
 |---|---|
@@ -292,47 +272,35 @@ It is worth seeing how violent that rewrite is. Following the single token
 | its stored row vs. its vector in the illness sentence | **0.140** |
 | the two sentence versions against each other | 0.939 |
 
-The stored row barely resembles what comes out. **The layers do not adjust the
-lookup, they largely replace it** — the row number is closer to an index than to a
-meaning. And the same word in two different sentences ends up as genuinely
-different numbers, which is what lets a vector stand for a *meaning* rather than a
-*spelling*. It is also why the whole approach beats counting words: `myocyte` and
-`muscle cell` can land near each other without sharing a single character.
+**The layers do not adjust the lookup, they largely replace it** — the row
+number is closer to an index than to a meaning. And the same word in two
+sentences ends up as genuinely different numbers, which is what lets a vector
+stand for a *meaning* rather than a *spelling*, and why the approach beats
+counting words: `myocyte` and `muscle cell` land near each other without sharing
+a character.
 
-**Why 768?** It is not derived from the data or the vocabulary. It is the width
-the model was built with — the "base" size in the BERT family — and every token
-vector at every layer has exactly that many numbers. It is divisible the way the
-architecture needs: 12 attention heads × 64 numbers each = 768. Larger variants
-use 1024 or more and are correspondingly slower; smaller ones lose accuracy. For
-our purposes 768 is simply a fixed, inherited constant, and no individual one of
-those numbers means anything on its own — only the whole pattern does.
+**Why 768?** Nothing about the data or the vocabulary: it is the width the model
+was built with, the "base" size in the BERT family, and it divides the way the
+architecture needs — 12 heads × 64 numbers = 768. No individual number means
+anything on its own; only the whole pattern does. (Where 768 and twelve both
+come from is one answer, given under *Why twelve* below.)
 
 **What a layer and a head actually are.** A **layer** has two halves. The first
 is that looking step — **attention** — and it is the *only* place one token's
-numbers can reach another. In the second, a
-small network called a **feed-forward** transforms each token entirely on its
-own, reading nothing else; it is four times wider inside than the vector it
-works on (768 → 3072 → 768) and holds most of the model's parameters.
+numbers can reach another. In the second, a small network called a
+**feed-forward** transforms each token entirely on its own, reading nothing
+else; it is four times wider inside than the vector it works on
+(768 → 3072 → 768) and holds most of the model's parameters.
 
-"Looks at" has a precise meaning. Each token distributes one unit of **attention**
-across the sentence, and the resulting weights decide how much of each other
-token gets mixed in. A token that spends 0.99 of its attention on one word is,
-for that round, essentially copying it.
-
-**What a head is, exactly.** Not a module you could point at — a *slice*. Each
-layer holds three learned 768 × 768 matrices, and head 8 owns columns 512–575 of
-each: its 64-wide share. Run a token's 768 numbers through those three slices and
-you get three 64-number vectors, which are given three different jobs:
-
-| | what it is | plain reading |
-|---|---|---|
-| **query** | the token through this head's slice of the first matrix | what this word is looking for |
-| **key** | every token through its slice of the second | what each word offers |
-| **value** | every token through its slice of the third | what actually gets passed on |
-
-Queries and keys exist separately because the two are not the same question — what
-a word is looking for and what it advertises about itself are different, and the
-comparison between them is deliberately asymmetric.
+**A head is not a module you could point at — it is a *slice*.** Each layer
+holds three learned 768 × 768 matrices, and head 8 owns columns 512–575 of each:
+its 64-wide share. So a head sees every token whole and differs from its
+neighbours only in *which weights it applies*. Run a token's 768 numbers through
+those three slices and you get the request, offer and contribution above, 64
+numbers each — the jargon for them being **query**, **key** and **value**.
+Queries and keys are separate because the two are not the same question: what a
+word is looking for and what it advertises about itself differ, and the
+comparison is deliberately asymmetric.
 
 The head compares its one query against every key by dot product, divides by √64
 to keep the numbers in a range where the next step behaves, and softmaxes the
@@ -351,10 +319,10 @@ laid end to end — **12 × 64 = 768** — and passed through a fourth matrix th
 them back together; that result is what the token becomes, and the next layer
 starts from it.
 
-So a head is a 64-column slice of three shared matrices plus the comparison that
-slice performs. Nothing more concrete than that exists to point at. (The account
-above is not a paraphrase: recomputing this head by hand from the raw weight
-matrices reproduces the model's own attention to 3 × 10⁻⁷.)
+So a head is a 64-column slice of three shared matrices plus the comparison it
+performs; nothing more concrete exists to point at. (Not a paraphrase:
+recomputing this head by hand from the raw weights reproduces the model's own
+attention to 3 × 10⁻⁷.)
 
 ![Figure 5 — inside a layer: twelve heads, each reading the sentence differently](figures/05-layers-and-heads.svg)
 
@@ -370,17 +338,15 @@ figure has one square per head — rows are the layers, columns are the twelve
 heads *within* that layer. (Those squares are a summary statistic, not attention
 weights; only the bars on the left sum to 1.)
 
-But it would be misleading to suggest all 144 have tidy jobs. On the sentence
-above, counting only what the real words point at, **57 of them send over 70% of
-their attention to punctuation and the sentence markers** — a known idling
+Most of the 144 have no tidy job at all. On the sentence above, **57 send over
+70% of their attention to punctuation and the sentence markers** — a known idling
 behaviour, where a head with nothing to contribute parks its attention somewhere
-harmless. Just 23 mostly read the actual words. How many idle depends on the
-text: run the same test over 1,500 real titles and it flags 33 rather than 57,
-because short input has proportionally more punctuation to park on. Either way
-the useful mental model is not twelve experts with twelve labelled specialities,
-but a large pool of cheap, partly-redundant pattern detectors of which a minority
-matter for any given sentence — and, as the next section shows, the idle ones sit
-almost entirely in the last five layers.
+harmless — and just 23 mostly read the actual words. How many idle depends on the
+text: over 1,500 real titles it is 33 rather than 57, short input having
+proportionally more punctuation to park on. So the mental model is not twelve
+labelled experts but a large pool of cheap, partly-redundant detectors of which a
+minority matter for any given sentence — and, as the next section shows, the idle
+ones sit almost entirely in the last five layers.
 
 **And "rewritten" means added to, not replaced.** Neither half overwrites the
 vector. Each computes a *correction* and adds it to what was already there — a
@@ -391,39 +357,35 @@ keep the numbers in a workable range.
 
 Measured on `muscle` at layer 3: the vector arrives with length 15.9, attention
 contributes a correction 29% that size, the feed-forward then contributes another
-23%, and the vector leaves at a cosine of **0.941** to the one that entered. One
-layer nudges; it does not replace. Twelve layers means **twenty-four** such
-corrections in sequence, which is how the token can travel from 1.00 to 0.403
-against its starting point without any single step discarding what was there.
+23%, and the vector leaves at a cosine of **0.941** to the one that entered. No
+single layer changes it much — consecutive versions stay above **0.79** cosine
+and mostly above **0.95** — so one layer nudges rather than replaces. Twelve
+layers means **twenty-four** such corrections in sequence, which is how the token
+travels from 1.00 to 0.403 against its starting point without any single step
+discarding what was there.
 
 That also settles what a token can be influenced by: because each round starts
 from the last one's output, a word can affect a token it never directly attended
 to, reached through whatever the layer below folded in.
 
-**Why they are called layers.** The word is older than transformers and comes
-from how these networks are drawn: a row of units all computed at once, then
-another row computed from that row's output, stacked upward like strata. Here it
-means something specific. **One layer is one complete round of "attention, then
-feed-forward", holding its own private copy of every weight it uses.** The twelve
-rounds do not reuse one set of weights twelve times — each layer holds
+**Why they are called layers.** **One layer is one complete round of "attention,
+then feed-forward", holding its own private copy of every weight it uses.** The
+twelve rounds do not reuse one set of weights twelve times — each layer holds
 **7.09 million** parameters of its own, and the twelve together are **85.1M of
 the model's 109.5M**, the 30,522-row lookup table being most of the rest. The
-layers *are* the model.
+layers *are* the model. Everything inside one is computed at the same moment
+from the layer below and nothing else, which is what makes it a layer rather
+than a step in a loop; and "layer" names a *block* of two sublayers, which is
+why twelve give **twenty-four** corrections, and why asking the library for the
+hidden states returns **thirteen** arrays — the lookup table's output, then one
+per layer.
 
-Two things follow from the name that are worth holding onto. Everything inside a
-layer is computed at the same moment, from the layer below and nothing else —
-that simultaneity is what makes it a layer rather than a step in a loop. And
-"layer" here names a *block* of two sublayers, which is why twelve layers give
-**twenty-four** corrections, and why asking the library for the hidden states
-returns **thirteen** arrays: the lookup table's output, then one per layer.
-
-**Why twelve.** For the same reason there are 768 numbers: it was inherited, not
-chosen. PubMedBERT is BERT-base retrained on PubMed, and BERT-base is 12 layers
-× 12 heads × 768 wide — a shape picked in 2018 to match the size of the model
-BERT was being compared against, then kept by everything built on it. The
-larger variant doubles the depth to 24 and widens to 1024. bioleads did not
-choose twelve; it chose a model that has twelve, the way you inherit a file
-format.
+**Why twelve, and why 768.** Both were inherited, not chosen. PubMedBERT is
+BERT-base retrained on PubMed, and BERT-base is 12 layers × 12 heads × 768 wide,
+a shape picked in 2018 to match the model BERT was being compared against and
+kept by everything built since; the larger variant doubles depth to 24 and
+widens to 1024. bioleads did not choose twelve, it chose a model that has
+twelve, the way you inherit a file format.
 
 What *depth* is for is easier to say than what twelve is for. Range is not the
 reason: one layer's attention already reaches every token in the text. What a
@@ -471,12 +433,10 @@ half again, and **38% of all the contextualisation in the model happens in it**;
 a dictionary entry.
 
 *Layers 1–7 read the sentence; 8–12 largely stop.* Six to twelve heads per layer
-are still reading words through layer 7 — layer 7 most locally of all, with a
-mean span of 4.5 tokens and 23% of attention going straight to the preceding
-word. From layer 8 there is at most one such head, five to nine heads park over
-70% of their attention on markers and punctuation, and the corrections shrink.
-The back half of the model does most of its work in the feed-forward half, on
-each token alone.
+still read words through layer 7 — layer 7 most locally of all, mean span 4.5
+tokens with 23% of attention going straight to the preceding word. From layer 8 there is at most one such head, five to nine park over 70%
+of their attention on markers, and the corrections shrink: the back half does
+most of its work in the feed-forward half, on each token alone.
 
 **Does the gate need all twelve?** The rest of step 1 turns these token vectors
 into one vector per paper by averaging them and scaling to length 1. Do that at
@@ -497,34 +457,30 @@ layers are *worse* than the early ones — the fall from layer 3 to layer 9
 (0.029). The curve is U-shaped: topical signal is built early, spent on work
 the gate does not use, then partly restored at the end.
 
-Deleting layers tells the same story from the other side. Skip any single layer
-and re-run the whole test: the paper's vector moves by at most **0.026** cosine
-(against a background where two *unrelated* papers already sit at 0.984), and the
-AUC moves by at most 0.013 — **six of the twelve deletions leave it slightly
-better**. Only removing layer 11 clearly hurts. No single layer is load-bearing
-here, which is what a stack of small additive corrections predicts.
+Deleting layers says the same from the other side. Skip any single layer and
+re-run: the paper's vector moves by at most **0.026** cosine (against a
+background where two *unrelated* papers already sit at 0.984) and the AUC by at
+most 0.013 — **six of the twelve deletions leave it slightly better**, and only
+removing layer 11 clearly hurts. No single layer is load-bearing, which is what
+a stack of small additive corrections predicts.
 
-So the honest answer to "why twelve" is that this stage did not need twelve and
-did not pick twelve. Twelve is the shape of the model it borrowed, mean-pooling
-the last layer is the convention rather than a tuned choice, and the measurement
-says a layer-3 readout would be slightly better on this task — worth about 0.008
-AUC and two points of precision@50. That is a proxy, not the benchmark: topics
-defined by one paper's reference list are cleaner than a real expansion round,
-and nothing here has been through [the benchmark](benchmark.md). The two
-independent draws also agree on the shape of the curve but not on the size of the
-prize — the layer-3 advantage in precision@50 is 0.2 points in one and 4.6 in the
-other. It is a flagged possibility, not a change.
+So the gate did not need twelve and did not pick twelve: twelve is the shape of
+the borrowed model, and mean-pooling the last layer is convention rather than a
+tuned choice. A layer-3 readout measures slightly better — about 0.008 AUC and
+two points of precision@50 — but this is a proxy, not [the
+benchmark](benchmark.md): reference-list topics are cleaner than a real
+expansion round, and the two draws agree on the curve's shape while disagreeing
+on the size of the prize (0.2 points of precision@50 in one, 4.6 in the other).
+A flagged possibility, not a change.
 
-**Averaging the tokens.** The gate needs *one* vector per paper, and what we have
-is one per token, so they are averaged — the simplest way to combine them, and the
-one bioleads uses. "Real tokens" in the equation below means the actual words:
-sentences in a batch are padded to equal length so the arrays are rectangular, and
-those padding slots are excluded so a short abstract is not diluted by its own
-padding.
+**Averaging the tokens.** The gate needs *one* vector per paper and we have one
+per token, so they are averaged. "Real tokens" in the equation below means the
+actual words: batches are padded to equal length so the arrays are rectangular,
+and those padding slots are excluded so a short abstract is not diluted by its
+own padding.
 
-Averaging costs something, and it is worth knowing what. Word order is largely
-flattened. Measured on two sentences that differ only by swapping subject and
-object:
+Averaging costs word order, and largely flattens it. Measured on two sentences
+that differ only by swapping subject and object:
 
 | pair | cosine |
 |---|---|
@@ -532,16 +488,15 @@ object:
 | the same sentence vs. a different claim entirely | 0.9814 |
 
 Reversing the direction of an interaction changes the paper's vector *less* than
-changing its subject does. So this representation is good at "which topic is this
-about" and poor at "what exactly does it claim" — which is fine here, because the
-gate's only job is topical filtering, and the co-occurrence network in stage 5 is
-undirected anyway. It would not be fine for extracting directed claims, and
-nothing downstream should be read as doing that.
+changing its subject does. So the representation is good at "which topic is this
+about" and poor at "what exactly does it claim" — fine here, since the gate only
+filters topically and stage 5's network is undirected anyway, but it would not be
+fine for extracting directed claims, and nothing downstream should be read as
+doing that.
 
-Averaging does one more thing, which only becomes visible in step 3: it
-**concentrates whatever every token has in common**. The parts of the tokens that
-differ partly cancel; the part they share does not. That is why the paper vectors
-end up crowded into a narrow cone — see *where the 0.99s come from*, below.
+Averaging also **concentrates whatever every token has in common**: the parts
+that differ partly cancel, the shared part does not. That is one of the steps
+that crowds the paper vectors into [the embedding space is a narrow cone](#appendix--the-embedding-space-is-a-narrow-cone).
 
 The average is finally scaled to length 1 so only its *direction* matters.
 That is the whole of step 1:

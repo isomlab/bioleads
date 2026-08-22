@@ -32,7 +32,19 @@ class Config:
     # --- Embeddings (PubMedBERT) ---
     embed_model: str = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext"
     embed_batch_size: int = 16
-    n_clusters: int = 12
+    # How the ranked terms get grouped:
+    #   "hdbscan" (default) -> density-based; the number of clusters falls out
+    #       of the embedding cloud, and terms in no dense region are left in an
+    #       unclustered bucket (cluster_id -1) instead of being forced into the
+    #       nearest group. Nothing to set before you have seen the terms.
+    #   "kmeans" -> the old behavior: exactly n_clusters groups, every term
+    #       assigned to one. Pick this when a fixed number of groups is the
+    #       point (say, comparing two runs at the same granularity).
+    cluster_method: str = "hdbscan"
+    n_clusters: int = 12          # kmeans only
+    # HDBSCAN's smallest admissible group. 0 = derive it from the term count
+    # (see _auto_min_cluster_size); raise it for fewer, broader clusters.
+    min_cluster_size: int = 0
     # Cluster ranked terms in PubMedBERT space, write term_clusters.csv, and
     # color the co-occurrence graph by cluster. Off by default — needs the
     # `embed` extra and downloads a model on first use.

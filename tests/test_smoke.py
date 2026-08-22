@@ -159,6 +159,121 @@ def test_clusters_to_dataframe_and_map():
         "vasodilation": 0, "vasorelaxation": 0, "trpv1": 1}
 
 
+def _two_blobs():
+    """Embeddings with an obvious answer: two tight, well-separated groups.
+
+    Deterministic, and no model needed — cluster_terms takes embeddings.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    a = np.array([1.0, 0.0, 0.0]) + rng.normal(scale=0.01, size=(6, 3))
+    b = np.array([0.0, 1.0, 0.0]) + rng.normal(scale=0.01, size=(6, 3))
+    terms = [f"a{i}" for i in range(6)] + [f"b{i}" for i in range(6)]
+    return terms, np.vstack([a, b])
+
+
+def test_hdbscan_picks_the_cluster_count_itself():
+    # The whole point of the default: no k is supplied anywhere and the two
+    # groups still come back as two.
+    from bioleads.embeddings import cluster_terms
+
+    terms, emb = _two_blobs()
+    clusters = cluster_terms(terms, Config(), embeddings=emb)
+
+    real = [c for c in clusters if not c.is_noise]
+    assert len(real) == 2, [c.terms for c in clusters]
+    # Each blob stayed whole and didn't mix with the other.
+    for c in real:
+        assert len({t[0] for t in c.terms}) == 1
+    # Nothing was dropped on the way through.
+    assert sorted(t for c in clusters for t in c.terms) == sorted(terms)
+    # The centroid is a real member, not an invented label.
+    assert all(c.centroid_term in c.terms for c in real)
+
+
+def test_hdbscan_reduces_before_it_measures_density():
+    # Term embeddings are anisotropic enough (mean pairwise cosine ~0.93) that
+    # clustering them raw returns one blob; the centre+PCA step is what makes
+    # the groups separable, so guard that it is actually applied.
+    import numpy as np
+    from bioleads.embeddings import _reduce_for_density
+
+    rng = np.random.default_rng(0)
+    shared = np.ones(64) * 5.0            # the direction every vector shares
+    a = shared + np.array([3.0] + [0.0] * 63) + rng.normal(scale=0.05, size=(8, 64))
+    b = shared + np.array([0.0, 3.0] + [0.0] * 62) + rng.normal(scale=0.05, size=(8, 64))
+    X = np.vstack([a, b])
+
+    Z = _reduce_for_density(X, Config())
+    assert Z.shape == (16, 10)            # projected, not the raw 64 dims
+
+    def spread(M):                        # between-group gap over within-group
+        ga, gb = M[:8], M[8:]
+        within = (np.linalg.norm(ga - ga.mean(0), axis=1).mean()
+                  + np.linalg.norm(gb - gb.mean(0), axis=1).mean()) / 2
+        return np.linalg.norm(ga.mean(0) - gb.mean(0)) / within
+
+    from sklearn.preprocessing import normalize
+    assert spread(Z) > spread(normalize(X))
+
+
+def test_kmeans_is_still_available_with_an_explicit_k():
+    from bioleads.embeddings import cluster_terms
+
+    terms, emb = _two_blobs()
+    clusters = cluster_terms(terms, Config(cluster_method="kmeans", n_clusters=3),
+                             embeddings=emb)
+
+    assert len(clusters) == 3
+    # KMeans assigns everything: no unclustered bucket, no term left out.
+    assert not any(c.is_noise for c in clusters)
+    assert sorted(t for c in clusters for t in c.terms) == sorted(terms)
+
+
+def test_unassigned_terms_become_the_noise_bucket():
+    # HDBSCAN's -1 label must survive as a bucket rather than vanish: the CSV,
+    # the scatter and the graph coloring all expect every term back.
+    import numpy as np
+    from bioleads.embeddings import _group
+
+    terms = ["a", "b", "c", "lonely", "stray"]
+    X = np.eye(5)
+    clusters = _group(terms, X, [1, 1, 1, -1, -1])
+
+    assert [c.cluster_id for c in clusters] == [0, -1]      # bucket last
+    real, noise = clusters
+    assert real.terms == ["a", "b", "c"] and not real.is_noise
+    assert noise.is_noise and noise.terms == ["lonely", "stray"]
+    assert noise.centroid_term == ""       # leftovers have no representative
+    assert term_to_cluster(clusters)["stray"] == -1
+
+
+def test_clusters_are_numbered_largest_first():
+    from bioleads.embeddings import cluster_terms
+    import numpy as np
+
+    rng = np.random.default_rng(1)
+    big = np.array([1.0, 0.0]) + rng.normal(scale=0.01, size=(8, 2))
+    small = np.array([0.0, 1.0]) + rng.normal(scale=0.01, size=(3, 2))
+    terms = [f"big{i}" for i in range(8)] + [f"small{i}" for i in range(3)]
+    clusters = [c for c in cluster_terms(terms, Config(),
+                                         embeddings=np.vstack([big, small]))
+                if not c.is_noise]
+
+    assert [c.cluster_id for c in clusters] == list(range(len(clusters)))
+    assert clusters[0].terms[0].startswith("big")
+
+
+def test_unknown_cluster_method_is_rejected():
+    from bioleads.embeddings import cluster_terms
+    import numpy as np
+
+    with pytest.raises(ValueError, match="cluster_method"):
+        cluster_terms(["a", "b"], Config(cluster_method="dbscan"),
+                      embeddings=np.eye(2))
+
+
 RIS_SAMPLE = """\
 TY  - JOUR
 TI  - TRPV1 activation drives vasodilation
@@ -358,10 +473,13 @@ def test_write_cluster_scatter_html(tmp_path):
                     centroid_term="trpv1"),
         TermCluster(cluster_id=1, terms=["mitochondria", "glycolysis"],
                     centroid_term="mitochondria"),
+        # HDBSCAN's leftovers: no centroid, and drawn as "unclustered".
+        TermCluster(cluster_id=-1, terms=["odd"], centroid_term="",
+                    is_noise=True),
     ]
-    # five rows, one per flattened term, in cluster order
+    # six rows, one per flattened term, in cluster order
     rng = np.random.default_rng(0)
-    emb = rng.normal(size=(5, 16))
+    emb = rng.normal(size=(6, 16))
     out = tmp_path / "term_clusters.html"
     path = write_cluster_scatter(clusters, str(out), embeddings=emb)
 
@@ -369,6 +487,7 @@ def test_write_cluster_scatter_html(tmp_path):
     assert out.exists()
     html = out.read_text()
     assert "trpv1" in html and "mitochondria" in html   # labels/hover baked in
+    assert "unclustered" in html                         # leftovers named, not "-1"
     assert "Plotly" in html or "plotly" in html          # self-contained plot
 
 

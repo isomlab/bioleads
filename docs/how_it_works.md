@@ -43,7 +43,7 @@ beats chance.
    │
    ├─ 6. Propose hypotheses ─────── Swanson ABC over that network
    │
-   ├─ 7. Cluster terms ─────────── PubMedBERT + KMeans (optional)
+   ├─ 7. Cluster terms ─────────── PubMedBERT + HDBSCAN (optional)
    │
    ├─ 8. Map the citations ──────── paper→paper and lab→lab (optional)
    │
@@ -960,8 +960,9 @@ co-occurrence count (0 by construction).
 ## 7. Cluster terms semantically *(optional)*
 
 **What it does.** Embeds each ranked term with **PubMedBERT** (mean-pooled over
-the token embeddings), L2-normalizes, and runs **KMeans**. Each cluster is
-labeled by the member term closest to the centroid.
+the token embeddings) and runs **HDBSCAN**. Each cluster is labeled by the
+member term closest to its centre; terms in no dense region are reported as
+*unclustered* (cluster id `-1`) rather than pushed into the nearest group.
 
 This is the same readout the gate uses in stage 2 — the last layer, mean-pooled —
 and it carries the same caveat: that is the convention rather than a tuned choice
@@ -972,18 +973,45 @@ long, and short strings are where the most heads idle.
 `nmdar`, and `glutamate receptor` compete as separate rows when they're one
 concept. Clustering groups them so you read concepts instead of strings.
 
+**Why HDBSCAN and not KMeans.** KMeans has to be told how many clusters to make
+before anyone has seen the terms — and that number is not knowable in advance:
+it is a property of the corpus, which is what the run just went and got. The
+old default of 12 was a guess that then shaped the answer. HDBSCAN reads the
+number of groups off the density of the embedding cloud instead, and its own
+parameter (the smallest admissible group) is derived from the term count.
+KMeans is still one flag away — `--cluster-method kmeans` — for when a fixed
+granularity is the point, e.g. comparing two corpora at the same k.
+
+**The catch, and what is done about it.** Term embeddings are strongly
+anisotropic: mean pairwise cosine ≈ 0.93 over a typical ranked list, the same
+shared-direction effect the stage-2 gate has to deal with (*relevance_center*).
+Run density clustering on that raw cloud and everything is everyone's
+neighbour — measured on a 74-term list, HDBSCAN put 67 terms in one cluster.
+So before clustering, the cloud's mean is subtracted (removing the shared
+direction) and the result is projected onto its leading 10 principal
+components, where a density estimate still means something; 768 dimensions is
+well inside the regime where distances concentrate. On the same list that is
+the difference between one blob and eleven readable groups: `nmda receptor` /
+`glutamate receptor` / `ampa receptor` together, `blood pressure` with `aorta`,
+the imaging methods with each other. The medoid that names a cluster is still
+picked in the full cosine space.
+
 In the GUI this is the **Cluster terms** button, run on demand after a pipeline
 run rather than as part of it — the first use downloads the model.
 
 **What it produces.** The **Clusters** tab, `term_clusters.csv`, and
 `term_clusters.html` — a 2D scatter of the embedding
 space, every term a point colored by cluster, laid out with UMAP (falling back
-to t-SNE, then PCA).
+to t-SNE, then PCA). All three carry the unclustered bucket too — last in the
+tab, id `-1` in the CSV, grey in the scatter — so no term disappears just
+because it had no neighbours.
 
 **Requires.** The `embed` extra (transformers + torch), and `viz` for the
 scatter.
 
-**Controls.** Clusters (target count, default 12) · the Cluster terms button.
+**Controls.** Clustering (`hdbscan` / `kmeans`, default `hdbscan`) · Clusters
+(k) — kmeans only, greyed out otherwise · `--min-cluster-size` to override the
+derived floor · the Cluster terms button.
 
 ---
 

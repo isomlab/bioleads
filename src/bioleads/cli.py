@@ -118,8 +118,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="cluster ranked terms with PubMedBERT: writes "
                         "term_clusters.csv and colors the graph by cluster "
                         '(needs the "embed" extra)')
+    p.add_argument("--cluster-method", choices=["hdbscan", "kmeans"],
+                   default=Config.cluster_method,
+                   help="how to group the terms: hdbscan (default) infers the "
+                        "number of clusters from the embedding density and "
+                        "leaves loners unclustered; kmeans forces exactly "
+                        "--n-clusters groups")
     p.add_argument("--n-clusters", type=int, default=Config.n_clusters,
-                   help="number of term clusters when --cluster is set")
+                   help="number of term clusters, --cluster-method kmeans only")
+    p.add_argument("--min-cluster-size", type=int, default=Config.min_cluster_size,
+                   metavar="N",
+                   help="smallest group HDBSCAN will call a cluster "
+                        "(default: derived from the number of terms)")
     p.add_argument("--top-terms", type=int, default=200)
     p.add_argument("--min-doc-freq", type=int, default=2)
     p.add_argument("--scispacy-model", default="en_core_sci_sm")
@@ -151,7 +161,9 @@ def main(argv=None) -> int:
         min_paper_degree=args.min_paper_degree,
         min_author_degree=args.min_author_degree,
         min_author_papers=args.min_author_papers,
+        cluster_method=args.cluster_method,
         n_clusters=args.n_clusters,
+        min_cluster_size=args.min_cluster_size,
         expand_rounds=args.expand,
         expand_link=args.expand_link,
         expand_source=args.expand_source,

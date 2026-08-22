@@ -16,7 +16,9 @@ Mine biomedical literature for candidate biological leads. Given a set of papers
    (the ABC model): A–C pairs that share intermediates B but never co-occur
    directly are flagged as hidden associations worth investigating.
 
-Optional PubMedBERT embeddings cluster terms semantically so synonyms group together.
+Optional PubMedBERT embeddings cluster terms semantically so synonyms group
+together — density-based (HDBSCAN), so the number of groups comes from the
+terms rather than from you.
 
 **For a stage-by-stage walkthrough of the whole pipeline — what each step does,
 why it's there, and which control changes it — see [How bioleads
@@ -128,8 +130,10 @@ bioleads --pmids @seeds.txt --expand 1 --expand-strategy relevance \
 # Open discovery seeded from specific concepts:
 bioleads --pmids @seeds.txt --anchors "trpv1,inflammation" --out ./results
 
-# Cluster ranked terms (writes term_clusters.csv + colors the graph by cluster):
-bioleads --pubmed "trpv1 vasodilation" --cluster --n-clusters 10 --out ./results
+# Cluster ranked terms (writes term_clusters.csv + colors the graph by cluster).
+# How many clusters is HDBSCAN's problem, not yours; add
+# --cluster-method kmeans --n-clusters 10 if you want a fixed number:
+bioleads --pubmed "trpv1 vasodilation" --cluster --out ./results
 
 # Build the citation network and rank the most-cited papers (in-corpus + global):
 bioleads --pmids @seeds.txt --citations --out ./results
@@ -151,9 +155,11 @@ written only if the corpus has PMIDs at all), — with `--citations` —
 `citation_ranking.csv` + `citation_network.html` and `author_ranking.csv` +
 `author_network.html` (each with a `*_3d.html` alongside),
 and — with `--cluster` — `term_clusters.csv` (one row per
-term: cluster id, centroid, member) plus `term_clusters.html`, an interactive
+term: cluster id, centroid, member; unclustered terms carry id `-1`)
+plus `term_clusters.html`, an interactive
 2D scatter of the term embeddings colored by cluster (every clustered term is a
-point; centroids are starred and labeled). The 2D layout uses UMAP when
+point; centroids are starred and labeled, and the unclustered leftovers are
+drawn in grey). The 2D layout uses UMAP when
 `umap-learn` is installed (it preserves cluster structure best); otherwise it
 falls back to t-SNE, then PCA for very small term sets. With clustering on, co-occurrence
 graph nodes are *also* colored by cluster — the two views are complementary:
@@ -397,10 +403,14 @@ the same measure as degree — the largest node need not be the central one.
 
 After a run, the **Cluster terms** button groups the ranked terms semantically
 with PubMedBERT and shows them in a collapsible **Clusters** tab (centroid term
-+ members). It also writes `term_clusters.csv` to the output folder and
-`term_clusters.html` — an
-interactive 2D embedding scatter (every term a point, colored by cluster) that
-appears under **Term clusters** in the Outputs tab. Clustering runs on demand
++ members, with anything left unclustered in a bucket at the bottom). The
+**Clustering** field on the Inputs page picks the method: `hdbscan` (the
+default) finds the number of groups itself, `kmeans` takes the number from
+**Clusters (k)**, which is greyed out under `hdbscan` because it is ignored.
+
+It also writes `term_clusters.csv` to the output folder and
+`term_clusters.html` — an interactive 2D embedding scatter (every term a point,
+colored by cluster) that appears under **Term clusters** in the Outputs tab. Clustering runs on demand
 in a background thread — the first use downloads the embedding model and needs the `embed`
 extra (and `viz` for the scatter). Tkinter ships with CPython, so the GUI itself
 needs no extra dependency beyond the pipeline's own extras (e.g. `pubmed` for

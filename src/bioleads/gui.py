@@ -312,6 +312,11 @@ class BioleadsGUI:
         self._set_field_enabled(self._follow_field, not relevance)
         self._set_field_enabled(self._topk_field, relevance)
 
+    def _sync_cluster_fields(self) -> None:
+        """Grey k when the chosen method is the one that infers it."""
+        self._set_field_enabled(self._k_field,
+                                self.cluster_method_var.get() == "kmeans")
+
     @staticmethod
     def _set_field_enabled(widget, on: bool) -> None:
         """Grey out a field, label included, when the run would ignore it.
@@ -348,6 +353,7 @@ class BioleadsGUI:
         self.mindeg_paper_var = tk.IntVar(value=Config.min_paper_degree)
         self.mindeg_author_var = tk.IntVar(value=Config.min_author_degree)
         self.min_author_papers_var = tk.IntVar(value=Config.min_author_papers)
+        self.cluster_method_var = tk.StringVar(value=Config.cluster_method)
         self.nclusters_var = tk.IntVar(value=Config.n_clusters)
         self.expand_var = tk.IntVar(value=Config.expand_rounds)
         self.expand_link_var = tk.StringVar(value=Config.expand_link)
@@ -459,10 +465,28 @@ class BioleadsGUI:
                     "search — open discovery from a starting point you care "
                     "about. Leave empty to try every term in the network "
                     "(exhaustive).")
-        self._field(card, 1, "Clusters",
+        self._field(card, 1, "Clustering",
+                    self._combo(card, self.cluster_method_var,
+                                ["hdbscan", "kmeans"]),
+                    "How the ranked terms get grouped in PubMedBERT space.\n\n"
+                    "hdbscan (the default) works out how many groups there are "
+                    "from the density of the embeddings, so there is no count "
+                    "to guess before you have seen the terms; anything sitting "
+                    "in no dense region is listed as unclustered instead of "
+                    "being pushed into the nearest group.\n\n"
+                    "kmeans forces exactly Clusters (k) groups and assigns "
+                    "every term to one — pick it when a fixed granularity is "
+                    "the point. Clusters (k) is greyed out under hdbscan, "
+                    "which ignores it.")
+        self._k_field = self._field(
+                    card, 2, "Clusters (k)",
                     self._spin(card, self.nclusters_var, 2, 200),
-                    "Target number of KMeans groups in PubMedBERT space. "
-                    "Applied by the Cluster terms button, not by Run pipeline.")
+                    "How many groups KMeans should make. Ignored by hdbscan, "
+                    "which infers the number itself. Applied by the Cluster "
+                    "terms button, not by Run pipeline.")
+        self.cluster_method_var.trace_add(
+            "write", lambda *_: self._sync_cluster_fields())
+        self._sync_cluster_fields()
 
         # --- citation networks ----------------------------------------------
         card = self._section(page, "Citation networks")
@@ -592,8 +616,9 @@ class BioleadsGUI:
         self._add_tooltip(
             self.cluster_btn,
             "Groups the ranked terms in PubMedBERT space, fills the Clusters "
-            "tab, and writes the cluster table and embedding scatter. "
-            "Available after a run; the first use downloads the model.")
+            "tab, and writes the cluster table and embedding scatter. Uses the "
+            "Clustering method set on the Inputs page. Available after a run; "
+            "the first use downloads the model.")
 
     def _build_statusbar(self) -> None:
         """A dedicated bottom strip for status text + the progress indicator.
@@ -860,13 +885,17 @@ class BioleadsGUI:
             messagebox.showinfo("No terms", "Run the pipeline first to get ranked terms.")
             return
         # Carry the run's settings (embed model, batch size, seed, ...) over and
-        # only override the cluster count from the spinbox.
-        cfg = replace(self._cfg or Config(), n_clusters=int(self.nclusters_var.get()))
+        # only override the clustering controls from this page.
+        cfg = replace(self._cfg or Config(),
+                      cluster_method=self.cluster_method_var.get(),
+                      n_clusters=int(self.nclusters_var.get()))
         self._set_running(True)
         self.status_var.set("Embedding & clustering… (first run downloads the model)")
         self.clusters_tree.delete(*self.clusters_tree.get_children())
-        self._log(f"Clustering {len(terms)} terms into up to "
-                  f"{cfg.n_clusters} groups with PubMedBERT…")
+        how = (f"into up to {cfg.n_clusters} groups" if cfg.cluster_method == "kmeans"
+               else "into however many groups the embeddings show")
+        self._log(f"Clustering {len(terms)} terms {how} with PubMedBERT "
+                  f"({cfg.cluster_method})…")
         self._worker = threading.Thread(
             target=self._cluster_worker, args=(terms, cfg), daemon=True)
         self._worker.start()
@@ -903,12 +932,17 @@ class BioleadsGUI:
     def _on_clusters_done(self, clusters: list[TermCluster], scatter=None) -> None:
         self._set_running(False)
         self.status_var.set("Done.")
-        self._log(f"Built {len(clusters)} clusters.")
-        for clu in sorted(clusters, key=lambda c: len(c.terms), reverse=True):
+        n_noise = sum(len(c.terms) for c in clusters if c.is_noise)
+        self._log(f"Built {sum(1 for c in clusters if not c.is_noise)} clusters"
+                  + (f"; {n_noise} term(s) unclustered." if n_noise else "."))
+        # Real groups first, largest first; the unclustered bucket last, where
+        # it reads as leftovers rather than as the biggest finding.
+        for clu in sorted(clusters, key=lambda c: (c.is_noise, -len(c.terms))):
             members = sorted(clu.terms)
             parent = self.clusters_tree.insert(
                 "", "end",
-                text=f"#{clu.cluster_id} · {clu.centroid_term}",
+                text=("unclustered" if clu.is_noise
+                      else f"#{clu.cluster_id} · {clu.centroid_term}"),
                 values=(len(members),), open=False)
             for term in members:
                 self.clusters_tree.insert(parent, "end", text=term, values=("",))

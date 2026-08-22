@@ -75,6 +75,7 @@ def test_cluster_inherits_the_runs_config(app, monkeypatch):
     app._result = _finished_run()
     app._cfg = run_cfg
     app._out_dir = None  # keep the best-effort scatter write out of this test
+    app.cluster_method_var.set("kmeans")
     app.nclusters_var.set(25)
 
     app._on_cluster()
@@ -82,7 +83,8 @@ def test_cluster_inherits_the_runs_config(app, monkeypatch):
 
     cfg = seen["cfg"]
     assert cfg is not None, "cluster_terms was never called"
-    # The spinbox overrides only the cluster count...
+    # The page overrides only the clustering controls...
+    assert cfg.cluster_method == "kmeans"
     assert cfg.n_clusters == 25
     # ...everything else comes from the run that produced the terms.
     assert cfg.embed_model == "my/custom-model"
@@ -90,6 +92,34 @@ def test_cluster_inherits_the_runs_config(app, monkeypatch):
     assert cfg.seed == 7
     # and the run's own Config is left untouched.
     assert run_cfg.n_clusters == 4
+    assert run_cfg.cluster_method == "hdbscan"
+
+
+def test_k_is_greyed_out_under_hdbscan(app):
+    # hdbscan infers the count, so the k spinbox must not look live.
+    assert app.cluster_method_var.get() == "hdbscan"
+    assert str(app._k_field["state"]) == "disabled"
+
+    app.cluster_method_var.set("kmeans")
+    assert str(app._k_field["state"]) == "normal"
+
+    app.cluster_method_var.set("hdbscan")
+    assert str(app._k_field["state"]) == "disabled"
+
+
+def test_unclustered_bucket_is_listed_last_and_named(app):
+    from bioleads.embeddings import TermCluster
+
+    app._result = _finished_run()
+    app._on_clusters_done([
+        TermCluster(-1, ["odd", "one", "out"], "", is_noise=True),
+        TermCluster(0, ["nmdar", "nmda receptor"], "nmdar"),
+    ])
+
+    rows = [app.clusters_tree.item(i, "text")
+            for i in app.clusters_tree.get_children()]
+    # Largest group would sort first by size; the leftovers still go last.
+    assert rows == ["#0 · nmdar", "unclustered"]
 
 
 # --------------------------------------------------------------- Outputs tab --

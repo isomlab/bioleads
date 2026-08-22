@@ -89,7 +89,7 @@ corpus *is*. Every later stage describes this document set and nothing else, so
 a biased or too-small corpus produces confident, well-scored nonsense.
 
 **Controls.** PubMed query · PubMed IDs · References file · Max query hits
-(caps how many hits a PubMed search fetches, default 500).
+(caps how many hits a PubMed search fetches, default 1000).
 
 ---
 
@@ -742,7 +742,7 @@ failure in the embedding path falls back here rather than sinking the run.
 | `expand_source` | | `all` | NCBI ELink, NIH iCite, or the union |
 
 One GUI behaviour is easy to get wrong: **`Follow` is ignored** by `relevance`,
-which always does both directions and gates each. "Citation expansion rounds"
+which always does both directions and gates each. **Rounds**
 now means the same thing for both strategies — 0 is off — though `relevance`
 treats any value above 0 as one gated round each way rather than as a depth.
 
@@ -834,8 +834,8 @@ recall more cleanly at large $K$.
 
 ### Controls
 
-Citation expansion rounds (0 = off) · Follow · Source · Strategy · Relevance
-top-K · Max records.
+Strategy · Rounds (0 = off) · Follow · Source · Relevance top-K · Max corpus
+size — in that order in the **Grow the corpus** card.
 
 ## 3. Extract entities
 
@@ -1018,8 +1018,8 @@ derived floor · the Cluster terms button.
 ## 8. Map the citation networks *(optional)*
 
 **What it does.** Asks **NIH iCite** for the citation record of every
-PMID-bearing paper in the corpus, then builds two directed graphs from a single
-fetch:
+PMID-bearing paper in the corpus, then builds two kinds of directed graph from a
+single fetch — the second of them written twice, sized two different ways:
 
 **Paper → paper.** An edge means "this corpus paper cites that corpus paper" —
 links to papers outside your set are ignored, so what you see is your corpus's
@@ -1087,13 +1087,8 @@ contributed 21 of the corpus's papers inherits the links of all 21.
 | `min_paper_degree` | ✓ | — |
 | `min_author_degree` | — | ✓ |
 
-Three properties are worth knowing before you turn either up:
+Two more properties are worth knowing before you turn either up:
 
-- **It is one pass, not a k-core.** Removing a node lowers its neighbours'
-  degree, and bioleads does *not* then re-check them. A node that clears the
-  threshold on the full graph is kept even if the neighbours that got it there
-  are gone. Iterating instead would cascade a threshold of 2 into an
-  unpredictably small graph.
 - **Degree is unweighted.** An author who cites one colleague forty times has one
   connection, not forty. Edge weights still size the picture; they do not decide
   who is in it.

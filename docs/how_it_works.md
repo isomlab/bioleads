@@ -121,11 +121,29 @@ yours — `references` (backward), `cited_by` (forward), or `both` — and
 `expand_rounds` is the depth. None of the machinery in the rest of this section
 touches it: no topic profile, no negative term, no $K$.
 
-That is the whole algorithm, and its weakness is the subject of everything
-below: it adds what the citation graph links, whether or not it is about your
-topic. Use it when you want exhaustive coverage of a small, tight seed set and
-intend to filter the result yourself — and note that on the benchmark
-`relevance` reaches the same recall more cleanly at large $K$.
+**It is also the strongest arm on the measure it optimises.** Nothing in the
+benchmark retrieves more of a systematic review's reference list: `bfs` takes
+median recall 0.3252 over 12 reviews and 0.2735 over 40, the highest of any arm
+tried, and the gate's headline result is that it *matches* that recall — at
+$K = 800$, on 87% less material — not that it beats it. If your question is
+"what might I be missing", `bfs` is the ceiling.
+
+**And it is the cheap one, in the sense that matters.** It reads PMIDs and
+citation links and nothing else: no embeddings, no PubMedBERT, no `embed`
+extra, no model download, no GPU. It is deterministic, its cost is bounded by
+`expand_max`, and the link lookups are cached for a month, so a repeated walk
+costs no network at all. That is worth weighing against the section below,
+because without the `embed` extra `relevance` quietly becomes the term-overlap
+variant (*The same five steps without PubMedBERT*) — and that variant is **not**
+what the benchmark measured. On a core install the honest comparison is `bfs`
+against an unmeasured fallback, not against the numbers below.
+
+What it does not do is discriminate: it adds what the citation graph links,
+whether or not it is about your topic, which costs it precision by an order of
+magnitude (pooled 0.83% against `relevance_seeds`' 9.55%) and is the subject of
+everything below. Use `bfs` when you want coverage of a small, tight seed set
+and intend to filter the result yourself; use the gate when the corpus has to
+be clean enough to read.
 
 ### The problem `bfs` has
 

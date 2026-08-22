@@ -304,9 +304,17 @@ source. Cycles are avoided: a record already seen is never re-queued.
 
 **Relevance-guided expansion** (`--expand-strategy relevance`) is the filtered
 alternative to the plain BFS snowball that `--expand` does by default. It is not
-the default, but it is what the benchmark favours: at equal reach it beat `bfs`
-on F1 in 35 of 40 reviews at K=50 and 38 of 40 at K=100, with about ten times the
-pooled precision. Both citation directions are noisy, so neither is trusted:
+the default, but it is what the benchmark favours *on precision*: at equal reach
+it beat `bfs` on F1 in 35 of 40 reviews at K=50 and 38 of 40 at K=100, with about
+ten times the pooled precision.
+
+`bfs` keeps two advantages worth stating. It has the **highest recall of any arm
+measured** (0.3252 over 12 reviews, 0.2735 over 40) — the gate's own best result
+is matching that number at K=800, not exceeding it — and it needs **no model**:
+no embeddings, no `embed` extra, no download, and its link lookups are cached.
+Without that extra, `relevance` silently drops to a term-overlap fallback the
+benchmark never measured, so on a core install the comparison above does not
+apply. Both citation directions are noisy, so the gate trusts neither:
 
 1. **Profile from the seeds alone.** Your seed documents are the only papers
    known to be on topic, so they — and nothing else — form the **topic profile**

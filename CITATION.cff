@@ -3,8 +3,8 @@ message: "If you use this software, please cite it as below."
 title: "bioleads"
 abstract: >-
   Mine biomedical literature for enriched terms, co-occurrence networks, and
-  Swanson-style hypothesis leads from PDFs and PubMed/PMC, with optional
-  biomedical NER and PubMedBERT term clustering.
+  Swanson-style hypothesis leads from PubMed/PMC and reference-manager
+  exports, with optional biomedical NER and PubMedBERT term clustering.
 type: software
 authors:
   - family-names: Isom

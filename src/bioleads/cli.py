@@ -116,7 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "that lab is what this view is for")
     p.add_argument("--cluster", action="store_true",
                    help="cluster ranked terms with PubMedBERT: writes "
-                        "term_clusters.csv and colors the graph by cluster "
+                        "term_clusters.csv and term_clusters.html "
                         '(needs the "embed" extra)')
     p.add_argument("--cluster-method", choices=["hdbscan", "kmeans"],
                    default=Config.cluster_method,

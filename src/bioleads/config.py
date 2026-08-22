@@ -45,9 +45,9 @@ class Config:
     # HDBSCAN's smallest admissible group. 0 = derive it from the term count
     # (see _auto_min_cluster_size); raise it for fewer, broader clusters.
     min_cluster_size: int = 0
-    # Cluster ranked terms in PubMedBERT space, write term_clusters.csv, and
-    # color the co-occurrence graph by cluster. Off by default — needs the
-    # `embed` extra and downloads a model on first use.
+    # Cluster ranked terms in PubMedBERT space and write term_clusters.csv
+    # plus the embedding scatter. Off by default — needs the `embed` extra and
+    # downloads a model on first use.
     do_clustering: bool = False
 
     # --- Swanson ABC discovery ---
@@ -62,8 +62,9 @@ class Config:
     entrez_email: str = "disom.biophysics@gmail.com"
     entrez_api_key: str | None = None
     pubmed_retmax: int = 1000
-    # Upgrade open-access PubMed Central articles to full body text (intro/
-    # methods/results) when available; others fall back to title + abstract.
+    # Every document is a title + abstract. The PMC full-text upgrade that used
+    # to sit here was removed because it reweighted everything downstream —
+    # see "What gets processed" in the README for the numbers.
 
     # --- Citation expansion (snowballing) ---
     # Grow the corpus from the PMID-bearing seeds by following citation links

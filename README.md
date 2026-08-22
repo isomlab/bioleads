@@ -130,7 +130,7 @@ bioleads --pmids @seeds.txt --expand 1 --expand-strategy relevance \
 # Open discovery seeded from specific concepts:
 bioleads --pmids @seeds.txt --anchors "trpv1,inflammation" --out ./results
 
-# Cluster ranked terms (writes term_clusters.csv + colors the graph by cluster).
+# Cluster ranked terms (writes term_clusters.csv + term_clusters.html).
 # How many clusters is HDBSCAN's problem, not yours; add
 # --cluster-method kmeans --n-clusters 10 if you want a fixed number:
 bioleads --pubmed "trpv1 vasodilation" --cluster --out ./results
@@ -152,19 +152,20 @@ Outputs in `--out`: `ranked_terms.csv`, `hypothesis_candidates.csv`,
 `pmids.txt` (every PMID in the corpus — seeds and anything expansion added —
 one per line, ready to paste into PubMed or feed back in as `--pmids @file`;
 written only if the corpus has PMIDs at all), — with `--citations` —
-`citation_ranking.csv` + `citation_network.html` and `author_ranking.csv` +
-`author_network.html` (each with a `*_3d.html` alongside),
-and — with `--cluster` — `term_clusters.csv` (one row per
+`citation_ranking.csv` + `citation_network.html`, `author_ranking.csv` +
+`author_network.html`, and `author_paper_ranking.csv` +
+`author_paper_network.html` (the same senior authors sized by papers published
+into the corpus rather than by citations received; each network with a
+`*_3d.html` alongside), and — with `--cluster` — `term_clusters.csv` (one row per
 term: cluster id, centroid, member; unclustered terms carry id `-1`)
 plus `term_clusters.html`, an interactive
 2D scatter of the term embeddings colored by cluster (every clustered term is a
 point; centroids are starred and labeled, and the unclustered leftovers are
 drawn in grey). The 2D layout uses UMAP when
 `umap-learn` is installed (it preserves cluster structure best); otherwise it
-falls back to t-SNE, then PCA for very small term sets. With clustering on, co-occurrence
-graph nodes are *also* colored by cluster — the two views are complementary:
-the graph shows clusters among co-occurring terms, the scatter shows *all*
-clustered terms in the embedding space the clustering actually used.
+falls back to t-SNE, then PCA for very small term sets. The scatter is the only
+view of the clusters: since the co-occurrence network is no longer written out,
+there is no graph left to colour by cluster.
 
 ### Citation network
 
@@ -373,15 +374,17 @@ with **Run pipeline**, **Stop** and **Cluster terms** pinned below it so they
 are always reachable. Each control explains itself on hover.
 
 Everything a run *produces* is listed in the **Outputs** tab of the results
-notebook, grouped by what it describes (term co-occurrence, term clusters,
-paper citations, senior-author citations, tables), each with its path and an
+notebook, grouped by what it describes (term clusters, paper citations,
+senior-author citations, senior-author output, tables), each with its path and an
 **Open** button that hands the file to your default application. Files the run
 didn't produce stay listed but greyed, so it's visible what's missing and why —
 a `*_3d.html` row is empty when Plotly isn't installed, for example.
 
-Tick **Build them (NIH iCite)** in the Citation networks card to also build the paper→paper
-citation graph *and* the senior-author→senior-author citation graph; `citation_ranking.csv`
-and `author_ranking.csv` land in the output folder alongside the graph files.
+Tick **Build them (NIH iCite)** in the Citation networks card to also build the
+paper→paper citation graph *and* the senior-author→senior-author graph, the
+latter drawn twice — once sized by citations received in the corpus, once by
+papers published into it. `citation_ranking.csv`, `author_ranking.csv` and
+`author_paper_ranking.csv` land in the output folder alongside the graph files.
 Every network is written as both a 2D pyvis layout and a rotatable 3D Plotly
 view, listed side by side in the Outputs tab.
 
@@ -449,19 +452,24 @@ background worth scoring against, not just the arithmetic.
 
 ```
 src/bioleads/
+  config.py        every knob, with the reasoning next to it
   sources.py       PubMed/PMC + RIS/EndNote loaders, citation links -> Document
   ner.py           scispaCy NER (regex fallback)
-  enrichment.py    log-odds / hypergeometric / tf-idf ranking
-  cooccurrence.py  PMI-weighted network + pyvis HTML
+  enrichment.py    corpus-internal TF-IDF term ranking
+  cooccurrence.py  PMI-filtered term network (built, not rendered)
   graph3d.py       rotatable 3D Plotly rendering of any network
-  citations.py     paper->paper citation network (iCite) + most-cited ranking
+  citations.py     paper->paper and senior-author networks (iCite) + rankings
+  cache.py         on-disk cache for everything fetched from iCite / ELink
   discovery.py     Swanson ABC hypothesis candidates
-  embeddings.py    PubMedBERT term/text embeddings + clustering
-  expansion.py     relevance-guided two-phase citation expansion
+  embeddings.py    PubMedBERT term/text embeddings + HDBSCAN clustering
+  expansion.py     citation expansion: bfs, or the relevance-gated two-phase walk
   pipeline.py      orchestration
   cli.py           command-line entry point
   gui.py           Tkinter desktop front-end
-tests/test_smoke.py
+tests/
+  test_smoke.py    the pipeline, end to end and unit
+  test_gui.py      the GUI's run-scoped state (skipped without a display)
+  test_benchmark.py  the systematic-review benchmark harness
 ```
 
 ## Caveats

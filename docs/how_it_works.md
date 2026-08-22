@@ -1117,9 +1117,19 @@ set is built on.
 senior author, `papers` counting the corpus papers they led), and 2D + 3D
 networks for both, nodes sized by in-corpus citations.
 
+The senior-author graph is also written a second time as
+`author_paper_ranking.csv` + `author_paper_network.html` (and `_3d`), same
+authors and same citation edges but **sized by papers published into the
+corpus** rather than by citations received. It is built separately rather than
+recoloured, because the `max_graph_nodes` trim has to keep the most published
+authors here: a lab publishing steadily that nothing in the corpus cites has
+citation degree 0, and that lab is exactly what this view exists to show.
+
 **Controls.** Citation network (iCite) · Min degree — papers
 (`min_paper_degree`, `--min-paper-degree`) · Min degree — senior authors
-(`min_author_degree`, `--min-author-degree`).
+(`min_author_degree`, `--min-author-degree`) · Min papers — paper-count network
+(`min_author_papers`, `--min-author-papers`), counted in corpus papers rather
+than citation degree, for the reason just given.
 
 ---
 
@@ -1138,6 +1148,8 @@ with an Open button.
 | `citation_network.html` / `_3d.html` | stage 8: the paper network |
 | `author_ranking.csv` | stage 8: authors by in-corpus citations |
 | `author_network.html` / `_3d.html` | stage 8: the author network |
+| `author_paper_ranking.csv` | stage 8: senior authors by papers published into the corpus |
+| `author_paper_network.html` / `_3d.html` | stage 8: the same author network sized by output |
 
 ---
 

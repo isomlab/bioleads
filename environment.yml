@@ -7,7 +7,7 @@
 #   conda env create -f environment.yml
 #   conda activate bioleads
 #
-# This installs Python plus the full pipeline with PDF input, PubMed/PMC
+# This installs Python plus the full pipeline with PubMed/PMC
 # fetching, citation expansion, interactive graph viz (incl. UMAP layout for the
 # term-cluster scatter), the Tkinter GUI, and the test suite. Tkinter ships with
 # the conda-forge Python build, so `bioleads-gui` works out of the box.

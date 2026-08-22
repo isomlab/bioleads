@@ -1048,8 +1048,10 @@ def fig_depth(n=1):
 # figure comes from this list, so the two can never disagree — reorder here and
 # the captions follow.
 ORDER = [
-    ("map", fig_map),
+    # bfs comes first in stage 2 now, so the direction sizes lead and the
+    # embedding vocabulary map arrives with the relevance walk that needs it.
     ("two-directions", fig_directions),
+    ("map", fig_map),
     ("token-in-context", fig_context),
     ("head-mechanics", fig_head_mechanics),   # what a head is…
     ("layers-and-heads", fig_heads),          # …then what all 144 of them do

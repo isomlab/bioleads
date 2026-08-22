@@ -33,7 +33,7 @@ beats chance.
 ```
    ┌─ 1. Collect documents ──────── PubMed query · PMIDs · RIS/EndNote
    │
-   ├─ 2. Grow the corpus ────────── follow citations (optional)
+   ├─ 2. Grow the corpus ────────── follow citations          OFF by default
    │
    ├─ 3. Extract entities ───────── scispaCy biomedical NER
    │
@@ -43,16 +43,22 @@ beats chance.
    │
    ├─ 6. Propose hypotheses ─────── Swanson ABC over that network
    │
-   ├─ 7. Cluster terms ─────────── PubMedBERT + HDBSCAN (optional)
+   ├─ 7. Cluster terms ─────────── PubMedBERT + HDBSCAN       OFF by default
    │
-   ├─ 8. Map the citations ──────── paper→paper and lab→lab (optional)
+   ├─ 8. Map the citations ──────── paper→paper and lab→lab   on by default
    │
    └─ 9. Write outputs ─────────── CSVs + interactive HTML
 ```
 
-Stages 1–6 always run. Stages 7 and 8 are optional and independent of each
-other. Each stage consumes only what the stage above it produced, so a weak
-result usually traces to one specific step — the sections below say which.
+**What a stock run actually does:** 1, 3, 4, 5, 6, 8, 9. Stage 2 needs
+`expand_rounds ≥ 1` (`Rounds` in the GUI) and stage 7 needs `--cluster` (the
+**Cluster terms** button); stage 8 is on unless you turn it off. So the two
+stages this page spends the most words on are the two a default run skips —
+worth knowing before you read stage 2, which is the longest section here and
+mostly describes a walk that is not the default one either.
+
+Each stage consumes only what the stage above it produced, so a weak result
+usually traces to one specific step — the sections below say which.
 
 ---
 
@@ -95,45 +101,37 @@ a biased or too-small corpus produces confident, well-scored nonsense.
 
 ## 2. Grow the corpus by following citations
 
-**What it does.** Optional. Starts from the documents that carry a PMID, walks
-the citation graph outward, and appends what it finds. A reference record with
-no accession can't seed this — there is nothing to follow.
+**What it does.** Starts from the documents that carry a PMID, walks the
+citation graph outward, and appends what it finds. A reference record with no
+accession can't seed this — there is nothing to follow.
 
-Before any of the mechanism, a map of the vocabulary. Everything in this stage is
-one idea — a list of numbers — used at four sizes, and every term below names a
-different size of it.
+**It is off until you turn it on.** `expand_rounds` is `0` by default, so a
+stock run never enters this stage: the corpus stays exactly what stage 1
+collected. Set it to 1 or more and one of two walks runs — **`bfs`**, the
+default, or **`relevance`**, an opt-in gate that costs a model download and
+measured much cleaner. The rest of this section is mostly about the second one,
+which is the longest part of this page and the part a default run skips
+entirely.
 
-![Figure 1 — the pieces, and how they fit together](figures/01-map.svg)
+### The default walk: `bfs`
 
-The middle band is the language model. bioleads does not touch it: it is used
-as-is and only ever asked for one thing, a vector per paper. Every decision this
-stage makes happens in the bottom band.
+Plain snowball, no gating. Each round takes the current frontier, adds
+everything linked to it, and chases those next, up to `expand_max`. Direction is
+yours — `references` (backward), `cited_by` (forward), or `both` — and
+`expand_rounds` is the depth. None of the machinery in the rest of this section
+touches it: no topic profile, no negative term, no $K$.
 
-Two phrases in that band are worth unpacking, because both are easy to read
-wrongly.
+That is the whole algorithm, and its weakness is the subject of everything
+below: it adds what the citation graph links, whether or not it is about your
+topic. Use it when you want exhaustive coverage of a small, tight seed set and
+intend to filter the result yourself — and note that on the benchmark
+`relevance` reaches the same recall more cleanly at large $K$.
 
-**"A 64-wide slice"** does not mean the head is handed 64 of the token's numbers.
-Every head sees the token *whole*, all 768. What is cut into twelve is the
-**weights**: the layer holds a 768 × 768 block of them, head 4 uses columns
-192–255, and putting 768 numbers through 64 columns gives 64 numbers back. The
-other eleven heads use the other eleven blocks of columns, and their eleven
-answers join back up to 768. So the heads differ in *which weights they apply*,
-never in which part of the token they get.
-
-**"Rewritten twelve times over"** means the token's vector is replaced at every
-layer, each version built from the one before. No single step changes it much —
-consecutive versions stay above 0.79 cosine, and mostly above 0.95 — but the
-changes compound. By the final layer the vector retains a cosine of **0.403** to
-the one that entered layer 1. It never stops being `muscle`; it stops being
-`muscle` in general and becomes `muscle` in this sentence. What each of those
-twelve rounds contributes, and whether this stage needs all of them, is measured
-in step 1.
-
-### The problem
+### The problem `bfs` has
 
 Every seed sits between two very different sets of papers.
 
-![Figure 2 — the two citation directions, drawn to scale](figures/02-two-directions.svg)
+![Figure 1 — the two citation directions, drawn to scale](figures/01-two-directions.svg)
 
 Those counts are measured, not illustrative: across the systematic-review seed
 sets in [the benchmark](benchmark.md), one round backward yielded 2,342 papers
@@ -159,11 +157,44 @@ bioleads' answer is to treat **the seed papers as the definition of the topic** 
 they are the only papers known to be on topic, because you chose them — and to
 make every candidate earn its place against them.
 
+### The other walk: `relevance`
 
-What follows is one continuous geometric story. Papers become arrows; the seeds
-define a direction; candidates are ranked by the angle they make with it; and a
-correction can rotate that direction away from the kinds of paper that keep
-scoring well without belonging.
+Everything from here to the end of stage 2 describes this walk, reached with
+`--expand-strategy relevance` (`Strategy` in the GUI). What follows is one
+continuous geometric story. Papers become arrows; the seeds define a direction;
+candidates are ranked by the angle they make with it; and a correction can
+rotate that direction away from the kinds of paper that keep scoring well
+without belonging.
+
+Before any of the mechanism, a map of the vocabulary. Everything in this walk is
+one idea — a list of numbers — used at four sizes, and every term below names a
+different size of it.
+
+![Figure 2 — the pieces, and how they fit together](figures/02-map.svg)
+
+The middle band is the language model. bioleads does not touch it: it is used
+as-is and only ever asked for one thing, a vector per paper. Every decision the
+gate makes happens in the bottom band.
+
+Two phrases in that band are worth unpacking, because both are easy to read
+wrongly.
+
+**"A 64-wide slice"** does not mean the head is handed 64 of the token's numbers.
+Every head sees the token *whole*, all 768. What is cut into twelve is the
+**weights**: the layer holds a 768 × 768 block of them, head 4 uses columns
+192–255, and putting 768 numbers through 64 columns gives 64 numbers back. The
+other eleven heads use the other eleven blocks of columns, and their eleven
+answers join back up to 768. So the heads differ in *which weights they apply*,
+never in which part of the token they get.
+
+**"Rewritten twelve times over"** means the token's vector is replaced at every
+layer, each version built from the one before. No single step changes it much —
+consecutive versions stay above 0.79 cosine, and mostly above 0.95 — but the
+changes compound. By the final layer the vector retains a cosine of **0.403** to
+the one that entered layer 1. It never stops being `muscle`; it stops being
+`muscle` in general and becomes `muscle` in this sentence. What each of those
+twelve rounds contributes, and whether this stage needs all of them, is measured
+in step 1.
 
 ### Step 1 · Every paper becomes a vector
 
@@ -776,16 +807,6 @@ topic-labelled benchmark would be the independent check.
   are close.
 - **No PMIDs, no expansion.** A corpus of reference records that carry no
   accession cannot seed this at all.
-
-### The other strategy: `bfs`
-
-Plain snowball, no gating — and the default, though none of the machinery
-above applies to it: no profile, no negative term, no $K$. Each round
-takes the current frontier, adds everything linked to it, and chases those next,
-up to the record cap. Direction is yours: `references`, `cited_by`, or `both`.
-Use it when you want exhaustive coverage of a small, tight seed set and intend to
-filter yourself — noting that on the benchmark `relevance` reaches the same
-recall more cleanly at large $K$.
 
 ### Controls
 

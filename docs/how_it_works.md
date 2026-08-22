@@ -540,27 +540,15 @@ subjects averages to a direction in the gap between them, and can rank papers
 from *neither* highly.
 
 It is tempting to read $\lVert \bar{\mathbf{e}}_S \rVert$ back out as a
-"seed coherence" diagnostic. **That was tried and it does not work**, for a
-reason worth knowing about the embedding space itself. Mean-pooled PubMedBERT
-vectors are strongly *anisotropic*: they occupy a narrow cone rather than
-spreading over the sphere. Measured on five deliberately unrelated papers — gut
-microbiome, HIV virology, urban blight, microglia, cervical cancer screening —
-
-| quantity | value |
-|---|---|
-| pairwise cosine between unrelated papers | 0.986 (range 0.983–0.991) |
-| $\lVert \bar{\mathbf{e}}_S \rVert$ for those five | **0.9945** |
-| the same, after removing the shared direction | −0.25 mean pairwise |
-
-About **99.5% of every unit document vector is one direction common to all
-biomedical text**, leaving roughly 10% that is about the paper. So the centroid
-norm reads ~0.99 whether the seeds share a topic or not, and cannot distinguish
-the two. Centring fixes the geometry — unrelated papers become correctly
-dissimilar — but centring a set on its own mean makes the mean pairwise cosine
-exactly $-1/(k-1)$, a function of $k$ alone, so a self-referential version
-carries no information either. A usable diagnostic would have to centre on an
-external background, and would need validating against seed sets of known
-coherence.
+"seed coherence" diagnostic. **That was tried and it does not work**, because
+almost all of that length is the shared direction every biomedical vector
+carries — see *[the embedding space is a narrow cone](#appendix--the-embedding-space-is-a-narrow-cone)*. Five deliberately unrelated papers give
+$\lVert \bar{\mathbf{e}}_S \rVert = 0.9945$, so the norm reads ~0.99 whether
+the seeds share a topic or not. Centring fixes the geometry, but centring a set
+on its own mean makes the mean pairwise cosine exactly $-1/(k-1)$, a function of
+$k$ alone, so the self-referential version carries no information either. A
+usable diagnostic would have to centre on an external background, and would need
+validating against seed sets of known coherence.
 
 The gate itself is unaffected, because it never uses absolute magnitudes — it
 ranks. But it is the reason step 3 insists the ranking, not the score, is the
@@ -584,58 +572,25 @@ In practice biomedical abstracts all occupy broadly similar semantic space, so
 absolute values cluster high and mean little on their own — measured across a
 real candidate pool, every raw cosine falls between 0.985 and 0.991.
 
-It is worth seeing *why*, because it looks like a bug and is not. Of the 768
-numbers, **one is very nearly the same for every text there is**:
-
-![Figure 11 — one dimension holds about the same value for every text](figures/11-shared-direction.svg)
-
-Dimension 424 sits at roughly −0.96 for a TRPV1 paper, a wheat-fertiliser paper,
-a microglia paper, and the sentence "the cat sat on the mat" alike, and accounts
-for about 93% of each vector's squared length. Two documents are therefore ~93%
-identical before either one says anything — which is the whole explanation for
-scores that never leave the high nineties. Language models are known to do this;
-the vectors occupy a narrow cone rather than spreading over the sphere. **The useful
+That is not a bug: one of the 768 numbers is very nearly the same for every text
+there is, so two documents are ~93% identical before either says anything — see
+*[the embedding space is a narrow cone](#appendix--the-embedding-space-is-a-narrow-cone)* for where
+that comes from. The consequence here is the one that matters: **the useful
 signal is the ranking**, which is why the cut in step 5 is a rank, not a
 threshold.
 
-**Where the 0.99s come from.** The cone is not something the biomedical
-vocabulary does, and it is worth being able to say what does it, because it is
-the one property of the representation that every score in this stage inherits.
-Traced back through the model, the lookup table turns out to be innocent and
-three later steps build it:
+It also makes the raw number useless to *report*, so the two jobs are split.
+Every kept document carries a `relevance` score in its metadata, and a column of
+0.98s tells a reader nothing; the score written out is the **centred** one, which
+widens the spread about 30× into a readable range, and the kept list is ordered
+by it. Selection stays on the raw cosine that was benchmarked.
 
-| where | what happens to dimension 424 |
-|---|---|
-| the 30,522-row lookup table | nothing. Its rows are near-orthogonal — mean pairwise cosine **0.068** — and no dimension dominates: the largest carries 0.63% of a row's squared length, and 424 carries **0.19%** |
-| assembling the input | the moment word, position and segment vectors are added and rescaled, 424 carries the largest average value of any dimension (−4.1). The trained parameters single it out: that step's bias for it is **+1.62**, where no other dimension's exceeds 0.39 |
-| the twelve layers | they amplify it. A token's share of squared length at 424 rises from **15%** at the input to **76%** by layer 12 |
-| averaging the tokens | it concentrates further, because every token carries it and the informative parts partly cancel: the pooled paper vector sits at **92%** where its own tokens sit at 76% |
-
-So the crowding is an artefact of one hard-wired direction, amplified by depth
-and then by pooling — not a statement that all biomedical papers are alike. It is
-also entirely removable: centring the pool (below) takes dimension 424 from 91%
-of a vector's squared length to **0.2%**, and the mean cosine between papers from
-0.985 to **−0.002**. Whether that is worth doing is the next question, and the
-answer turns out to be "for the score you read, not the one that selects".
-
-That also makes the raw number useless to *report*. Every kept document carries a
-`relevance` score in its metadata, and a column of 0.98s tells a reader nothing.
-So the score written out is the **centred** one — the candidate pool's mean
-removed, which widens the spread about 30× into a readable range — while
-selection stays on the raw cosine that was benchmarked.
-
-Centring was tested for selection too, and does not help. Over 40 reviews it
+Centring was tested for selection too, and does not help: over 40 reviews it
 loses on median F1 at both cutoffs (K=50: 0.0958 → 0.0891; K=100: 0.0971 →
 0.0868) and on the paired comparison (23–16 at K=50, 19–18 at K=100), while
-finding the same number of true papers — 308 either way at K=50. The reason is
-mechanical: centring changes the *spread* of the scores about 30× but barely
-their *order* (Spearman ρ ≈ 0.89, 5/5 overlap in the top 5), and a rank cutoff
-only reads order. So it is applied to the reported value only, where a readable
-range is exactly what is wanted.
-
-So the two numbers do different jobs: the raw cosine decides *which* documents
-survive, and the centred one is what you read — and what the kept list is
-ordered by, highest first.
+finding the same number of true papers — 308 either way at K=50. Centring moves
+the spread, not the order (Spearman ρ ≈ 0.89, 5/5 overlap in the top 5), and a
+rank cutoff only reads order.
 
 ### Step 4 · The gate learns what the topic is not
 
@@ -647,7 +602,7 @@ papers use that vocabulary too. No amount of aiming at the topic separates them.
 So the gate also learns from its own worst matches. Take the lowest-scoring
 candidates, average them into a direction, and tilt the topic vector away from it:
 
-![Figure 12 — the negative term rotates the query vector away from the worst candidates](figures/12-negative-term.svg)
+![Figure 11 — the negative term rotates the query vector away from the worst candidates](figures/11-negative-term.svg)
 
 $$\hat{\mathbf{n}} \;=\; \frac{\bar{\mathbf{e}}_N}{\lVert\bar{\mathbf{e}}_N\rVert}, \qquad \mathbf{q} \;=\; \frac{\mathbf{q}_0 - \gamma\,\hat{\mathbf{n}}}{\lVert \mathbf{q}_0 - \gamma\,\hat{\mathbf{n}} \rVert}$$
 
@@ -694,7 +649,7 @@ the corpus gets.
 
 Benchmarked, precision falls and recall rises as $K$ grows (12 reviews):
 
-![Figure 13 — precision falls and recall rises as K grows](figures/13-top-k-tradeoff.svg)
+![Figure 12 — precision falls and recall rises as K grows](figures/12-top-k-tradeoff.svg)
 
 The bottom two rows are the point: **at $K = 800$ the gate reaches exactly the
 recall of unfiltered snowballing, 0.3252, on 87% less material.** The recall gap
@@ -982,16 +937,15 @@ parameter (the smallest admissible group) is derived from the term count.
 KMeans is still one flag away — `--cluster-method kmeans` — for when a fixed
 granularity is the point, e.g. comparing two corpora at the same k.
 
-**The catch, and what is done about it.** Term embeddings are strongly
-anisotropic: mean pairwise cosine ≈ 0.93 over a typical ranked list, the same
-shared-direction effect the stage-2 gate has to deal with (*relevance_center*).
-Run density clustering on that raw cloud and everything is everyone's
-neighbour — measured on a 74-term list, HDBSCAN put 67 terms in one cluster.
-So before clustering, the cloud's mean is subtracted (removing the shared
-direction) and the result is projected onto its leading 10 principal
-components, where a density estimate still means something; 768 dimensions is
-well inside the regime where distances concentrate. On the same list that is
-the difference between one blob and eleven readable groups: `nmda receptor` /
+**The catch, and what is done about it.** Term vectors sit in the same narrow
+cone as document vectors — mean pairwise cosine ≈ 0.93 over a typical ranked
+list (*[the embedding space is a narrow cone](#appendix--the-embedding-space-is-a-narrow-cone)*). Run
+density clustering on that raw cloud and everything is everyone's neighbour:
+measured on a 74-term list, HDBSCAN put 67 terms in one cluster. So the cloud's
+mean is subtracted first and the result projected onto its leading 10 principal
+components — 768 dimensions is well inside the regime where distances
+concentrate and any density estimate goes flat. On the same list that is the
+difference between one blob and eleven readable groups: `nmda receptor` /
 `glutamate receptor` / `ampa receptor` together, `blood pressure` with `aorta`,
 the imaging methods with each other. The medoid that names a cluster is still
 picked in the full cosine space.
@@ -1145,6 +1099,63 @@ with an Open button.
 | `author_network.html` / `_3d.html` | stage 8: the author network |
 | `author_paper_ranking.csv` | stage 8: senior authors by papers published into the corpus |
 | `author_paper_network.html` / `_3d.html` | stage 8: the same author network sized by output |
+
+---
+
+## Appendix · The embedding space is a narrow cone
+
+Two stages read PubMedBERT vectors — the relevance gate in stage 2 and the
+clustering in stage 7 — and both inherit the same property of that space, so it
+is described once here and cited from both.
+
+**The measurement.** Vectors that should be unrelated are not. Five deliberately
+unrelated papers — gut microbiome, HIV virology, urban blight, microglia,
+cervical cancer screening — sit at pairwise cosine **0.986** (range 0.983–0.991),
+and a real candidate pool's scores all fall between **0.985 and 0.991**. Term
+vectors do the same thing a little less severely: mean pairwise cosine **≈0.93**
+over a typical ranked term list. The vectors occupy a narrow cone rather than
+spreading over the sphere — a known property of language models, not a bug in
+bioleads and not a statement that all biomedical text is alike.
+
+![Figure 13 — one dimension holds about the same value for every text](figures/13-shared-direction.svg)
+
+**Where it comes from.** One direction does nearly all of it. Dimension 424 sits
+at roughly −0.96 for a TRPV1 paper, a wheat-fertiliser paper, a microglia paper
+and the sentence "the cat sat on the mat" alike, and accounts for about **93% of
+each vector's squared length** — two documents are ~93% identical before either
+says anything. Traced back through the model, the lookup table is innocent and
+three later steps build it:
+
+| where | what happens to dimension 424 |
+|---|---|
+| the 30,522-row lookup table | nothing. Its rows are near-orthogonal — mean pairwise cosine **0.068** — and no dimension dominates: the largest carries 0.63% of a row's squared length, and 424 carries **0.19%** |
+| assembling the input | the moment word, position and segment vectors are added and rescaled, 424 carries the largest average value of any dimension (−4.1). The trained parameters single it out: that step's bias for it is **+1.62**, where no other dimension's exceeds 0.39 |
+| the twelve layers | they amplify it. A token's share of squared length at 424 rises from **15%** at the input to **76%** by layer 12 |
+| averaging the tokens | it concentrates further, because every token carries it and the informative parts partly cancel: the pooled paper vector sits at **92%** where its own tokens sit at 76% |
+
+So the crowding is an artefact of one hard-wired direction, amplified by depth
+and then by pooling. About **99.5% of every unit document vector is that shared
+direction**, leaving roughly 10% that is about the paper.
+
+**Removing it works.** Subtracting the pool's mean — *centring* — takes dimension
+424 from 91% of a vector's squared length to **0.2%**, and the mean cosine
+between unrelated papers from 0.985 to **−0.002**. Whether that is worth doing
+depends on what the numbers are for, and the three answers differ:
+
+- **Selecting** (stage 2, step 3): no. Centring changes the *spread* of the
+  scores about 30× but barely their *order* (Spearman ρ ≈ 0.89), and a rank
+  cutoff only reads order — measured over 40 reviews it slightly *loses*.
+  Selection stays on the raw cosine.
+- **Reporting** (stage 2, step 3): yes. A column of 0.98s tells a reader nothing,
+  so the `relevance` score written into a kept document's metadata is the centred
+  one.
+- **Clustering** (stage 7): mandatory. Density-based clustering cannot work in a
+  cone where every term is every other term's neighbour, so terms are centred
+  *and* projected to ten dimensions before HDBSCAN sees them.
+
+The general rule the three share: **the ranking is the signal, the absolute value
+is not.** Any use of these vectors that reads a raw cosine as a quantity, rather
+than comparing one against another, is reading the shared direction.
 
 ---
 

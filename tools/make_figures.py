@@ -1058,9 +1058,10 @@ ORDER = [
     ("tokens-to-vector", fig_tokens),   # the recap, after all five steps are told
     ("seed-direction", fig_centroid),
     ("scoring-by-angle", fig_angle),
-    ("shared-direction", fig_shared),
     ("negative-term", fig_rocchio),
     ("top-k-tradeoff", fig_topk),
+    # Last: the cone is explained once in the appendix, cited by stages 2 and 7.
+    ("shared-direction", fig_shared),
 ]
 
 

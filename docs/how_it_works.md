@@ -753,47 +753,35 @@ treats any value above 0 as one gated round each way rather than as a depth.
 ### What the measurements showed
 
 This design replaced an earlier one **on evidence**, and the evidence is kept
-visible because it contradicts the intuition the original was built on. Method
-and full tables: [docs/benchmark.md](benchmark.md). Ground truth is a systematic
-review's reference list; seeds are sampled from it; each arm tries to recover the
-rest.
+visible because it contradicts the intuition the original was built on. Method,
+full tables and the sweeps: [docs/benchmark.md](benchmark.md). Ground truth is a
+systematic review's reference list; seeds are sampled from it; each arm tries to
+recover the rest.
+
+**Read the absolute numbers with care.** Recovering a whole reference list from
+a handful of seeds is an unforgiving target, so every arm scores low and an F1
+of 0.10 is the scale rather than a failing grade. The numbers rank the arms
+against each other under identical conditions; they are not a claim about how
+much of your own literature a run will find.
 
 **The original design** profiled on the seeds *plus* their forward citers, added
 every citer ungated, and filtered only backward references — on the theory that
 citing papers converge on a seed's topic while reference lists sprawl.
 
-**The asymmetry runs the other way.** Over 40 reviews, backward was *more*
-precise than forward in **33 of 40**: forward P 0.0152 / R 0.1154 against backward
-P 0.0530 / R 0.1667. Comparable true hits (403 vs 397), but forward drags 2.88×
-the volume.
+Two measurements took it apart:
 
-**The gate governed 5% of the output.** Backward references were 2,342 of the
-~49,700 documents returned; the other ~95% were ungated forward citers. The
-profile, the negative term and $K$ were all tuning one twentieth of the result —
-and the cleaner twentieth. That is also why $\gamma$ looked inert: $\gamma = 0
-\to 0.25$ moved the total from 172 hits to **173**, one document across ~48,000
-retrieved. Re-running on full abstracts instead of titles changed nothing
-(172 / 173 / 172), refuting the obvious "scoring fidelity" explanation.
+- **The asymmetry runs the other way.** Over 40 reviews, backward was *more*
+  precise than forward in **33 of 40** (P 0.0530 against 0.0152), while forward
+  dragged 2.88× the volume for comparable true hits.
+- **The gate governed 5% of the output.** Backward references were 2,342 of the
+  ~49,700 documents returned; the other ~95% were ungated forward citers. The
+  profile, the negative term and $K$ were all tuning one twentieth of the
+  result — which is also why $\gamma$ looked inert, moving a single document
+  across twelve reviews.
 
-**Gating the other way is much better** (12 reviews):
-
-| arm | median P | median R | median F1 | retrieved | pooled P |
-|---|---|---|---|---|---|
-| `relevance` (original) | 0.0247 | 0.2659 | 0.0434 | 47,974 | 0.36% |
-| `both` (= bfs) | 0.0244 | 0.3252 | 0.0442 | 49,683 | 0.41% |
-| `relevance_fwd` | 0.0520 | 0.1760 | 0.0718 | 2,712 | 4.46% |
-| **`relevance_seeds`** | **0.0854** | 0.1406 | **0.0927** | **975** | **10.56%** |
-
-`relevance_fwd` inverts the original (profile on backward, gate forward);
-`relevance_seeds` profiles on the **seeds alone** and gates both. The latter wins:
-better F1 in 10 of 12 reviews, better precision in 11 of 12, and better than
-`relevance_fwd` in 11 of 12. Because the arm *least* exposed to the circularity
-worry — the ground truth is itself a reference list, which could flatter an arm
-that profiles on references — is the strongest, this is not an artefact.
-**`relevance_seeds` is what stage 2 now implements.**
-
-**Confirmed at 40 reviews.** The gate comparisons above are 12 reviews; re-run
-on the 40-review set they hold and strengthen:
+**What replaced it** — profile on the seeds alone, gate both directions — is the
+`relevance_seeds` arm, and it wins on every summary the benchmark reports
+(40 reviews):
 
 | arm | median P | median R | median F1 | pooled P | beats `bfs` |
 |---|---|---|---|---|---|
@@ -803,15 +791,11 @@ on the 40-review set they hold and strengthen:
 | `relevance_seeds` K=100 | 0.0665 | 0.2025 | **0.0971** | 7.18% | **38/40** |
 
 At K=100 the gate finds 455 of `bfs`'s 718 hits from 6,336 documents rather than
-86,155 — 63% of the findings on 7% of the material.
+86,155 — 63% of the findings on 7% of the material. K=50 and K=100 are close
+enough that the choice is a precision/recall preference; the paired records are
+in [benchmark.md](benchmark.md).
 
-K=50 and K=100 are effectively tied on quality and the two summary statistics
-disagree about which leads: K=100 has the better median F1 (0.0971 vs 0.0958)
-while K=50 wins the paired comparison (22 of 40 against 17). Read that as a
-precision/recall preference rather than a quality difference — K=100 wins recall
-in 36 of 40, K=50 wins precision in 33 of 40.
-
-**Caveats.** Scoring used iCite titles, though the abstract re-run agreed. Ground
+**Caveats.** Scoring used iCite titles, though an abstract re-run agreed. Ground
 truth is a reference list, which may favour backward-ish arms in general; a
 topic-labelled benchmark would be the independent check.
 

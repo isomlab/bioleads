@@ -30,6 +30,22 @@ the same NIH Open Citation Collection data that iCite serves:
 Reported as **median** precision / recall / F1 across reviews, because the
 per-review distributions are skewed and a mean would follow the outliers.
 
+### How to read the absolute numbers
+
+**They are low by construction, and only meaningful against each other.** The
+task set here is to recover an entire systematic review's reference list — work
+that took its authors months of reading — from a handful of seeds and one round
+of citation links. An F1 of 0.10 is not a failing grade on that task; it is the
+scale the task lives on. Nothing here should be read as "the tool retrieves 9%
+of what matters" in any absolute sense, and the numbers do not transfer to your
+own corpus, where you choose the seeds deliberately rather than by random
+sample.
+
+What they *are* good for is ranking the arms against one another under identical
+conditions, which is the only question the benchmark was built to answer. A
+tenfold difference in pooled precision between two arms is a real tenfold
+difference; the 0.0958 itself is an artefact of an unforgiving target.
+
 ### The fairness correction
 
 A paper published *after* the review cannot possibly appear in its reference
@@ -105,17 +121,52 @@ by median F1 with its delta against `gamma=0`.
 
 The design predicts **forward wins on precision and loses on recall**. The first
 run at scale (40 reviews, 5 seeds) found the opposite: backward won on *both*, in
-33 of 40 reviews. See [How bioleads works](how_it_works.md#what-the-measurements-showed)
-for the numbers and what follows from them.
+33 of 40 reviews — forward P 0.0152 / R 0.1154 against backward P 0.0530 /
+R 0.1667, comparable true hits (403 against 397) but 2.88× the volume dragged in.
+[Stage 2](how_it_works.md#what-the-measurements-showed) tells the story of what
+that did to the design.
 
-The gamma sweep is measured in the same place. Headline: at the default
-`rocchio_gamma=0.25` the negative term moves one document across twelve reviews,
-and in the design that then shipped the gate governed only ~5% of what the
-strategy returned — the other ~95% being forward citers admitted without ever
-meeting it. (That is the finding that produced `relevance_seeds`, where the gate
-governs everything.) Both were re-run with `--abstracts` (title + abstract
-scoring) and are unchanged — richer text does not rescue the gate, so the cause
-is structural rather than a scoring-fidelity artefact.
+### The gate comparison, 12 reviews
+
+| arm | median P | median R | median F1 | retrieved | pooled P |
+|---|---|---|---|---|---|
+| `relevance` (original) | 0.0247 | 0.2659 | 0.0434 | 47,974 | 0.36% |
+| `both` (= bfs) | 0.0244 | 0.3252 | 0.0442 | 49,683 | 0.41% |
+| `relevance_fwd` | 0.0520 | 0.1760 | 0.0718 | 2,712 | 4.46% |
+| **`relevance_seeds`** | **0.0854** | 0.1406 | **0.0927** | **975** | **10.56%** |
+
+`relevance_seeds` wins on F1 in 10 of 12 reviews, on precision in 11 of 12, and
+beats `relevance_fwd` in 11 of 12. The arm *least* exposed to the circularity
+worry — the ground truth is itself a reference list, which could flatter an arm
+that profiles on references — is the strongest, so this is not an artefact of
+the target. The 40-review confirmation is in
+[stage 2](how_it_works.md#what-the-measurements-showed).
+
+### The gamma sweep, and why it was inert
+
+At the default `rocchio_gamma=0.25` the negative term moves **one document**
+across twelve reviews: $\gamma = 0 \to 0.25$ took the total from 172 hits to
+173, one document in ~48,000 retrieved.
+
+That is not a verdict on the negative term, it is a verdict on where it sat. In
+the design that then shipped, the gate governed only ~5% of what the strategy
+returned — backward references were 2,342 of ~49,700 documents, and the other
+~95% were forward citers admitted without ever meeting the gate. The profile,
+the negative term and $K$ were all tuning one twentieth of the output, and the
+cleaner twentieth at that. That is the finding that produced `relevance_seeds`,
+where the gate governs everything.
+
+Both results were re-run with `--abstracts` (title + abstract scoring) and are
+unchanged — 172 / 173 / 172 — so richer text does not rescue the gate and the
+cause is structural rather than a scoring-fidelity artefact.
+
+### K = 50 against K = 100
+
+The two are effectively tied on quality, and the two summary statistics disagree
+about which leads: K=100 has the better median F1 (0.0971 against 0.0958) while
+K=50 wins the paired comparison, 22 of 40 against 17. Read it as a
+precision/recall preference rather than a quality difference — K=100 wins recall
+in 36 of 40, K=50 wins precision in 33 of 40.
 
 ## The top-K sweep
 

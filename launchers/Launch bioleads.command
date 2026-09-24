@@ -91,8 +91,61 @@ update_env() {
     fi
 }
 
+# --- make sure the env can actually import the app ------------------------------
+# The app is installed EDITABLE, which is just a .pth file in the environment holding
+# an absolute path to this source tree. Move or rename the repo and that path goes
+# stale: the bioleads-gui command still exists and looks healthy, but importing it
+# fails with ModuleNotFoundError — or worse, silently imports an older copy still
+# sitting at the old location. Both have happened. So check that the environment
+# imports THIS tree, and repoint it if it does not.
+
+app_src() {
+    env -u PYTHONPATH "$CONDA" run --no-capture-output -n "$ENV_NAME" python - 2>/dev/null <<'PYEOF' | tail -1
+import os
+try:
+    import bioleads
+    print(os.path.realpath(os.path.dirname(os.path.dirname(bioleads.__file__))))
+except Exception:
+    print("")
+PYEOF
+}
+
+ensure_installed() {
+    local want got
+    want="$(cd "$REPO/src" 2>/dev/null && pwd -P)"
+    [ -n "$want" ] || return 0
+    got="$(app_src)"
+    [ "$got" = "$want" ] && return 0
+
+    if [ -z "$got" ]; then
+        echo "The app is not installed in the '$ENV_NAME' environment — installing it…"
+    else
+        echo "The environment is pointing at a different copy of bioleads:"
+        echo "    $got"
+        echo "Repointing it at this one…"
+    fi
+    env -u PYTHONPATH "$CONDA" run --no-capture-output -n "$ENV_NAME" \
+        python -m pip install -e "$REPO" --no-deps --quiet >/dev/null 2>&1
+
+    got="$(app_src)"
+    if [ "$got" = "$want" ]; then
+        echo "  done."
+        return 0
+    fi
+    echo
+    echo "bioleads still cannot be imported from:"
+    echo "    $want"
+    [ -n "$got" ] && echo "The environment is using: $got"
+    echo
+    echo "Try rebuilding the environment from scratch:"
+    echo "    conda env remove -n $ENV_NAME"
+    echo "then double-click this launcher again."
+    pause_and_exit 1
+}
+
 update_repo
 update_env
+ensure_installed
 
 echo "Starting bioleads…"
 # Isolate from the user's Python environment: PYTHONPATH is cleared (entries there

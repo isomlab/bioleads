@@ -53,6 +53,40 @@ if defined NEEDS_ENV pushd "%REPO%"
 if defined NEEDS_ENV %CONDA% env update -f environment.yml
 if defined NEEDS_ENV popd
 
+REM --- make sure the env can actually import the app --------------------------
+REM The app is installed EDITABLE: a .pth file in the environment holding an
+REM absolute path to this source tree. Move or rename the repo and that path goes
+REM stale, so bioleads-gui still exists but importing it fails - or silently picks
+REM up an older copy left at the old location. Check, and repoint if needed.
+set APPSRC=
+for /f "delims=" %%P in ('%CONDA% run --no-capture-output -n %ENV_NAME% python -c "import os,bioleads;print(os.path.realpath(os.path.dirname(os.path.dirname(bioleads.__file__))))" 2^>nul') do set APPSRC=%%P
+for /f "delims=" %%W in ('cd /d "%REPO%\src" ^&^& cd') do set WANTSRC=%%W
+if /i not "%APPSRC%"=="%WANTSRC%" (
+    if "%APPSRC%"=="" (
+        echo The app is not installed in the %ENV_NAME% environment - installing it...
+    ) else (
+        echo The environment is pointing at a different copy of bioleads:
+        echo     %APPSRC%
+        echo Repointing it at this one...
+    )
+    %CONDA% run --no-capture-output -n %ENV_NAME% python -m pip install -e "%REPO%" --no-deps --quiet >nul 2>nul
+    set APPSRC=
+    for /f "delims=" %%P in ('%CONDA% run --no-capture-output -n %ENV_NAME% python -c "import os,bioleads;print(os.path.realpath(os.path.dirname(os.path.dirname(bioleads.__file__))))" 2^>nul') do set APPSRC=%%P
+    if "%APPSRC%"=="" (
+        echo.
+        echo bioleads still cannot be imported from:
+        echo     %WANTSRC%
+        echo.
+        echo Try rebuilding the environment from scratch:
+        echo     conda env remove -n %ENV_NAME%
+        echo then double-click this launcher again.
+        echo.
+        pause
+        exit /b 1
+    )
+    echo   done.
+)
+
 echo Starting bioleads...
 set PYTHONPATH=
 cd /d "%USERPROFILE%"

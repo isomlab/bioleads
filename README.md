@@ -148,7 +148,28 @@ scroll to zoom; laid out in shells ranked by degree outward from the busiest nod
 The term co-occurrence graph is **not** rendered. It is still built, and ABC
 discovery still runs over it — it is simply not written out as a network file.
 
-Outputs in `--out`: `ranked_terms.csv`, `hypothesis_candidates.csv`,
+**`--out` is the results root, not the run folder.** Each run writes to its own
+timestamped subfolder under it, named from the query, so a second run never
+overwrites the first:
+
+```
+results/
+  2026-09-29_143205_gpcr-allosteric-modulation/
+      run.json              what produced this run
+      ranked_terms.csv
+      hypothesis_candidates.csv
+      ...
+  2026-09-29_151140_gpcr-allosteric-modulation/
+  latest -> 2026-09-29_151140_gpcr-allosteric-modulation
+```
+
+`run.json` records the bioleads version, the inputs, the fully resolved config
+and the counts that came out, so a folder found months later still says what
+made it. Credential-shaped config fields are redacted rather than written.
+Name a run yourself with `--run-name`, or pass `--no-run-dir` to write straight
+into `--out` and overwrite it, the way versions before 0.3 did.
+
+Outputs in the run folder: `ranked_terms.csv`, `hypothesis_candidates.csv`,
 `pmids.txt` (every PMID in the corpus — seeds and anything expansion added —
 one per line, ready to paste into PubMed or feed back in as `--pmids @file`;
 written only if the corpus has PMIDs at all), — with `--citations` —

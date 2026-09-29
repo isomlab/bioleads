@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import networkx as nx
 
+from . import runs
 from .config import Config
 from .sources import Document, load_documents, document_pmids, _check_cancel
 from .ner import extract_entities
@@ -43,6 +45,10 @@ class PipelineResult:
     citation_graph: nx.DiGraph | None = None
     author_graph: nx.DiGraph | None = None
     outputs: dict[str, str] = field(default_factory=dict)
+    # The folder this run actually wrote to, which is a subfolder of the --out
+    # root unless unique_run_dir was turned off. Kept out of `outputs` because
+    # the CLI and the GUI's Outputs tab render every entry there as a file.
+    run_dir: str | None = None
 
     def summary(self) -> str:
         parts = [
@@ -78,6 +84,8 @@ def run_pipeline(
     documents: list[Document] | None = None,
     cancel=None,
     progress=None,
+    unique_run_dir: bool = True,
+    run_name: str | None = None,
 ) -> PipelineResult:
     """Run the full bioleads pipeline and optionally write outputs to `out_dir`.
 
@@ -90,7 +98,14 @@ def run_pipeline(
 
     Pass `progress` (a callable taking one str) to receive step-by-step status
     messages as each stage runs — handy for a live log/progress display.
+
+    `out_dir` is the ROOT for results, not the run folder. Each run gets its own
+    timestamped subfolder under it plus a `run.json` manifest, so one run cannot
+    overwrite another. Pass `run_name` to label the folder yourself, or
+    `unique_run_dir=False` to write straight into `out_dir` as older versions did.
+    The folder actually written comes back as `result.run_dir`.
     """
+    started = datetime.now()
     cfg = cfg or Config()
     say = progress if callable(progress) else (lambda _msg: None)
 
@@ -174,8 +189,15 @@ def run_pipeline(
                             citation_graph, author_graph)
 
     if out_dir:
+        if unique_run_dir:
+            slug = runs.slugify(run_name) if run_name else runs.describe_inputs(
+                pubmed_query=pubmed_query, pmids=pmids, refs=refs, texts=texts)
+            root, out_dir = out_dir, runs.new_run_dir(out_dir, slug=slug)
+        else:
+            root = out_dir
+            os.makedirs(out_dir, exist_ok=True)
+        result.run_dir = out_dir
         say(f"Writing outputs to {out_dir}…")
-        os.makedirs(out_dir, exist_ok=True)
         terms_csv = os.path.join(out_dir, "ranked_terms.csv")
         terms_df(ranked).to_csv(terms_csv, index=False)
         result.outputs["ranked_terms"] = terms_csv
@@ -265,5 +287,22 @@ def run_pipeline(
                     seed=cfg.seed, size_attr="papers")
                 if ap_3d:
                     result.outputs["author_paper_network_3d"] = ap_3d
+
+        # Last, so it can record what was actually written. A failure here must
+        # not throw away a run whose outputs are already on disk.
+        try:
+            # Imported here, not at module scope: __init__ imports this module,
+            # so a top-level import of the version would be circular.
+            from . import __version__
+            manifest = runs.build_manifest(
+                version=__version__, started=started, finished=datetime.now(),
+                run_dir=out_dir, cfg=cfg, pubmed_query=pubmed_query, pmids=pmids,
+                refs=refs, texts=texts, anchors=anchors, result=result,
+                outputs=result.outputs)
+            result.outputs["manifest"] = runs.write_manifest(out_dir, manifest)
+            if unique_run_dir:
+                runs.update_latest(root, out_dir)
+        except OSError as exc:
+            say(f"Could not write the run manifest: {exc}")
 
     return result

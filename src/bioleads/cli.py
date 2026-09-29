@@ -14,6 +14,7 @@ bioleads --pmids @seeds.txt --anchors "trpv1,inflammation" --out ./results
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 
@@ -51,7 +52,15 @@ def build_parser() -> argparse.ArgumentParser:
                      help="reference-manager export to seed from: RIS (.ris) "
                           "or EndNote XML (.xml), auto-detected")
 
-    p.add_argument("--out", default="./bioleads_out", help="output directory")
+    p.add_argument("--out", default="./bioleads_out", metavar="DIR",
+                   help="results root. Each run writes to its own timestamped "
+                        "subfolder here, with a run.json manifest, and 'latest' "
+                        "points at the newest (default: ./bioleads_out)")
+    p.add_argument("--run-name", metavar="NAME",
+                   help="label this run's folder instead of naming it from the query")
+    p.add_argument("--no-run-dir", action="store_true",
+                   help="write straight into --out and overwrite what is there, "
+                        "as versions before 0.3 did")
     p.add_argument("--anchors", help="comma-separated seed concepts for ABC discovery")
     p.add_argument("--expand", type=int, default=0, metavar="ROUNDS",
                    help="grow the corpus by following citations from the seed "
@@ -177,11 +186,15 @@ def main(argv=None) -> int:
     result = run_pipeline(
         pubmed_query=args.pubmed, pmids=args.pmids, refs=args.refs, cfg=cfg,
         anchors=anchors, out_dir=args.out,
+        unique_run_dir=not args.no_run_dir, run_name=args.run_name,
     )
 
     print(result.summary())
-    for label, path in result.outputs.items():
-        print(f"  {label:14s} -> {path}")
+    if result.run_dir:
+        print(f"\nRun folder: {result.run_dir}")
+    # Files are listed by name, since they all sit in the run folder printed above.
+    for label, path in sorted(result.outputs.items()):
+        print(f"  {label:14s} -> {os.path.basename(path)}")
     return 0
 
 

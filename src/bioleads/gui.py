@@ -852,10 +852,11 @@ class BioleadsGUI:
         self._set_running(True)
         self._clear_results()
         # Claim the run's output folder and settings up front: clustering can be
-        # asked for as soon as terms exist, and it needs both.
+        # asked for as soon as terms exist, and it needs both. This is the root
+        # until the run reports the subfolder it actually made, in _on_done.
         self._out_dir = out_dir
         self._cfg = cfg
-        self._log(f"Starting pipeline → {out_dir}")
+        self._log(f"Starting pipeline → a new run folder under {out_dir}")
         self.status_var.set("Starting…")
         self._worker = threading.Thread(
             target=self._run_worker,
@@ -1004,7 +1005,10 @@ class BioleadsGUI:
 
     def _on_done(self, result: PipelineResult, out_dir: str) -> None:
         self._result = result
-        self._out_dir = out_dir
+        # The pipeline made a timestamped subfolder of the root it was given, so
+        # switch to it. Clustering started from the GUI afterwards writes into
+        # self._out_dir, and must land in this run's folder rather than the root.
+        self._out_dir = getattr(result, "run_dir", None) or out_dir
         self._set_running(False)
         self.status_var.set("Done.")
         self._log(result.summary())

@@ -3,6 +3,28 @@
 Notable changes to bioleads. Versions follow [semantic versioning](https://semver.org);
 while the major version is 0, a minor bump may change defaults.
 
+## Unreleased
+
+### Every run gets its own folder
+
+- **`--out` is now the results root, and each run writes to a timestamped
+  subfolder of it.** It was written to directly with `exist_ok=True`, so a
+  second run silently overwrote the first, and nothing on disk said which
+  settings produced the files that survived.
+- The folder is named from the query, `2026-09-29_143205_gpcr-allosteric`.
+  Two runs starting in the same second get `-2`, `-3` rather than colliding.
+  `--run-name` labels one yourself.
+- **`run.json` in each folder** records the bioleads version, the inputs, the
+  fully resolved `Config` and the result counts, with output names relative so
+  the folder survives being moved or sent on. **Config fields that look like
+  credentials are redacted**, so an Entrez API key cannot reach disk.
+- **`<root>/latest`** symlinks to the newest run. Best effort: a platform that
+  refuses symlinks loses the convenience, not the run.
+- `PipelineResult.run_dir` is the folder actually written. The GUI follows it,
+  so clustering started after a run lands in that run's folder rather than the
+  root.
+- **`--no-run-dir`** (or `unique_run_dir=False`) restores the old flat layout.
+
 ## 0.2.0 — 2026-08-22
 
 ### Clustering

@@ -7,6 +7,7 @@ background is supplied.
 import os
 import warnings
 from collections import Counter
+from pathlib import Path
 
 import networkx as nx
 import pytest
@@ -91,10 +92,13 @@ def test_abc_finds_planted_link():
 
 
 def test_outputs_written(tmp_path):
+    # out_dir is the results ROOT; the files land in the run folder under it.
     res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
                        out_dir=str(tmp_path))
-    assert (tmp_path / "ranked_terms.csv").exists()
-    assert (tmp_path / "hypothesis_candidates.csv").exists()
+    run = Path(res.run_dir)
+    assert run.parent == tmp_path
+    assert (run / "ranked_terms.csv").exists()
+    assert (run / "hypothesis_candidates.csv").exists()
 
 
 def test_pmid_list_is_one_bare_pmid_per_line(tmp_path):
@@ -107,7 +111,7 @@ def test_pmid_list_is_one_bare_pmid_per_line(tmp_path):
     res = run_pipeline(documents=_citation_docs(), cfg=_cfg(),
                        out_dir=str(tmp_path))
 
-    written = (tmp_path / "pmids.txt")
+    written = Path(res.run_dir) / "pmids.txt"
     assert written.exists(), "a PMID-bearing corpus produced no pmids.txt"
     assert res.outputs["pmids"] == str(written)
     assert written.read_text() == "1\n2\n3\n"
@@ -1841,3 +1845,91 @@ def test_output_order_follows_the_reported_score_not_the_raw_one(monkeypatch):
     scores = [sc for _, sc in kept]
     assert scores == sorted(scores, reverse=True), "not sorted by reported score"
     assert set(d.doc_id for d, _ in kept) == set(raw_order), "selection changed"
+
+
+# ── every run gets its own folder ───────────────────────────────────────────────
+# Before 0.3, out_dir was written to with exist_ok=True, so a second run silently
+# overwrote the first and nothing on disk said which settings produced it.
+
+def test_two_runs_into_one_root_do_not_overwrite_each_other(tmp_path):
+    """REGRESSION: this is the whole reason the run folder exists."""
+    docs = documents_from_texts(CORPUS)
+    a = run_pipeline(documents=docs, cfg=_cfg(), out_dir=str(tmp_path))
+    b = run_pipeline(documents=docs, cfg=_cfg(), out_dir=str(tmp_path))
+    assert a.run_dir != b.run_dir
+    assert Path(a.run_dir).exists() and Path(b.run_dir).exists()
+    assert (Path(a.run_dir) / "ranked_terms.csv").exists()
+    assert (Path(b.run_dir) / "ranked_terms.csv").exists()
+
+
+def test_runs_in_the_same_second_still_get_separate_folders(tmp_path):
+    """The folder name is second-resolution, so collisions are reachable."""
+    from datetime import datetime
+    from bioleads import runs
+    when = datetime(2026, 9, 29, 14, 30, 5)
+    made = {runs.new_run_dir(str(tmp_path), slug="x", when=when) for _ in range(3)}
+    assert len(made) == 3
+
+
+def test_the_run_folder_is_named_from_the_query(tmp_path):
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
+                       out_dir=str(tmp_path), pubmed_query="TMEM184C AND autophagy")
+    assert "tmem184c-and-autophagy" in os.path.basename(res.run_dir)
+
+
+def test_run_name_overrides_the_generated_folder_name(tmp_path):
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
+                       out_dir=str(tmp_path), run_name="Sweep 3")
+    assert os.path.basename(res.run_dir).endswith("_sweep-3")
+
+
+def test_unique_run_dir_off_restores_the_old_flat_layout(tmp_path):
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
+                       out_dir=str(tmp_path), unique_run_dir=False)
+    assert res.run_dir == str(tmp_path)
+    assert (tmp_path / "ranked_terms.csv").exists()
+
+
+def test_the_manifest_records_what_produced_the_run(tmp_path):
+    import json
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
+                       out_dir=str(tmp_path), pubmed_query="autophagy")
+    man = json.loads((Path(res.run_dir) / "run.json").read_text())
+    assert man["inputs"]["pubmed_query"] == "autophagy"
+    assert man["results"]["documents"] == len(res.documents)
+    assert man["config"]["min_doc_freq"] == _cfg().min_doc_freq
+    # Output names are relative, so the folder survives being moved or sent on.
+    assert man["outputs"]["ranked_terms"] == "ranked_terms.csv"
+
+
+def test_the_manifest_never_writes_a_credential(tmp_path):
+    """An api key in Config must not reach disk. Checked on the raw text."""
+    import json
+    cfg = _cfg()
+    cfg.entrez_api_key = "SECRET_KEY_THAT_MUST_NOT_LEAK"
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=cfg,
+                       out_dir=str(tmp_path))
+    raw = (Path(res.run_dir) / "run.json").read_text()
+    assert "SECRET_KEY_THAT_MUST_NOT_LEAK" not in raw
+    assert json.loads(raw)["config"]["entrez_api_key"] == "<redacted>"
+
+
+def test_the_manifest_is_valid_json_despite_config_holding_a_set(tmp_path):
+    """Config.stopwords is a set, which json cannot serialise directly."""
+    import json
+    cfg = _cfg()
+    cfg.stopwords = {"zzz", "aaa"}
+    res = run_pipeline(documents=documents_from_texts(CORPUS), cfg=cfg,
+                       out_dir=str(tmp_path))
+    man = json.loads((Path(res.run_dir) / "run.json").read_text())
+    assert man["config"]["stopwords"] == ["aaa", "zzz"]
+
+
+def test_latest_points_at_the_newest_run(tmp_path):
+    docs = documents_from_texts(CORPUS)
+    run_pipeline(documents=docs, cfg=_cfg(), out_dir=str(tmp_path))
+    second = run_pipeline(documents=docs, cfg=_cfg(), out_dir=str(tmp_path))
+    link = tmp_path / "latest"
+    if not link.exists():
+        pytest.skip("symlinks unavailable on this platform")
+    assert os.path.realpath(link) == os.path.realpath(second.run_dir)

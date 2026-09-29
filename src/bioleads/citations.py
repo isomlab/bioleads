@@ -21,6 +21,7 @@ import warnings
 import networkx as nx
 
 from .config import Config
+from .querymatch import MATCH_COLORS
 from .sources import (
     Document,
     _ICITE_URL,
@@ -544,6 +545,51 @@ def _freeze_physics_after_stabilization(path: str) -> None:
         f.write(html)
 
 
+def _inject_match_legend(path: str, title: str, terms: list[str]) -> None:
+    """Explain the node colours, under the heading.
+
+    A coloured graph with no key is a worse graph than an uncoloured one, and
+    the "none" case needs the caveat spelled out: PubMed can match a paper on a
+    MeSH term or on full text we never fetched, so grey does not mean the hit
+    was wrong.
+    """
+    if not terms:
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            html = f.read()
+    except OSError:
+        return
+    shown = ", ".join(f"<code>{t}</code>" for t in terms[:8])
+    if len(terms) > 8:
+        shown += f" and {len(terms) - 8} more"
+    swatch = (
+        '<span style="display:inline-block;width:11px;height:11px;'
+        'border-radius:50%%;background:%s;margin-right:5px;'
+        'vertical-align:middle"></span>')
+    legend = (
+        '<div style="font:13px/1.5 system-ui,sans-serif;color:#1f2a36;'
+        'max-width:860px;margin:4px auto 10px;padding:8px 12px;'
+        'border:1px solid #d7dee6;border-radius:6px;background:#f8fafc">'
+        f'<b>Query terms:</b> {shown}<br>'
+        f'{swatch % MATCH_COLORS["all"]}contains every term &nbsp; '
+        f'{swatch % MATCH_COLORS["partial"]}contains some &nbsp; '
+        f'{swatch % MATCH_COLORS["none"]}contains none'
+        '<br><span style="color:#5b6b7c">Matching is literal, on title and '
+        'abstract only. PubMed can also match on MeSH terms or on full text '
+        'not fetched here, so grey does not mean the paper was a bad hit. '
+        'Papers added by citation expansion never went through the query at '
+        'all.</span></div>'
+    )
+    needle = f"<h1>{title}</h1>"
+    at = html.find(needle)
+    if at == -1 or legend in html:
+        return
+    cut = at + len(needle)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html[:cut] + legend + html[cut:])
+
+
 def _collapse_duplicate_heading(path: str, title: str) -> None:
     """Keep only the first ``<h1>{title}</h1>``.
 
@@ -568,13 +614,19 @@ def _collapse_duplicate_heading(path: str, title: str) -> None:
 
 
 def write_citation_html(
-    g: nx.DiGraph, path: str, title: str = "bioleads citation network"
+    g: nx.DiGraph, path: str, title: str = "bioleads citation network",
+    query_terms: list[str] | None = None,
 ) -> str:
     """Render the directed citation network to a standalone HTML file (pyvis).
 
     Nodes are sized by in-corpus citations (most-cited papers are largest);
     arrows point from a paper to the papers it cites. Falls back to GraphML if
     pyvis isn't installed.
+
+    When the graph carries ``query_match`` attributes (see
+    :func:`bioleads.querymatch.annotate_citation_graph`), nodes are coloured by
+    whether the paper's title and abstract contain the PubMed query's terms, and
+    `query_terms` is used to caption the legend.
     """
     try:
         from pyvis.network import Network
@@ -587,6 +639,9 @@ def write_citation_html(
 
     net = Network(height="800px", width="100%", notebook=False, directed=True,
                   heading=title, bgcolor="#ffffff")
+    # Colour by query-term containment only when the graph was annotated with a
+    # text query; otherwise leave pyvis's own colour alone, as before.
+    coloured = any("query_match" in d for _, d in g.nodes(data=True))
     if g.number_of_nodes():
         max_cit = max((d["in_corpus_citations"] for _, d in g.nodes(data=True)),
                       default=0)
@@ -605,13 +660,25 @@ def write_citation_html(
             tip_lines.append(f"cited by {cit} paper(s) in corpus")
             if d.get("global_citations") is not None:
                 tip_lines.append(f"global citations: {d['global_citations']}")
+            kw = {}
+            if coloured:
+                state = d.get("query_match", "unknown")
+                kw["color"] = MATCH_COLORS.get(state, MATCH_COLORS["unknown"])
+                hits = d.get("query_terms_matched") or ""
+                tip_lines.append(
+                    f"query terms found: {hits}" if hits
+                    else "query terms found: none in title/abstract")
+                if d.get("expanded"):
+                    tip_lines.append("added by citation expansion, not a search hit")
             net.add_node(n, label=label, value=cit + 1, size=size,
-                         title="\n".join(tip_lines))
+                         title="\n".join(tip_lines), **kw)
         for a, b in g.edges():
             net.add_edge(a, b, title="cites", arrows="to")
     net.force_atlas_2based(spring_length=120)
     net.write_html(path, notebook=False, open_browser=False)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
+    if coloured:
+        _inject_match_legend(path, title, query_terms or [])
     _freeze_physics_after_stabilization(path)
     return path
 

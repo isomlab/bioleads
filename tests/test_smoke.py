@@ -1933,3 +1933,111 @@ def test_latest_points_at_the_newest_run(tmp_path):
     if not link.exists():
         pytest.skip("symlinks unavailable on this platform")
     assert os.path.realpath(link) == os.path.realpath(second.run_dir)
+
+
+# ── query-term colouring ────────────────────────────────────────────────────────
+# A PubMed hit need not contain the query's words: it can match on a MeSH term or
+# on full text never fetched. And --expand adds papers that never went through
+# the query at all. Colouring the papers that literally contain the terms cuts
+# across both, which is the point.
+
+@pytest.mark.parametrize("query, expected", [
+    ("TMEM184C AND (autophagy OR lysosome)", ["TMEM184C", "autophagy", "lysosome"]),
+    ('"tunneling nanotube" AND cancer', ["tunneling nanotube", "cancer"]),
+    ('"tunneling nanotube"[tiab] AND cancer[mesh]', ["tunneling nanotube", "cancer"]),
+    ("GPCR NOT olfactory", ["GPCR", "olfactory"]),
+    ("cancer AND cancer", ["cancer"]),
+    ("", []),
+    (None, []),
+])
+def test_query_terms_are_pulled_out_of_a_pubmed_query(query, expected):
+    from bioleads.querymatch import parse_query_terms
+    assert parse_query_terms(query) == expected
+
+
+@pytest.mark.parametrize("query, expected", [
+    ("Isom DG[au] AND autophagy", ["autophagy"]),
+    ('"Nature"[ta] AND spermine', ["spermine"]),
+    ('"Isom D"[au]', []),
+])
+def test_a_field_tag_drops_the_whole_term_before_it(query, expected):
+    """REGRESSION: splitting on whitespace first let `Isom DG[au]` leak `Isom`.
+
+    The tag binds to the whole term, so the query has to be cut at the boolean
+    operators before tags are read.
+    """
+    from bioleads.querymatch import parse_query_terms
+    assert parse_query_terms(query) == expected
+
+
+def test_an_untagged_multi_word_chunk_becomes_separate_words():
+    """PubMed maps `firefighter cancer risk` term by term, it is not a phrase."""
+    from bioleads.querymatch import parse_query_terms
+    assert parse_query_terms("firefighter cancer risk") == [
+        "firefighter", "cancer", "risk"]
+
+
+def test_matching_is_literal_and_respects_word_boundaries():
+    from bioleads.querymatch import matched_terms
+    text = "Spermine transport and autophagic flux in TMEM184C-positive vesicles."
+    assert matched_terms(text, ["TMEM184C"]) == ["TMEM184C"]
+    assert matched_terms(text, ["spermine"]) == ["spermine"]      # case-insensitive
+    assert matched_terms(text, ["autophagy"]) == []               # no stemming
+    assert matched_terms(text, ["ras"]) == []                     # not inside a word
+    assert matched_terms(text, ["spermine transport"]) == ["spermine transport"]
+
+
+def test_a_trailing_star_is_pubmed_truncation():
+    from bioleads.querymatch import matched_terms
+    assert matched_terms("autophagic flux", ["autophag*"]) == ["autophag*"]
+    assert matched_terms("autophagic flux", ["lysosom*"]) == []
+
+
+def test_nodes_are_classified_all_partial_and_none(tmp_path):
+    from bioleads.querymatch import annotate_citation_graph
+    import networkx as nx
+    docs = [
+        Document(doc_id="1", title="TMEM184C drives autophagy",
+                 text="lysosome biology", source="pubmed", meta={"pmid": "1"}),
+        Document(doc_id="2", title="TMEM184C in vesicles", text="trafficking",
+                 source="pubmed", meta={"pmid": "2"}),
+        Document(doc_id="3", title="Unrelated kinase", text="signalling",
+                 source="pubmed", meta={"pmid": "3"}),
+        Document(doc_id="4", title="Pulled in", text="autophagy here",
+                 source="pubmed", meta={"pmid": "4", "expanded": True}),
+    ]
+    g = nx.DiGraph()
+    for d in docs:
+        g.add_node(f"PMID:{d.meta['pmid']}", pmid=d.meta["pmid"])
+    terms = annotate_citation_graph(g, docs, "TMEM184C AND (autophagy OR lysosome)")
+    assert terms == ["TMEM184C", "autophagy", "lysosome"]
+    assert g.nodes["PMID:1"]["query_match"] == "all"
+    assert g.nodes["PMID:2"]["query_match"] == "partial"
+    assert g.nodes["PMID:3"]["query_match"] == "none"
+    # An expansion-added paper can still contain a term, which is worth seeing.
+    assert g.nodes["PMID:4"]["query_match"] == "partial"
+    assert g.nodes["PMID:4"]["expanded"] is True
+    assert g.nodes["PMID:3"]["expanded"] is False
+
+
+def test_annotations_are_graphml_safe():
+    """GraphML cannot store a list or a None, so the attrs must be str/int/bool."""
+    from bioleads.querymatch import annotate_citation_graph
+    import networkx as nx, io as _io
+    docs = [Document(doc_id="1", title="TMEM184C", text="autophagy",
+                     source="pubmed", meta={"pmid": "1"})]
+    g = nx.DiGraph()
+    g.add_node("PMID:1", pmid="1")
+    annotate_citation_graph(g, docs, "TMEM184C AND autophagy")
+    buf = _io.BytesIO()
+    nx.write_graphml(g, buf)          # raises if an attr type is unsupported
+    assert b"query_match" in buf.getvalue()
+
+
+def test_a_non_text_run_leaves_the_graph_uncoloured(tmp_path):
+    """--pmids has no query, so nothing should be marked `none` as if it failed."""
+    res = run_pipeline(documents=_citation_docs(), cfg=_cfg(), out_dir=str(tmp_path))
+    if res.citation_graph is None or not res.citation_graph.number_of_nodes():
+        pytest.skip("no citation graph in this environment")
+    assert not any("query_match" in d
+                   for _, d in res.citation_graph.nodes(data=True))

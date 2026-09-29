@@ -3,6 +3,31 @@
 Notable changes to bioleads. Versions follow [semantic versioning](https://semver.org);
 while the major version is 0, a minor bump may change defaults.
 
+## Unreleased
+
+### Citation-network nodes are coloured by whether the paper contains the query
+
+- **After a `--pubmed` text search, each paper in `citation_network.html` is
+  coloured by how many of the query's terms its title and abstract actually
+  contain**: green for all, amber for some, grey for none. The hover says which
+  terms were found, and flags a paper added by citation expansion.
+- **This is not the same as "was it a hit".** PubMed can match on a MeSH term,
+  on automatic term mapping, or on full text never fetched here, so a grey node
+  can be a perfectly good hit. `--expand` also adds papers that never went
+  through the query. The legend in the file says so rather than leaving the
+  colours to be misread, and that crossing is the interesting part: a grey seed
+  matched on something else, and a coloured expansion-added paper is one the
+  search arguably should have returned.
+- Matching is **literal**, case-insensitive, on word boundaries, so `autophagy`
+  does not match `autophagic`. PubMed's truncation operator works: `autophag*`
+  matches both. Quoted phrases stay phrases.
+- Field-tagged terms that cannot appear in an abstract, such as `Isom DG[au]` or
+  `"Nature"[ta]`, are dropped rather than searched for and reported as misses.
+- `--pmids` and `--refs` runs have no query, so their graphs stay uncoloured
+  rather than showing every paper as "contains none".
+- Nodes carry `query_match`, `query_match_count` and `query_terms_matched`, all
+  GraphML-safe, so the pyvis-less fallback keeps the information too.
+
 ## 0.3.0 — 2026-09-29
 
 ### Every run gets its own folder

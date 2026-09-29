@@ -7,7 +7,7 @@ from datetime import datetime
 
 import networkx as nx
 
-from . import runs
+from . import querymatch, runs
 from .config import Config
 from .sources import Document, load_documents, document_pmids, _check_cancel
 from .ner import extract_entities
@@ -173,6 +173,7 @@ def run_pipeline(
 
     citation_graph: nx.DiGraph | None = None
     author_graph: nx.DiGraph | None = None
+    query_terms: list[str] = []
     if cfg.do_citation_network:
         _check_cancel(cancel)
         say("Building citation network (iCite)…")
@@ -184,6 +185,19 @@ def run_pipeline(
         say("Building senior-author citation network…")
         author_graph = build_author_citation_graph(
             docs, cfg, prefetched=prefetched, cancel=cancel, progress=progress)
+        # Mark which papers literally contain the query's terms. Only meaningful
+        # for a text search, so a --pmids or --refs run leaves the graph
+        # uncoloured rather than colouring everything "none", which would read
+        # as a finding instead of as "nothing was asked".
+        if pubmed_query and citation_graph is not None:
+            query_terms = querymatch.annotate_citation_graph(
+                citation_graph, docs, pubmed_query)
+            if query_terms:
+                hit = sum(1 for _, d in citation_graph.nodes(data=True)
+                          if d.get("query_match") in ("all", "partial"))
+                say(f"  query terms {query_terms}: {hit} of "
+                    f"{citation_graph.number_of_nodes()} paper(s) contain at "
+                    f"least one in title/abstract.")
 
     result = PipelineResult(docs, entities, ranked, graph, candidates, clusters,
                             citation_graph, author_graph)
@@ -238,7 +252,7 @@ def run_pipeline(
             say("Rendering citation network…")
             cit_html = os.path.join(out_dir, "citation_network.html")
             result.outputs["citation_network"] = write_citation_html(
-                citation_graph, cit_html)
+                citation_graph, cit_html, query_terms=query_terms)
             cit_3d = write_citation_html_3d(
                 citation_graph, os.path.join(out_dir, "citation_network_3d.html"),
                 seed=cfg.seed)

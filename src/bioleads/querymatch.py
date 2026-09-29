@@ -1,0 +1,165 @@
+"""Which corpus papers actually contain the PubMed query's terms.
+
+A PubMed search returns papers that PubMed decided are hits, which is not the
+same as papers whose text contains what you typed. Two gaps open up:
+
+- **PubMed matched something we do not hold.** A hit can come from a MeSH term,
+  an automatic term-mapping expansion, or full text we never fetched, so a
+  genuine hit can contain none of the query words in its title or abstract.
+- **Expansion added papers that were never hits at all.** With ``--expand`` the
+  corpus grows along citation links, and those papers never went through the
+  query.
+
+So marking the papers that literally contain the terms cuts across how a paper
+got into the corpus, and that is what makes it worth looking at: a seed with no
+literal match was matched on something else, and an expansion-added paper that
+does contain the terms is one the search arguably should have returned.
+
+**Matching here is literal**, case-insensitive, on word boundaries, over title
+plus abstract. It is not PubMed's automatic term mapping and does not stem, so
+``autophagy`` does not match ``autophagic``. PubMed's truncation operator is
+honoured: ``autophag*`` matches both.
+"""
+from __future__ import annotations
+
+import re
+
+# PubMed field tags whose terms are not expected in title or abstract text, so
+# searching for them would only ever produce misleading misses.
+NON_TEXT_FIELDS = {
+    "au", "auth", "author", "1au", "lastau", "ad", "affil", "affiliation",
+    "dp", "date", "edat", "crdt", "pdat", "ta", "jour", "journal", "si",
+    "pt", "ptyp", "la", "lang", "language", "pmid", "uid", "issn", "vi", "ip",
+    "cn", "ir", "ip",
+}
+
+_QUOTED = re.compile(r'"([^"]+)"|\'([^\']+)\'')
+_FIELD_TAG = re.compile(r"\[([^\]]*)\]\s*$")     # tag closing a term
+_LEADING_TAG = re.compile(r"^\[([^\]]*)\]")      # tag straight after a quote
+_BOOLEANS = {"AND", "OR", "NOT"}
+# A field tag binds to the whole term before it, so the query has to be cut into
+# chunks at the boolean operators and parentheses BEFORE tags are read. Splitting
+# on whitespace first lets `Isom DG[au]` leak the word `Isom`, because only the
+# `DG[au]` token carries the tag.
+_CHUNK_SPLIT = re.compile(r"[()]|(?<=\s)(?:AND|OR|NOT)(?=\s)")
+
+
+def _strip_field_tag(token: str) -> tuple[str, str | None]:
+    """`"nanotube"[tiab]` -> ("nanotube", "tiab"). Returns (term, field-or-None)."""
+    m = _FIELD_TAG.search(token)
+    if not m:
+        return token, None
+    return token[: m.start()].strip(), m.group(1).strip().lower()
+
+
+def parse_query_terms(query: str | None) -> list[str]:
+    """Pull the searchable terms out of a PubMed query string.
+
+    Quoted phrases survive as phrases. Boolean operators, parentheses and
+    field-tagged terms that cannot appear in an abstract (author, journal, date
+    and so on) are dropped. Order is preserved and duplicates removed.
+    """
+    if not query or not str(query).strip():
+        return []
+    text = str(query)
+    terms: list[str] = []
+
+    # Quoted phrases first, so their internal spaces survive as one term and a
+    # tag straight after the closing quote is read from what follows.
+    def _take_quoted(m):
+        phrase = (m.group(1) or m.group(2) or "").strip()
+        tag = _LEADING_TAG.match(text[m.end():].lstrip())
+        field = tag.group(1).strip().lower() if tag else None
+        if phrase and (field is None or field not in NON_TEXT_FIELDS):
+            terms.append(phrase)
+        return " "
+
+    rest = _QUOTED.sub(_take_quoted, text)
+
+    for chunk in _CHUNK_SPLIT.split(rest):
+        chunk = (chunk or "").strip()
+        if not chunk or chunk.upper() in _BOOLEANS:
+            continue
+        body, field = _strip_field_tag(chunk)
+        # The tag governs the whole chunk: `Isom DG[au]` drops both words.
+        if field is not None and field in NON_TEXT_FIELDS:
+            continue
+        # An untagged multi-word chunk is PubMed's automatic term mapping, which
+        # is not a literal phrase, so its words are searched separately.
+        for word in body.split():
+            term = word.strip(" ,;:")
+            if len(term) < 2 or term.upper() in _BOOLEANS:
+                continue
+            terms.append(term)
+
+    seen, out = set(), []
+    for t in terms:
+        k = t.lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(t)
+    return out
+
+
+def _term_pattern(term: str) -> re.Pattern:
+    """Word-boundary, case-insensitive. A trailing `*` becomes a prefix match."""
+    if term.endswith("*"):
+        stem = re.escape(term[:-1].strip())
+        return re.compile(rf"\b{stem}\w*", re.I)
+    # Escape, then let internal whitespace match any run of whitespace so a
+    # phrase still matches across a line break in an abstract.
+    body = r"\s+".join(re.escape(w) for w in term.split())
+    return re.compile(rf"\b{body}\b" if body else r"(?!)", re.I)
+
+
+def matched_terms(text: str | None, terms: list[str]) -> list[str]:
+    """Which of `terms` literally appear in `text`."""
+    if not text or not terms:
+        return []
+    return [t for t in terms if _term_pattern(t).search(text)]
+
+
+def classify(n_matched: int, n_terms: int) -> str:
+    """`all`, `partial` or `none`. With no terms to match, `unknown`."""
+    if not n_terms:
+        return "unknown"
+    if n_matched == 0:
+        return "none"
+    return "all" if n_matched == n_terms else "partial"
+
+
+# Grey for "none" matches the unclustered grey in the term scatter, so the two
+# views read the same way: grey is always "not in the thing being shown".
+MATCH_COLORS = {
+    "all": "#1a7f37",       # green: contains every query term
+    "partial": "#d4a017",   # amber: some
+    "none": "#bbbbbb",      # grey: none
+    "unknown": "#2b6cb0",   # blue: nothing to match against (no text query)
+}
+
+
+def annotate_citation_graph(g, docs, query: str | None) -> list[str]:
+    """Tag each paper node with which query terms its text contains.
+
+    Sets ``query_terms_matched`` (a comma-joined string, for GraphML's sake),
+    ``query_match_count`` and ``query_match`` on every node, and returns the
+    parsed terms so a caller can report or legend them.
+
+    GraphML cannot store a list or a None, which is why the attributes written
+    here are a string and two ints.
+    """
+    terms = parse_query_terms(query)
+    by_pmid = {}
+    for d in docs or []:
+        pmid = str(d.meta.get("pmid") or "").strip()
+        if pmid:
+            by_pmid[pmid] = d
+
+    for n, data in g.nodes(data=True):
+        doc = by_pmid.get(str(data.get("pmid") or "").strip())
+        hits = matched_terms(getattr(doc, "content", None), terms) if doc else []
+        data["query_terms_matched"] = ", ".join(hits)
+        data["query_match_count"] = len(hits)
+        data["query_match"] = classify(len(hits), len(terms))
+        data["expanded"] = bool(doc.meta.get("expanded")) if doc else False
+    return terms

@@ -190,6 +190,18 @@ there is no graph left to colour by cluster.
 
 ### Citation network
 
+After a `--pubmed` search, papers in `citation_network.html` are **coloured by
+whether their title and abstract contain the query's terms**: green for all,
+amber for some, grey for none, with the matched terms on hover.
+
+**Grey does not mean a bad hit.** PubMed matches on MeSH terms and on full text
+that is never fetched here, so a genuine hit can contain none of the words you
+typed. `--expand` also adds papers that never went through the query. That
+crossing is what makes the colouring worth looking at: a grey seed was matched
+on something other than its text, and a coloured expansion-added paper is one
+the search arguably should have returned. Matching is literal and does not stem,
+so use PubMed's truncation, `autophag*`, to catch a word family.
+
 `--citations` builds a directed **paper→paper** graph over the PMID-bearing
 records in your corpus (an edge A→B means "A cites B"), using NIH
 [iCite](https://icite.od.nih.gov/) for both the links and per-paper metadata

@@ -3,7 +3,7 @@
 Notable changes to bioleads. Versions follow [semantic versioning](https://semver.org);
 while the major version is 0, a minor bump may change defaults.
 
-## Unreleased
+## 0.3.0 — 2026-09-29
 
 ### Every run gets its own folder
 

@@ -5,6 +5,28 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### A second citation network holding only the papers that match
+
+- **`citation_network_matches.html`**, written beside the full network after a
+  `--pubmed` text search: the **union of the green and amber nodes**, meaning
+  every paper whose own title or abstract contains **all** of the query's terms
+  or **some** of them, with the citations between them.
+- **Edges are induced**, so a citation is kept only when both ends matched.
+  Citation paths between matching papers often run through papers that matched
+  nothing, so this network is routinely sparser and more fragmented than the
+  same nodes look inside the full graph. **That is a property of the selection,
+  not a finding about the literature**, and it is the one thing to understand
+  before reading anything into it.
+- **`in_corpus_citations` is carried over, not recomputed**, so node sizes stay
+  comparable with the full network rather than being rescaled against the
+  subset.
+- Written only when a text query produced terms and at least one paper matched.
+  A `--pmids` or `--refs` run has nothing to subset, and a query no paper
+  carries writes no file rather than an empty network. The Outputs tab lists
+  the row greyed in both cases.
+- `querymatch.matching_subgraph(g, states=("all", "partial"))` is the API;
+  pass `("all",)` for the stricter set.
+
 ### `querymatch` has tests
 
 - **66 tests for the query-term matcher**, which had none. Every case in the

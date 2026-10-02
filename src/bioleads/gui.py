@@ -76,6 +76,9 @@ OUTPUT_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Paper citation network", [
         ("2D", "citation_network"),
         ("3D", "citation_network_3d"),
+        # Only a text search produces this one; it stays listed and greyed on a
+        # --pmids or --refs run, which is the point of the greying.
+        ("Query-term matches only", "citation_network_matches"),
         ("Ranking (CSV)", "citation_ranking"),
     ]),
     ("Senior-author citation network", [

@@ -2034,6 +2034,46 @@ def test_annotations_are_graphml_safe():
     assert b"query_match" in buf.getvalue()
 
 
+def test_a_text_run_writes_the_matching_subnetwork(tmp_path):
+    """The matches-only network is written beside the full one, not instead of it.
+
+    The query is `review`, which is a word the fixture corpus actually contains.
+    An earlier version of this test used a term no document carried, so it
+    passed while the file was never written, which is no test at all.
+    """
+    res = run_pipeline(documents=_citation_docs(), cfg=_cfg(),
+                       out_dir=str(tmp_path), pubmed_query="review")
+    if res.citation_graph is None or not res.citation_graph.number_of_nodes():
+        pytest.skip("no citation graph in this environment")
+
+    from bioleads.querymatch import matching_subgraph
+    sub = matching_subgraph(res.citation_graph)
+    assert sub.number_of_nodes() > 0, "fixture no longer matches the query"
+
+    path = res.outputs["citation_network_matches"]
+    assert os.path.exists(path)
+    assert os.path.basename(path).startswith("citation_network_matches")
+    # It must not replace the full network.
+    assert os.path.exists(res.outputs["citation_network"])
+    assert path != res.outputs["citation_network"]
+    # And it must be a strict subset, not a copy of everything.
+    assert sub.number_of_nodes() <= res.citation_graph.number_of_nodes()
+
+
+def test_no_matching_subnetwork_when_nothing_contains_the_terms(tmp_path):
+    """A query no paper carries writes no file rather than an empty network."""
+    res = run_pipeline(documents=_citation_docs(), cfg=_cfg(),
+                       out_dir=str(tmp_path), pubmed_query="zzzznotaword")
+    assert "citation_network_matches" not in res.outputs
+    assert not (tmp_path / "citation_network_matches.html").exists()
+
+
+def test_a_non_text_run_writes_no_matching_subnetwork(tmp_path):
+    """No query means every node is `unknown`, so there is nothing to subset."""
+    res = run_pipeline(documents=_citation_docs(), cfg=_cfg(), out_dir=str(tmp_path))
+    assert "citation_network_matches" not in res.outputs
+
+
 def test_a_non_text_run_leaves_the_graph_uncoloured(tmp_path):
     """--pmids has no query, so nothing should be marked `none` as if it failed."""
     res = run_pipeline(documents=_citation_docs(), cfg=_cfg(), out_dir=str(tmp_path))

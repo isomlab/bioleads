@@ -259,6 +259,30 @@ def run_pipeline(
             if cit_3d:
                 result.outputs["citation_network_3d"] = cit_3d
 
+            # The matching subnetwork: just the papers whose own text contains
+            # at least one query term, with the citations between them. Written
+            # only for a text search, since without a query every node is
+            # "unknown" and the subnetwork would be empty.
+            if query_terms:
+                sub = querymatch.matching_subgraph(citation_graph)
+                if sub.number_of_nodes():
+                    full_n = citation_graph.number_of_nodes()
+                    say(f"  matching subnetwork: {sub.number_of_nodes()} of "
+                        f"{full_n} paper(s), {sub.number_of_edges()} of "
+                        f"{citation_graph.number_of_edges()} citation(s) "
+                        f"between them.")
+                    sub_html = os.path.join(out_dir,
+                                            "citation_network_matches.html")
+                    result.outputs["citation_network_matches"] = (
+                        write_citation_html(
+                            sub, sub_html,
+                            title="bioleads citation network \u2014 papers "
+                                  "containing the query terms",
+                            query_terms=query_terms))
+                else:
+                    say("  matching subnetwork: no paper's title or abstract "
+                        "contains any query term, so none was written.")
+
         if author_graph is not None and author_graph.number_of_nodes():
             arank_csv = os.path.join(out_dir, "author_ranking.csv")
             authors_df(author_graph).to_csv(arank_csv, index=False)

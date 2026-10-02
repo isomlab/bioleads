@@ -11,10 +11,12 @@ import pytest
 
 from bioleads.querymatch import (
     MATCH_COLORS,
+    MATCHING_STATES,
     NON_TEXT_FIELDS,
     annotate_citation_graph,
     classify,
     matched_terms,
+    matching_subgraph,
     parse_query_terms,
 )
 
@@ -250,3 +252,90 @@ def test_annotation_survives_an_empty_corpus():
     g = _graph("1")
     annotate_citation_graph(g, [], "autophagy")
     assert g.nodes["1"]["query_match"] == "none"
+
+
+# --------------------------------------------------------------------------
+# matching_subgraph: the union of "all" and "partial"
+# --------------------------------------------------------------------------
+
+def _annotated(edges, texts, query="autophagy nanotube"):
+    g = nx.DiGraph()
+    for p in texts:
+        g.add_node(p, pmid=p, in_corpus_citations=1)
+    g.add_edges_from(edges)
+    annotate_citation_graph(g, [_Doc(p, t) for p, t in texts.items()], query)
+    return g
+
+
+def test_matching_states_are_all_and_partial():
+    assert MATCHING_STATES == ("all", "partial")
+
+
+def test_subgraph_keeps_all_and_partial_and_drops_none():
+    g = _annotated(
+        [("1", "2"), ("2", "3")],
+        {"1": "autophagy nanotube", "2": "nothing here", "3": "autophagy"},
+    )
+    sub = matching_subgraph(g)
+    assert sorted(sub.nodes()) == ["1", "3"]
+
+
+def test_edges_are_induced_so_a_path_through_a_miss_is_broken():
+    # 1 cites 2 cites 3. Only 2 fails to match, and the subnetwork is then two
+    # isolated nodes rather than a chain. This is the behaviour to understand
+    # before reading anything into how fragmented the result looks.
+    g = _annotated(
+        [("1", "2"), ("2", "3")],
+        {"1": "autophagy", "2": "nothing here", "3": "nanotube"},
+    )
+    sub = matching_subgraph(g)
+    assert sub.number_of_edges() == 0
+
+
+def test_edges_between_two_matching_nodes_survive():
+    g = _annotated(
+        [("1", "3")],
+        {"1": "autophagy", "3": "nanotube"},
+    )
+    assert sorted(matching_subgraph(g).edges()) == [("1", "3")]
+
+
+def test_strict_mode_keeps_only_all():
+    g = _annotated(
+        [],
+        {"1": "autophagy nanotube", "2": "autophagy", "3": "nothing"},
+    )
+    assert sorted(matching_subgraph(g, ("all",)).nodes()) == ["1"]
+
+
+def test_subgraph_is_a_copy_and_the_full_graph_is_untouched():
+    g = _annotated([("1", "2")], {"1": "autophagy", "2": "nothing"})
+    sub = matching_subgraph(g)
+    sub.add_node("new")
+    assert "new" not in g
+    assert g.number_of_nodes() == 2
+
+
+def test_node_attributes_carry_over_including_corpus_wide_citations():
+    # in_corpus_citations was computed against the WHOLE corpus and must not be
+    # recomputed here, or node sizes stop being comparable with the full network.
+    g = _annotated([], {"1": "autophagy"})
+    g.nodes["1"]["in_corpus_citations"] = 7
+    sub = matching_subgraph(g)
+    assert sub.nodes["1"]["in_corpus_citations"] == 7
+    assert sub.nodes["1"]["query_match"] == "partial"
+
+
+def test_nothing_matching_gives_an_empty_graph_not_an_error():
+    g = _annotated([("1", "2")], {"1": "nothing", "2": "nothing either"})
+    sub = matching_subgraph(g)
+    assert sub.number_of_nodes() == 0
+    assert isinstance(sub, nx.DiGraph)
+
+
+def test_an_unannotated_graph_yields_nothing():
+    # No text query means every node is "unknown", which is not a match.
+    g = nx.DiGraph()
+    g.add_node("1", pmid="1")
+    annotate_citation_graph(g, [_Doc("1", "autophagy")], None)
+    assert matching_subgraph(g).number_of_nodes() == 0

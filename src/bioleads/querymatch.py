@@ -138,6 +138,39 @@ MATCH_COLORS = {
 }
 
 
+# The two states that mean "this paper's text actually contains what was typed".
+# `none` is not a bad hit (PubMed matches MeSH and full text), and `unknown`
+# means there was no text query to match against, so neither belongs in a
+# subnetwork of matching papers.
+MATCHING_STATES = ("all", "partial")
+
+
+def matching_subgraph(g, states=MATCHING_STATES):
+    """The induced subgraph of nodes whose text contains at least one query term.
+
+    `states` defaults to ``("all", "partial")``, which is the union asked for:
+    papers containing every term, plus papers containing some. Pass
+    ``("all",)`` for the stricter set.
+
+    **Edges are induced**, so a citation is kept only when both ends matched.
+    Citation paths between matching papers often run through papers that matched
+    nothing, so this subnetwork is routinely sparser and more fragmented than
+    the same nodes look inside the full graph. That is a property of the
+    selection, not a finding about the literature.
+
+    Node attributes are carried over untouched, including
+    ``in_corpus_citations``, which was computed against the **whole** corpus.
+    Sizes therefore stay comparable with the full network rather than being
+    recomputed against this subset.
+
+    Returns a copy, so annotating or writing it cannot disturb the full graph.
+    Returns an empty graph of the same type when nothing matched.
+    """
+    wanted = set(states)
+    keep = [n for n, d in g.nodes(data=True) if d.get("query_match") in wanted]
+    return g.subgraph(keep).copy()
+
+
 def annotate_citation_graph(g, docs, query: str | None) -> list[str]:
     """Tag each paper node with which query terms its text contains.
 

@@ -417,6 +417,11 @@ def build_author_citation_graph(
     for n in g.nodes:
         g.nodes[n]["in_corpus_citations"] = int(g.in_degree(n, weight="weight"))
 
+    # Kept on the graph so the query-match annotation can reach back to the
+    # papers behind each author. Pruning below returns new graph objects, which
+    # carry .graph through, so this is set once here.
+    g.graph["paper_senior"] = dict(paper_senior)
+
     say(f"  senior-author network: {g.number_of_nodes()} author(s) / "
         f"{g.number_of_edges()} author-citation edge(s).")
 
@@ -545,13 +550,18 @@ def _freeze_physics_after_stabilization(path: str) -> None:
         f.write(html)
 
 
-def _inject_match_legend(path: str, title: str, terms: list[str]) -> None:
+def _inject_match_legend(path: str, title: str, terms: list[str],
+                         unit: str = "paper") -> None:
     """Explain the node colours, under the heading.
 
     A coloured graph with no key is a worse graph than an uncoloured one, and
     the "none" case needs the caveat spelled out: PubMed can match a paper on a
     MeSH term or on full text we never fetched, so grey does not mean the hit
     was wrong.
+
+    ``unit`` is "paper" or "author". An author node is coloured by their single
+    best-matching paper, which is a different claim from a paper node and has
+    to be said in the key rather than left to be assumed.
     """
     if not terms:
         return
@@ -575,10 +585,15 @@ def _inject_match_legend(path: str, title: str, terms: list[str]) -> None:
         f'{swatch % MATCH_COLORS["all"]}contains every term &nbsp; '
         f'{swatch % MATCH_COLORS["partial"]}contains some &nbsp; '
         f'{swatch % MATCH_COLORS["none"]}contains none'
-        '<br><span style="color:#5b6b7c">Matching is literal, on title and '
+        + (('<br><span style="color:#5b6b7c"><b>An author is coloured by their '
+            'single best-matching paper</b>, not by pooling terms across their '
+            'papers. Green means one paper of theirs names every term. The '
+            'hover gives how many of their papers name any.</span>')
+           if unit == "author" else '')
+        + '<br><span style="color:#5b6b7c">Matching is literal, on title and '
         'abstract only. PubMed can also match on MeSH terms or on full text '
-        'not fetched here, so grey does not mean the paper was a bad hit. '
-        'Papers added by citation expansion never went through the query at '
+        'not fetched here, so grey does not mean the hit was wrong. Papers '
+        'added by citation expansion never went through the query at '
         'all.</span></div>'
     )
     needle = f"<h1>{title}</h1>"
@@ -632,7 +647,7 @@ def write_citation_html(
         from pyvis.network import Network
     except ImportError:
         alt = path.rsplit(".", 1)[0] + ".graphml"
-        nx.write_graphml(g, alt)
+        nx.write_graphml(_graphml_safe(g), alt)
         print(f'[bioleads] pyvis not installed; wrote {alt}. '
               f'Install with: pip install "bioleads[viz]"')
         return alt
@@ -708,8 +723,37 @@ def write_citation_html_3d(
 
     return write_graph_3d(
         g, path, title=title, size_attr="in_corpus_citations", seed=seed,
-        color_attr="in_corpus_citations", hover=_citation_hover, directed=True,
+        color_attr="in_corpus_citations", colors=_match_colors(g),
+        hover=_citation_hover, directed=True,
     )
+
+
+def _graphml_safe(g):
+    """A copy with graph-level attributes dropped, for GraphML.
+
+    GraphML stores only scalars, and the author graph carries
+    ``graph["paper_senior"]`` (a ``{pmid: author}`` dict) so the query-match
+    annotation can reach back to the papers behind each author. Writing that
+    graph directly raises. Graph-level attributes are not used by anything that
+    reads these files, so dropping them loses nothing.
+    """
+    h = g.copy()
+    h.graph.clear()
+    return h
+
+
+def _match_colors(g) -> dict | None:
+    """Per-node query-match colours, or None when the graph was never annotated.
+
+    Returning None rather than a dict of greys matters: it lets the 3D writer
+    keep its citation-count colorscale on a run with no text query, instead of
+    painting every node the "nothing matched" colour.
+    """
+    if not any("query_match" in d for _, d in g.nodes(data=True)):
+        return None
+    return {n: MATCH_COLORS.get(d.get("query_match", "unknown"),
+                                MATCH_COLORS["unknown"])
+            for n, d in g.nodes(data=True)}
 
 
 def _author_tip_lines(n, d) -> list[str]:
@@ -718,6 +762,14 @@ def _author_tip_lines(n, d) -> list[str]:
              f"cited {d.get('in_corpus_citations', 0)} time(s) within corpus"]
     if d.get("global_citations"):
         lines.append(f"global citations (sum): {d['global_citations']}")
+    if "query_match" in d:
+        hits = d.get("query_terms_matched") or ""
+        lines.append(f"best paper's query terms: {hits}" if hits
+                     else "no paper of theirs names a query term")
+        total = d.get("query_papers_total", 0)
+        if total:
+            lines.append(f"{d.get('query_papers_matched', 0)} of {total} "
+                         f"paper(s) name at least one term")
     return lines
 
 
@@ -728,6 +780,7 @@ def _author_hover(n, d) -> str:
 def write_author_html(
     g: nx.DiGraph, path: str, title: str = "bioleads senior-author citation network",
     size_attr: str = "in_corpus_citations",
+    query_terms: list[str] | None = None,
 ) -> str:
     """Render the senior-author network to standalone HTML (pyvis).
 
@@ -744,25 +797,32 @@ def write_author_html(
         from pyvis.network import Network
     except ImportError:
         alt = path.rsplit(".", 1)[0] + ".graphml"
-        nx.write_graphml(g, alt)
+        nx.write_graphml(_graphml_safe(g), alt)
         print(f'[bioleads] pyvis not installed; wrote {alt}. '
               f'Install with: pip install "bioleads[viz]"')
         return alt
 
     net = Network(height="800px", width="100%", notebook=False, directed=True,
                   heading=title, bgcolor="#ffffff")
+    coloured = any("query_match" in d for _, d in g.nodes(data=True))
     if g.number_of_nodes():
         top = max((d.get(size_attr) or 0 for _, d in g.nodes(data=True)), default=0)
         for n, d in g.nodes(data=True):
             v = d.get(size_attr) or 0
             size = 10 + 30 * (v / top if top else 0)
+            kw = {}
+            if coloured:
+                kw["color"] = MATCH_COLORS.get(d.get("query_match", "unknown"),
+                                               MATCH_COLORS["unknown"])
             net.add_node(n, label=d.get("author") or n, value=v + 1, size=size,
-                         title="\n".join(_author_tip_lines(n, d)))
+                         title="\n".join(_author_tip_lines(n, d)), **kw)
         for a, b, ed in g.edges(data=True):
             net.add_edge(a, b, title=f"cites ×{ed.get('weight', 1)}", arrows="to")
     net.force_atlas_2based(spring_length=120)
     net.write_html(path, notebook=False, open_browser=False)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
+    if coloured:
+        _inject_match_legend(path, title, query_terms or [], unit="author")
     _freeze_physics_after_stabilization(path)
     return path
 
@@ -781,5 +841,6 @@ def write_author_html_3d(
 
     return write_graph_3d(
         g, path, title=title, size_attr=size_attr, seed=seed,
-        color_attr=size_attr, hover=_author_hover, directed=True,
+        color_attr=size_attr, colors=_match_colors(g),
+        hover=_author_hover, directed=True,
     )

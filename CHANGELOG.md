@@ -5,6 +5,29 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Every network is coloured by query-term containment, not just the 2D one
+
+- **All five network views now colour by the query when a `--pubmed` search was
+  run**: the paper citation network in 2D and 3D, the matches-only subnetwork,
+  and both senior-author networks in 2D and 3D. Previously only the 2D paper
+  network was coloured, so the same corpus told different stories depending on
+  which file was opened.
+- **An author is coloured by their single best-matching paper**, not by pooling
+  terms across their papers. An author with one paper naming every term is
+  green; an author with two papers naming one term each is amber, because
+  pooling would claim a paper that does not exist. The hover gives `k of n`
+  papers naming any term, and the legend says so rather than leaving it to be
+  assumed.
+- **A run with no text query is unchanged.** The 3D views keep their
+  citation-count colorscale instead of being painted the "nothing matched"
+  colour, which is what returning no colours rather than a dict of greys buys.
+- `querymatch.annotate_author_graph` is the API. It needs
+  `graph["paper_senior"]`, which `build_author_citation_graph` now carries.
+- **Fixed in passing: GraphML writes of the author graph.** That `paper_senior`
+  map is a dict on `graph`, which GraphML cannot store, so the pyvis fallback
+  raised on a core-only install — the one the conda recipe builds. Both
+  fallbacks now write a copy with graph-level attributes dropped.
+
 ### Fixed: nothing was ever coloured on a real PubMed search
 
 - **Every node came out grey on a `--pubmed` run, whatever the query.** A paper

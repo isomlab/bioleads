@@ -6,11 +6,14 @@ parser reads field tags *after* splitting on booleans and parentheses, because
 a tag binds to the whole term before it and splitting on whitespace first lets
 ``Isom DG[au]`` leak the bare word ``Isom`` into the term list.
 """
+import io as _io
+
 import networkx as nx
 import pytest
 
 from bioleads.querymatch import (
     MATCH_COLORS,
+    annotate_author_graph,
     MATCHING_STATES,
     NON_TEXT_FIELDS,
     annotate_citation_graph,
@@ -402,3 +405,95 @@ def test_a_mixed_corpus_from_real_records():
     sub = matching_subgraph(g)
     assert sorted(sub.nodes()) == ["PMID:1", "PMID:3"]
     assert sorted(sub.edges()) == [("PMID:1", "PMID:3")]
+
+
+# --------------------------------------------------------------------------
+# annotate_author_graph: an author takes their best paper's state
+# --------------------------------------------------------------------------
+
+def _author_graph(rows):
+    """rows = [(pmid, title, abstract, senior_author)]."""
+    from bioleads.sources import _record_to_document
+    docs = [_record_to_document({"PMID": p, "TI": t, "AB": a})
+            for p, t, a, _ in rows]
+    g = nx.DiGraph()
+    for _, _, _, au in rows:
+        if not g.has_node(au):
+            g.add_node(au, author=au, papers=0, in_corpus_citations=0)
+        g.nodes[au]["papers"] += 1
+    g.graph["paper_senior"] = {p: au for p, _, _, au in rows}
+    return g, docs
+
+
+def test_author_takes_the_state_of_their_best_paper():
+    g, docs = _author_graph([
+        ("1", "TMEM184A heparin", "TMEM184A binds heparin", "Smith A"),
+        ("2", "Vascular review", "nothing", "Smith A"),
+        ("3", "Tmem184a only", "we study it", "Jones B"),
+        ("4", "Unrelated", "nothing at all", "Lee C"),
+    ])
+    annotate_author_graph(g, docs, "TMEM184A heparin")
+    assert g.nodes["Smith A"]["query_match"] == "all"
+    assert g.nodes["Jones B"]["query_match"] == "partial"
+    assert g.nodes["Lee C"]["query_match"] == "none"
+
+
+def test_terms_are_not_pooled_across_an_authors_papers():
+    """Two papers naming one term each is amber, not green.
+
+    Pooling would claim a paper naming both terms, which does not exist. This
+    is the whole design decision of this function.
+    """
+    g, docs = _author_graph([
+        ("1", "TMEM184A", "about the protein", "Split A"),
+        ("2", "heparin", "about the sugar", "Split A"),
+    ])
+    annotate_author_graph(g, docs, "TMEM184A heparin")
+    assert g.nodes["Split A"]["query_match"] == "partial"
+    assert g.nodes["Split A"]["query_match_count"] == 1
+
+
+def test_author_carries_how_many_of_their_papers_matched():
+    g, docs = _author_graph([
+        ("1", "TMEM184A", "yes", "Smith A"),
+        ("2", "Vascular review", "no", "Smith A"),
+        ("3", "TMEM184A again", "yes", "Smith A"),
+    ])
+    annotate_author_graph(g, docs, "TMEM184A")
+    assert g.nodes["Smith A"]["query_papers_matched"] == 2
+    assert g.nodes["Smith A"]["query_papers_total"] == 3
+
+
+def test_author_attributes_are_graphml_safe():
+    """Node attributes must be scalars, and the paper_senior map must not block
+    a GraphML write.
+
+    `paper_senior` is a dict on `graph`, which GraphML cannot store, so writing
+    the annotated author graph raised until `_graphml_safe` was added. That is
+    not hypothetical: the pyvis fallback writes GraphML whenever pyvis is
+    missing, which is the core-only install the conda recipe builds.
+    """
+    from bioleads.citations import _graphml_safe
+    g, docs = _author_graph([("1", "TMEM184A", "yes", "Smith A")])
+    annotate_author_graph(g, docs, "TMEM184A")
+
+    with pytest.raises(Exception):
+        nx.write_graphml(g, _io.BytesIO())        # the dict on .graph
+
+    buf = _io.BytesIO()
+    nx.write_graphml(_graphml_safe(g), buf)       # what the writers actually do
+    assert b"query_match" in buf.getvalue()
+
+
+def test_no_paper_senior_map_means_no_annotation():
+    """An author graph built some other way is left alone rather than greyed."""
+    g = nx.DiGraph()
+    g.add_node("Smith A", author="Smith A")
+    annotate_author_graph(g, [], "TMEM184A")
+    assert "query_match" not in g.nodes["Smith A"]
+
+
+def test_no_query_leaves_the_author_graph_alone():
+    g, docs = _author_graph([("1", "TMEM184A", "yes", "Smith A")])
+    assert annotate_author_graph(g, docs, None) == []
+    assert "query_match" not in g.nodes["Smith A"]

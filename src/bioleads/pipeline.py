@@ -185,6 +185,8 @@ def run_pipeline(
         say("Building senior-author citation network…")
         author_graph = build_author_citation_graph(
             docs, cfg, prefetched=prefetched, cancel=cancel, progress=progress)
+        if pubmed_query and author_graph is not None:
+            querymatch.annotate_author_graph(author_graph, docs, pubmed_query)
         # Mark which papers literally contain the query's terms. Only meaningful
         # for a text search, so a --pmids or --refs run leaves the graph
         # uncoloured rather than colouring everything "none", which would read
@@ -291,7 +293,7 @@ def run_pipeline(
             say("Rendering senior-author citation network…")
             auth_html = os.path.join(out_dir, "author_network.html")
             result.outputs["author_network"] = write_author_html(
-                author_graph, auth_html)
+                author_graph, auth_html, query_terms=query_terms)
             auth_3d = write_author_html_3d(
                 author_graph, os.path.join(out_dir, "author_network_3d.html"),
                 seed=cfg.seed)
@@ -308,6 +310,8 @@ def run_pipeline(
             paper_graph = build_author_citation_graph(
                 docs, cfg, prefetched=prefetched, rank_by="papers",
                 cancel=cancel, progress=progress)
+            if pubmed_query and paper_graph is not None:
+                querymatch.annotate_author_graph(paper_graph, docs, pubmed_query)
             if paper_graph is not None and paper_graph.number_of_nodes():
                 aprank_csv = os.path.join(out_dir, "author_paper_ranking.csv")
                 authors_df(paper_graph, by="papers").to_csv(aprank_csv, index=False)
@@ -317,7 +321,7 @@ def run_pipeline(
                 result.outputs["author_paper_network"] = write_author_html(
                     paper_graph, ap_html,
                     title="bioleads senior-author paper-count network",
-                    size_attr="papers")
+                    size_attr="papers", query_terms=query_terms)
                 ap_3d = write_author_html_3d(
                     paper_graph,
                     os.path.join(out_dir, "author_paper_network_3d.html"),

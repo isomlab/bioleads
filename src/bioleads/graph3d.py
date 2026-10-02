@@ -122,6 +122,7 @@ def write_graph_3d(
     seed: int = 0,
     groups: dict | None = None,
     color_attr: str | None = None,
+    colors: dict | None = None,
     hover=None,
     directed: bool = False,
 ) -> str | None:
@@ -131,6 +132,9 @@ def write_graph_3d(
     ----------
     size_attr   node attribute used for marker size (e.g. "count").
     groups      {node: cluster_id} → discrete per-cluster colors (takes priority).
+    colors      {node: css color} → explicit per-node colors. Outranks both of
+                the above, because it carries a meaning the caller has already
+                decided (query-term match) rather than one derived here.
     color_attr  node attribute for a continuous colorscale when no `groups`.
     hover       callable(node, data)->str for the marker tooltip (HTML allowed).
     directed    annotate the title that edges are directed (A→B = A cites B).
@@ -179,7 +183,9 @@ def write_graph_3d(
     # against the white background.
     marker = dict(size=marker_sizes, opacity=0.95,
                   line=dict(width=0.8, color="rgba(40,40,40,0.65)"))
-    if groups:
+    if colors:
+        marker["color"] = [colors.get(n, "#2b6cb0") for n in nodes]
+    elif groups:
         marker["color"] = [_PALETTE[(groups.get(n, 0)) % len(_PALETTE)] for n in nodes]
     elif color_attr:
         marker["color"] = [float(g.nodes[n].get(color_attr) or 0) for n in nodes]

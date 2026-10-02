@@ -216,3 +216,58 @@ def annotate_citation_graph(g, docs, query: str | None) -> list[str]:
         data["query_match"] = classify(len(hits), len(terms))
         data["expanded"] = bool(doc.meta.get("expanded")) if doc else False
     return terms
+
+
+def annotate_author_graph(g, docs, query: str | None) -> list[str]:
+    """Tag each author node with how well their corpus papers match the query.
+
+    Needs ``g.graph["paper_senior"]`` (``{pmid: author}``), which
+    :func:`bioleads.citations.build_author_citation_graph` stores for exactly
+    this purpose. Without it nothing is annotated and the graph is left alone,
+    which is the right outcome for an author graph built some other way.
+
+    **An author takes the state of their single best-matching paper**, not the
+    union of terms across their papers. An author with one paper naming every
+    term is green; an author with five papers that each name a different single
+    term is amber. The alternative — pooling terms across an author's papers —
+    would call that second author green, which claims a paper that does not
+    exist. The hover carries ``k of n papers`` so the spread is visible either
+    way.
+
+    Sets ``query_match``, ``query_match_count``, ``query_terms_matched`` (the
+    best paper's terms, comma-joined for GraphML's sake),
+    ``query_papers_matched`` and ``query_papers_total``. Returns the parsed
+    terms.
+    """
+    terms = parse_query_terms(query)
+    paper_senior = (getattr(g, "graph", None) or {}).get("paper_senior") or {}
+    if not terms or not paper_senior:
+        return terms
+
+    by_pmid = {}
+    for d in docs or []:
+        pmid = _doc_pmid(d)
+        if pmid:
+            by_pmid[pmid] = d
+
+    # best[author] = (n_matched, hits); counts[author] = (matched, total)
+    best: dict = {}
+    counts: dict = {}
+    for pmid, author in paper_senior.items():
+        doc = by_pmid.get(pmid)
+        hits = matched_terms(getattr(doc, "content", None), terms) if doc else []
+        prev_n, prev_hits = best.get(author, (-1, []))
+        if len(hits) > prev_n:
+            best[author] = (len(hits), hits)
+        m, t = counts.get(author, (0, 0))
+        counts[author] = (m + (1 if hits else 0), t + 1)
+
+    for n, data in g.nodes(data=True):
+        n_hits, hits = best.get(n, (0, []))
+        matched, total = counts.get(n, (0, 0))
+        data["query_terms_matched"] = ", ".join(hits)
+        data["query_match_count"] = max(n_hits, 0)
+        data["query_match"] = classify(max(n_hits, 0), len(terms))
+        data["query_papers_matched"] = matched
+        data["query_papers_total"] = total
+    return terms

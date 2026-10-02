@@ -315,6 +315,9 @@ class BioleadsGUI:
         relevance = self.expand_strategy_var.get() == "relevance"
         self._set_field_enabled(self._follow_field, not relevance)
         self._set_field_enabled(self._topk_field, relevance)
+        # "Seeds for relevance" belongs to the keep-gate, not to the strategy.
+        self._set_field_enabled(self._seed_n_field,
+                                self.expand_gate_var.get() == "seeds")
 
     def _sync_cluster_fields(self) -> None:
         """Grey k when the chosen method is the one that infers it."""
@@ -365,6 +368,8 @@ class BioleadsGUI:
         self.expand_strategy_var = tk.StringVar(value=Config.expand_strategy)
         self.expand_topk_var = tk.IntVar(value=Config.expand_top_k)
         self.expand_max_var = tk.IntVar(value=Config.expand_max)
+        self.expand_gate_var = tk.StringVar(value=Config.expand_gate)
+        self.expand_seed_n_var = tk.IntVar(value=Config.expand_seed_profile_n)
         self.retmax_var = tk.IntVar(value=Config.pubmed_retmax)
 
         # --- what to search -------------------------------------------------
@@ -456,6 +461,38 @@ class BioleadsGUI:
                     self._spin(card, self.expand_max_var, 1, 100000),
                     "Hard cap on the total PMIDs (seeds + discovered) after "
                     "expansion.")
+        self._field(card, 6, "Keep a found paper if",
+                    self._combo(card, self.expand_gate_var,
+                                ["seeds", "terms", "off"]),
+                    "What a paper discovered by expansion must do to stay in "
+                    "the corpus. Seeds are never filtered by any of these.\n\n"
+                    "seeds — it looks like the seed papers, by sharing their "
+                    "characteristic terms. The useful default.\n\n"
+                    "terms — it literally contains one of the query's terms. "
+                    "Beware on a rare gene symbol: PubMed has already found "
+                    "every paper containing it, so this keeps almost nothing. "
+                    "Measured on TMEM184C OR TM184C: 0 of 582 kept.\n\n"
+                    "off — keep everything the walk found, as before.\n\n"
+                    "All of these judge whether to KEEP a paper, not whether "
+                    "to follow its links.")
+        self._seed_n_field = self._field(
+                    card, 7, "Seeds for relevance",
+                    self._spin(card, self.expand_seed_n_var, 0, 10000),
+                    "How many seeds the relevance profile is built from, in "
+                    "PubMed's own relevance order. 0 means all of them.\n\n"
+                    "This matters more than it sounds. A query returning three "
+                    "seeds can return three unrelated papers — a gene symbol "
+                    "matches a mechanism paper and two genomics case reports "
+                    "that mention the gene inside a copy-number region — and a "
+                    "profile built from all three describes chromosomes rather "
+                    "than the biology. Set it to 1 and the profile is the paper "
+                    "you actually meant.\n\n"
+                    "Raise it when the seeds are a coherent set, lower it when "
+                    "the query is a symbol that means different things to "
+                    "different literatures.\n\n"
+                    "Used only when the setting above is 'seeds'.")
+        self.expand_gate_var.trace_add(
+            "write", lambda *_: self._sync_strategy_fields())
         self.expand_strategy_var.trace_add(
             "write", lambda *_: self._sync_strategy_fields())
         self._sync_strategy_fields()
@@ -849,6 +886,8 @@ class BioleadsGUI:
             expand_strategy=self.expand_strategy_var.get(),
             expand_top_k=int(self.expand_topk_var.get()),
             expand_max=int(self.expand_max_var.get()),
+            expand_gate=self.expand_gate_var.get(),
+            expand_seed_profile_n=int(self.expand_seed_n_var.get()),
         )
 
         self._cancel.clear()

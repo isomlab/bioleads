@@ -623,6 +623,86 @@ def documents_from_texts(texts: Iterable[str], prefix: str = "doc") -> list[Docu
             for i, t in enumerate(texts)]
 
 
+_WORD = re.compile(r"[a-z][a-z0-9\-]{2,}")
+
+# Words that say nothing about a topic. Deliberately short and literal rather
+# than a linguistic stopword list: the profile is built from abstracts, and
+# abstract boilerplate is what has to go.
+_PROFILE_STOP = frozenset("""
+the and for with that this from were was are has have been not but can may
+our their its his her they them these those than then when which while who
+whom whose into onto upon over under between among during after before above
+below both each more most other some such only own same too very
+study studies results result method methods conclusion conclusions background
+objective objectives purpose aim aims here show shown showed demonstrate
+demonstrated suggest suggests suggested indicate indicates indicated report
+reported found find finding findings data analysis analyses using used use
+however therefore thus also well within across via per due able likely
+significant significantly increased decreased higher lower level levels
+effect effects role roles function functions mechanism mechanisms
+""".split())
+
+
+def _content_words(text: str) -> set[str]:
+    return {w for w in _WORD.findall((text or "").lower())
+            if w not in _PROFILE_STOP}
+
+
+def seed_profile(seed_docs, *, top_n: int = 0, n_terms: int = 60) -> list[str]:
+    """The terms that characterise the seed papers, most shared first.
+
+    Built from the first `top_n` seeds in corpus order, which for a PubMed query
+    is PubMed's own relevance order. `top_n = 0` uses all of them.
+
+    **Terms are weighted by how many seeds mention them, not by how often.** A
+    word used once in each of eight seeds describes the topic; a word used
+    forty times in one seed describes that paper. Ties break alphabetically so
+    the profile is reproducible.
+    """
+    docs = list(seed_docs)[:top_n] if top_n and top_n > 0 else list(seed_docs)
+    from collections import Counter
+    df: Counter = Counter()
+    for d in docs:
+        df.update(_content_words(getattr(d, "content", "")))
+    ranked = sorted(df.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [t for t, _ in ranked[:n_terms]]
+
+
+def _keep_if_like_seeds(docs, seed_docs, *, top_n, n_terms, min_share, say):
+    """Keep discovered papers whose text looks like the seed papers.
+
+    Score is the **share of the profile's terms a candidate contains**, which is
+    interpretable in a way a cosine is not: 0.10 means the paper names a tenth
+    of what the seeds are about. It does not reward length, because the
+    denominator is the profile rather than the candidate.
+
+    With no seeds or an empty profile nothing is filtered, rather than the whole
+    expansion being discarded over a corpus that could not be profiled.
+    """
+    profile = seed_profile(seed_docs, top_n=top_n, n_terms=n_terms)
+    if not profile:
+        say("  seed-profile filter: no profile could be built, so nothing was "
+            "filtered.")
+        return docs
+    want = set(profile)
+    need = len(want) * float(min_share)
+    kept, scores = [], []
+    for d in docs:
+        hits = len(_content_words(getattr(d, "content", "")) & want)
+        scores.append(hits)
+        if hits >= need:
+            d.meta["seed_profile_hits"] = hits
+            kept.append(d)
+    n_seeds = len(list(seed_docs)[:top_n] if top_n and top_n > 0 else seed_docs)
+    say(f"  seed-profile filter: profile of {len(profile)} term(s) from "
+        f"{n_seeds} seed(s); kept {len(kept)} of {len(docs)} discovered "
+        f"paper(s) sharing at least {need:.0f} of them.")
+    if scores:
+        say(f"    profile terms matched per paper: max {max(scores)}, "
+            f"median {sorted(scores)[len(scores) // 2]}")
+    return kept
+
+
 def _keep_if_query_terms(docs: list[Document], query: str, say) -> list[Document]:
     """Drop expansion-discovered papers whose text contains no query term.
 
@@ -658,7 +738,10 @@ def load_documents(
     expand_source: str = "ncbi",
     expand_max: int = 1000,
     expand_cache=None,
-    expand_require_query_terms: bool = False,
+    expand_gate: str = "off",
+    expand_seed_profile_n: int = 0,
+    expand_seed_min_share: float = 0.10,
+    expand_seed_profile_terms: int = 60,
     cancel=None,
     progress=None,
     pubmed_report: dict | None = None,
@@ -673,11 +756,12 @@ def load_documents(
     `pubmed_report` is passed through to :func:`fetch_pubmed`; see
     :func:`describe_pubmed_search`.
 
-    With `expand_require_query_terms` and a `pubmed_query`, a paper discovered by
-    expansion is kept only if its own title or abstract contains at least one of
-    the query's terms. **Seeds are never filtered** — they came from the query,
-    and PubMed may have matched them on a MeSH term or on full text not fetched
-    here, so a seed failing a literal test says something about the test.
+`expand_gate` decides what a discovered paper must do to be kept: ``"terms"``
+    requires it to name one of the query's terms, ``"seeds"`` requires it to look
+    like the seed papers, ``"off"`` keeps everything. **Seeds are never filtered**
+    under any setting — they came from the query, and PubMed may have matched
+    them on a MeSH term or on full text not fetched here, so a seed failing a
+    literal test says something about the test.
     """
     say = _sayer(progress)
     docs: list[Document] = []
@@ -733,8 +817,15 @@ def load_documents(
                     cancel=cancel, progress=progress)
                 for d in added:
                     d.meta["expanded"] = True
-                if expand_require_query_terms and pubmed_query:
+                if expand_gate == "terms" and pubmed_query:
                     added = _keep_if_query_terms(added, pubmed_query, say)
+                elif expand_gate == "seeds":
+                    seed_docs = [d for d in docs
+                                 if not d.meta.get("expanded")]
+                    added = _keep_if_like_seeds(
+                        added, seed_docs, top_n=expand_seed_profile_n,
+                        n_terms=expand_seed_profile_terms,
+                        min_share=expand_seed_min_share, say=say)
                 docs += added
             else:
                 say("  no new records found to add")

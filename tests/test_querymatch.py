@@ -527,3 +527,67 @@ def test_expansion_gate_matches_the_colouring():
     kept = _keep_if_query_terms(docs, "TMEM184C", lambda m: None)
     assert len(kept) == 1                       # case-insensitive, as the colours are
     assert matched_terms(kept[0].content, parse_query_terms("TMEM184C"))
+
+
+# --------------------------------------------------------------------------
+# The seed-profile gate
+# --------------------------------------------------------------------------
+
+def test_seed_profile_ranks_terms_by_how_many_seeds_share_them():
+    from bioleads.sources import seed_profile
+    docs = [_pubmed_doc("1", "autophagy and lysosome", "autophagy autophagy autophagy"),
+            _pubmed_doc("2", "lysosome biology", "the lysosome again"),
+            _pubmed_doc("3", "lysosome transport", "lysosome vesicles")]
+    # autophagy is said many times but in one paper; lysosome is in all three.
+    profile = seed_profile(docs, n_terms=5)
+    assert profile[0] == "lysosome"
+
+
+def test_top_n_limits_which_seeds_build_the_profile():
+    """The control Dan asked for: a heterogeneous seed set is fixed by using fewer.
+
+    This mirrors the real case. A gene-symbol query returned one mechanism paper
+    and two genomics case reports that merely name the gene inside a copy-number
+    region, and a profile over all three described chromosomes.
+    """
+    from bioleads.sources import seed_profile
+    docs = [_pubmed_doc("1", "GPCR-like regulator of autophagy", "arrestin autophagosome"),
+            _pubmed_doc("2", "A duplication CNV on chromosome 17", "chromosome sequencing"),
+            _pubmed_doc("3", "Interchromosomal insertion", "chromosome sequencing")]
+    all_three = seed_profile(docs, n_terms=10)
+    just_one = seed_profile(docs, top_n=1, n_terms=10)
+    assert "chromosome" in all_three
+    assert "chromosome" not in just_one
+    assert "autophagosome" in just_one
+
+
+def test_seed_gate_keeps_papers_sharing_enough_of_the_profile():
+    from bioleads.sources import _keep_if_like_seeds
+    seeds = [_pubmed_doc("1", "autophagy lysosome arrestin",
+                         "autophagosome vesicle trafficking")]
+    cands = [_pubmed_doc("9", "autophagosome lysosome fusion",
+                         "vesicle trafficking and arrestin"),
+             _pubmed_doc("8", "Sheep genome resequencing",
+                         "domestic breeds and agronomic traits")]
+    kept = _keep_if_like_seeds(cands, seeds, top_n=1, n_terms=10,
+                               min_share=0.3, say=lambda m: None)
+    assert [d.meta["pmid"] for d in kept] == ["9"]
+
+
+def test_seed_gate_does_nothing_without_a_profile():
+    """No seeds means no profile, and discarding the expansion over that would
+    be far worse than keeping it."""
+    from bioleads.sources import _keep_if_like_seeds
+    cands = [_pubmed_doc("9", "anything", "at all")]
+    kept = _keep_if_like_seeds(cands, [], top_n=1, n_terms=10, min_share=0.3,
+                               say=lambda m: None)
+    assert kept == cands
+
+
+def test_seed_gate_records_the_hit_count_on_what_it_keeps():
+    from bioleads.sources import _keep_if_like_seeds
+    seeds = [_pubmed_doc("1", "autophagy lysosome arrestin", "autophagosome vesicle")]
+    cands = [_pubmed_doc("9", "autophagy lysosome", "arrestin autophagosome vesicle")]
+    kept = _keep_if_like_seeds(cands, seeds, top_n=1, n_terms=10, min_share=0.1,
+                               say=lambda m: None)
+    assert kept[0].meta["seed_profile_hits"] >= 1

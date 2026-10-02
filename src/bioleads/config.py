@@ -116,7 +116,37 @@ class Config:
     # chosen from PMIDs before anything is fetched, so a paper that fails the
     # test has still already contributed its links. Gating the walk is a
     # separate change.
-    expand_require_query_terms: bool = True
+    # How an expansion-discovered paper earns its place in the corpus.
+    #   "off"   — keep everything the walk found, as before 0.4.
+    #   "terms" — keep it only if its text names one of the query's terms.
+    #   "seeds" — keep it only if its text looks like the seed papers.
+    # Seeds are never filtered under any setting: they came from the query, and
+    # PubMed may have matched them on a MeSH term or on full text not fetched
+    # here, so a seed failing a literal test says something about the test.
+    #
+    # "terms" is exhaustive-by-construction on a rare symbol: PubMed has already
+    # found every record containing it, so the gate keeps nothing. Measured on
+    # `TMEM184C OR TM184C`: 0 of 582 discovered papers kept. It earns its place
+    # on a broad query where retrieval is incomplete.
+    #
+    # All of these gate COLLECTION, not the walk. The next round's frontier is
+    # chosen from PMIDs before anything is fetched, so a rejected paper has
+    # already contributed its links.
+    expand_gate: str = "seeds"
+
+    # "seeds" mode: how many seeds the profile is built from, in corpus order,
+    # which for a PubMed query is PubMed's own relevance order. 0 means all of
+    # them. A cap matters because a broad query can return hundreds of seeds and
+    # a profile built from all of them describes the field rather than the
+    # question.
+    expand_seed_profile_n: int = 10
+
+    # "seeds" mode: the share of the profile's characteristic terms a candidate
+    # must contain. Raise it to admit less.
+    expand_seed_min_share: float = 0.10
+
+    # How many characteristic terms the seed profile holds.
+    expand_seed_profile_terms: int = 60
     expand_fwd_rounds: int = 1   # cited_by depth
     expand_back_rounds: int = 1  # references depth
     # Keep this many most-relevant papers *per direction*. Swept on the

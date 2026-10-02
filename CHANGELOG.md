@@ -20,12 +20,36 @@ while the major version is 0, a minor bump may change defaults.
   author if any of their corpus papers is a seed.
 - Graphs with no `seed` attribute trim exactly as before.
 
-### Expansion can be required to name a query term
+### Expansion keeps a paper only if it looks like the seeds
 
-- **`expand_require_query_terms` (default on).** With a `--pubmed` query, a paper
-  discovered by citation expansion is kept only if its own title or abstract
-  contains at least one of the query's terms. **Seeds are never filtered**:
-  PubMed may have matched them on a MeSH term or on full text not fetched here.
+- **`expand_gate`** replaces the boolean added earlier the same day:
+  `"seeds"` (default), `"terms"`, or `"off"`. Seeds are never filtered by any
+  of them.
+- **`"seeds"` builds a profile from the seed papers' own text** — the terms most
+  of them share, weighted by how many seeds mention a term rather than how often,
+  so a word repeated forty times in one paper does not define the topic — and
+  keeps a discovered paper if it contains at least `expand_seed_min_share` of
+  that profile.
+- **`expand_seed_profile_n` caps how many seeds build the profile**, in PubMed's
+  own relevance order, and it matters far more than it sounds. Measured on
+  `TMEM184C OR TM184C`, whose three seeds are one mechanism paper and **two
+  genomics case reports that merely name the gene inside a copy-number region**:
+
+  | Seeds in profile | Kept of 582 | What came back |
+  |---|---|---|
+  | all 3 | 107 | hypertrichosis, SOX3 insertions, **Boer goats, sheep resequencing** |
+  | **1** | **19** | **GPCR activation, autophagosome-lysosome fusion, mini-G probes, GRK5/6 and β-arrestin bias, Atg8** |
+
+  A profile over all three described chromosomes. A profile over the first
+  described the biology. **Both are settable in the GUI** under "Keep a found
+  paper if" and "Seeds for relevance".
+
+### Expansion can instead be required to name a query term
+
+- **`expand_gate = "terms"`.** A paper discovered by citation expansion is kept
+  only if its own title or abstract contains at least one of the query's terms.
+  **Seeds are never filtered**: PubMed may have matched them on a MeSH term or
+  on full text not fetched here.
 - The test is the same literal one that colours the networks, so the gate and
   the colours can never disagree.
 - A query with no searchable term — all author or journal tags — filters

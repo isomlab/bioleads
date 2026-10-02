@@ -5,6 +5,21 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### The `latest` symlink is gone; the timestamp is the pointer
+
+- **No more `<out>/latest`.** Runs are identified by the timestamp in their
+  folder name and nothing else. The names sort chronologically as plain text,
+  so the newest run is the last one listed.
+- **A stale `latest` left by 0.3.x is removed on the next run**, with a line
+  saying so, because nothing writes it any more and it would otherwise sit
+  there pointing at whatever ran last before the upgrade.
+- **A real file or directory named `latest` is left alone.** Only a symlink is
+  removed.
+- Why: a symlink is a second name for a run, and a second name is a way to be
+  wrong about which run you are looking at. A file opened through it reports a
+  path that is not where it lives, and it goes stale silently.
+- `runs.update_latest` is replaced by `runs.prune_latest_link`.
+
 ### Every network is coloured by query-term containment, not just the 2D one
 
 - **All five network views now colour by the query when a `--pubmed` search was

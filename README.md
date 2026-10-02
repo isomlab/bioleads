@@ -160,8 +160,13 @@ results/
       hypothesis_candidates.csv
       ...
   2026-09-29_151140_gpcr-allosteric-modulation/
-  latest -> 2026-09-29_151140_gpcr-allosteric-modulation
 ```
+
+**The timestamp is the only pointer.** Folder names sort chronologically as
+plain text, so the newest run is the last one listed. Earlier versions also
+wrote a `latest` symlink; it is gone, and a stale one is removed on the next
+run. A symlink is a second name for a run, and a second name is a way to be
+wrong about which run you are looking at.
 
 `run.json` records the bioleads version, the inputs, the fully resolved config
 and the counts that came out, so a folder found months later still says what

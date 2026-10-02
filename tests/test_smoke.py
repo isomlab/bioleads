@@ -1925,14 +1925,45 @@ def test_the_manifest_is_valid_json_despite_config_holding_a_set(tmp_path):
     assert man["config"]["stopwords"] == ["aaa", "zzz"]
 
 
-def test_latest_points_at_the_newest_run(tmp_path):
+def test_no_latest_symlink_is_written(tmp_path):
+    """Runs are identified by the timestamp in the folder name and nothing else."""
     docs = documents_from_texts(CORPUS)
     run_pipeline(documents=docs, cfg=_cfg(), out_dir=str(tmp_path))
+    run_pipeline(documents=docs, cfg=_cfg(), out_dir=str(tmp_path))
+    assert not (tmp_path / "latest").exists()
+    assert not os.path.islink(str(tmp_path / "latest"))
+
+
+def test_run_folders_sort_chronologically(tmp_path):
+    """Plain-text sorting has to put the newest run last, since that is the
+    only way to find it now."""
+    docs = documents_from_texts(CORPUS)
+    first = run_pipeline(documents=docs, cfg=_cfg(), out_dir=str(tmp_path))
     second = run_pipeline(documents=docs, cfg=_cfg(), out_dir=str(tmp_path))
+    names = sorted(p.name for p in tmp_path.iterdir() if p.is_dir())
+    assert names[-1] == os.path.basename(second.run_dir)
+    assert os.path.basename(first.run_dir) in names
+
+
+def test_a_stale_latest_symlink_from_an_older_version_is_removed(tmp_path):
+    docs = documents_from_texts(CORPUS)
+    first = run_pipeline(documents=docs, cfg=_cfg(), out_dir=str(tmp_path))
     link = tmp_path / "latest"
-    if not link.exists():
+    try:
+        os.symlink(os.path.basename(first.run_dir), link)
+    except OSError:
         pytest.skip("symlinks unavailable on this platform")
-    assert os.path.realpath(link) == os.path.realpath(second.run_dir)
+    run_pipeline(documents=docs, cfg=_cfg(), out_dir=str(tmp_path))
+    assert not os.path.islink(str(link))
+
+
+def test_a_real_directory_named_latest_is_left_alone(tmp_path):
+    """Tidying up must never delete something a person put there."""
+    (tmp_path / "latest").mkdir()
+    (tmp_path / "latest" / "keep.txt").write_text("mine")
+    run_pipeline(documents=documents_from_texts(CORPUS), cfg=_cfg(),
+                 out_dir=str(tmp_path))
+    assert (tmp_path / "latest" / "keep.txt").read_text() == "mine"
 
 
 # ── query-term colouring ────────────────────────────────────────────────────────

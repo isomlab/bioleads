@@ -54,8 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--out", default="./bioleads_out", metavar="DIR",
                    help="results root. Each run writes to its own timestamped "
-                        "subfolder here, with a run.json manifest, and 'latest' "
-                        "points at the newest (default: ./bioleads_out)")
+                        "subfolder here, with a run.json manifest. The folder "
+                        "names sort chronologically, so the newest run is the "
+                        "last one listed (default: ./bioleads_out)")
     p.add_argument("--run-name", metavar="NAME",
                    help="label this run's folder instead of naming it from the query")
     p.add_argument("--no-run-dir", action="store_true",

@@ -4,9 +4,15 @@ Before this, `--out` was written to directly with ``exist_ok=True``, so a second
 run silently overwrote the first. Two runs with different settings left one set
 of files on disk and no way to tell which settings made them.
 
-A run now lands in ``<root>/<timestamp>_<slug>/`` with a ``run.json`` recording
-the version, the inputs, the resolved config and what came out. ``<root>/latest``
-points at the newest one.
+A run lands in ``<root>/<timestamp>_<slug>/`` with a ``run.json`` recording the
+version, the inputs, the resolved config and what came out.
+
+**The timestamp in the folder name is the only pointer.** There was a
+``<root>/latest`` symlink; it is gone. A symlink is a second name for a run, and
+a second name is a way to be wrong about which run you are looking at — a file
+opened through it reports a path that is not where it lives, and the link is
+silently stale the moment anything writes outside the pipeline. The folder names
+sort chronologically as plain text, so the newest run is the last one listed.
 """
 from __future__ import annotations
 
@@ -19,7 +25,7 @@ import sys
 from datetime import datetime, timezone
 
 MANIFEST_NAME = "run.json"
-LATEST_NAME = "latest"
+LATEST_NAME = "latest"          # kept only so `prune_latest_link` can find it
 
 # Config fields whose values must never reach a manifest on disk. Matched on the
 # field NAME, so a key added to Config later is redacted without touching this
@@ -79,23 +85,26 @@ def new_run_dir(root: str, *, slug: str = "", when: datetime | None = None) -> s
             candidate = f"{base}-{n}"
 
 
-def update_latest(root: str, run_dir: str) -> str | None:
-    """Point `<root>/latest` at this run. Best effort, never fatal.
+def prune_latest_link(root: str) -> bool:
+    """Remove a stale ``<root>/latest`` symlink left by an earlier version.
 
-    Symlinks need a developer mode or elevation on Windows, and can fail on some
-    network shares, so a failure here must not lose a run that already succeeded.
+    Runs are identified by the timestamp in their folder name and nothing else.
+    Older versions also wrote a ``latest`` symlink, which now has no writer, so
+    it would sit there pointing at whatever run happened to be last before the
+    upgrade and quietly misreport itself as current.
+
+    **Only a symlink is removed.** A real file or directory someone put there is
+    left alone, because deleting a user's data to tidy up is never worth it.
+    Returns True when a link was removed. Best effort, never fatal.
     """
     link = os.path.join(root, LATEST_NAME)
     try:
-        if os.path.islink(link) or os.path.exists(link):
-            if os.path.islink(link):
-                os.unlink(link)
-            else:
-                return None          # a real file or directory: leave it alone
-        os.symlink(os.path.basename(run_dir), link)
-        return link
+        if os.path.islink(link):
+            os.unlink(link)
+            return True
     except OSError:
-        return None
+        pass
+    return False
 
 
 def _jsonable(v):

@@ -342,8 +342,9 @@ def run_pipeline(
                 refs=refs, texts=texts, anchors=anchors, result=result,
                 outputs=result.outputs)
             result.outputs["manifest"] = runs.write_manifest(out_dir, manifest)
-            if unique_run_dir:
-                runs.update_latest(root, out_dir)
+            if unique_run_dir and runs.prune_latest_link(root):
+                say("  removed a stale 'latest' symlink from an earlier "
+                    "version; runs are identified by their timestamp.")
         except OSError as exc:
             say(f"Could not write the run manifest: {exc}")
 

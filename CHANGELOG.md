@@ -5,6 +5,21 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### `querymatch` has tests
+
+- **66 tests for the query-term matcher**, which had none. Every case in the
+  field-tag section is a bug that actually shipped and was caught by eye:
+  `Isom DG[au]` leaking the bare word `Isom`, and `"Nature"[ta]` leaking the
+  journal name, both because a tag binds to the whole term before it and the
+  query has to be cut at booleans and parentheses before tags are read.
+- Also covered: truncation (`autophag*` matches `autophagic`, `autophagy` does
+  not), phrases matching across a line break in an abstract, regex
+  metacharacters in a term staying literal, and **the GraphML contract** that
+  the node attributes are a string and two ints, never a list and never `None`.
+- **Checked by mutation, not just by passing.** Reverting the parser to the
+  shipped bug fails six of them. A test that has never been seen to fail is not
+  evidence.
+
 ### Citation-network nodes are coloured by whether the paper contains the query
 
 - **After a `--pubmed` text search, each paper in `citation_network.html` is

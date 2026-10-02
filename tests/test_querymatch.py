@@ -339,3 +339,66 @@ def test_an_unannotated_graph_yields_nothing():
     g.add_node("1", pmid="1")
     annotate_citation_graph(g, [_Doc("1", "autophagy")], None)
     assert matching_subgraph(g).number_of_nodes() == 0
+
+
+# --------------------------------------------------------------------------
+# The real PubMed document shape.
+#
+# Everything above this point uses a hand-made stand-in whose meta carries a
+# pmid, because that is what the code reads. A real `--pubmed` record did not,
+# so the matcher found nothing on live runs while every test passed. These
+# build the document through the actual PubMed path so the fixture cannot
+# drift from it again.
+# --------------------------------------------------------------------------
+
+def _pubmed_doc(pmid, title, abstract):
+    from bioleads.sources import _record_to_document
+    return _record_to_document({"PMID": pmid, "TI": title, "AB": abstract,
+                                "JT": "J Test", "DP": "2026"})
+
+
+def test_a_pubmed_record_carries_its_pmid_in_meta():
+    doc = _pubmed_doc("12345", "TMEM184A", "about TMEM184A")
+    assert doc.meta["pmid"] == "12345"
+    assert doc.doc_id == "PMID:12345"
+
+
+def test_a_real_pubmed_document_is_matched():
+    """The regression: a paper naming the term in title AND abstract read as `none`."""
+    doc = _pubmed_doc("12345", "TMEM184A is a heparin receptor",
+                      "We show that TMEM184A binds heparin.")
+    g = nx.DiGraph()
+    g.add_node("PMID:12345", pmid="12345")
+    annotate_citation_graph(g, [doc], "TMEM184A")
+    assert g.nodes["PMID:12345"]["query_match"] == "all"
+
+
+def test_a_document_with_no_meta_pmid_is_still_matched_via_doc_id():
+    """Defence in depth: doc_id alone has to be enough."""
+    doc = _pubmed_doc("777", "TMEM184A", "abstract naming TMEM184A")
+    doc.meta.pop("pmid")
+    g = nx.DiGraph()
+    g.add_node("PMID:777", pmid="777")
+    annotate_citation_graph(g, [doc], "TMEM184A")
+    assert g.nodes["PMID:777"]["query_match"] == "all"
+
+
+def test_a_mixed_corpus_from_real_records():
+    docs = [
+        _pubmed_doc("1", "TMEM184A is a heparin receptor", "TMEM184A binds heparin."),
+        _pubmed_doc("2", "Vascular biology review", "Nothing relevant here."),
+        _pubmed_doc("3", "Tmem184a in endothelium", "We study it."),
+    ]
+    g = nx.DiGraph()
+    for d in docs:
+        g.add_node(d.doc_id, pmid=d.meta["pmid"])
+    g.add_edges_from([("PMID:1", "PMID:3"), ("PMID:1", "PMID:2")])
+    annotate_citation_graph(g, docs, "TMEM184A")
+
+    assert g.nodes["PMID:1"]["query_match"] == "all"
+    assert g.nodes["PMID:2"]["query_match"] == "none"
+    assert g.nodes["PMID:3"]["query_match"] == "all"   # case-insensitive
+
+    sub = matching_subgraph(g)
+    assert sorted(sub.nodes()) == ["PMID:1", "PMID:3"]
+    assert sorted(sub.edges()) == [("PMID:1", "PMID:3")]

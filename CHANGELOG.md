@@ -5,6 +5,23 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Fixed: nothing was ever coloured on a real PubMed search
+
+- **Every node came out grey on a `--pubmed` run, whatever the query.** A paper
+  with the search term in both its title and its abstract was classified as
+  containing none of it.
+- **Cause: PubMed records did not carry their PMID where the matcher looked.**
+  `_record_to_document` put the PMID in `doc_id` but not in `meta`, and
+  `annotate_citation_graph` read only `meta`, so its lookup table was empty and
+  every node fell through to "no document, therefore no match".
+- Fixed in both places. PubMed records now carry `meta["pmid"]`, and the matcher
+  falls back to a `PMID:` doc_id the way `citations._doc_pmid` and
+  `sources.document_pmids` already did.
+- **The tests passed throughout**, because every fixture built its documents by
+  hand with a `meta` pmid, which is what the code read rather than what the
+  PubMed path produced. The regression tests now build documents through
+  `_record_to_document` itself.
+
 ### A second citation network holding only the papers that match
 
 - **`citation_network_matches.html`**, written beside the full network after a

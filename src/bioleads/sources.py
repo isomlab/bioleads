@@ -177,6 +177,10 @@ def _record_to_document(rec: dict) -> Document:
         title=rec.get("TI", ""),
         source="pubmed",
         meta={
+            # The PMID is carried in meta as well as in doc_id. Readers that
+            # only looked at meta used to see nothing for a PubMed record,
+            # which silently left every citation node unmatched.
+            "pmid": str(pmid).strip(),
             "journal": rec.get("JT", ""),
             "year": rec.get("DP", "")[:4],
             "mesh": rec.get("MH", []),

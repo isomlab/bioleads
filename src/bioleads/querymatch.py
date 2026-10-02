@@ -142,6 +142,26 @@ MATCH_COLORS = {
 # `none` is not a bad hit (PubMed matches MeSH and full text), and `unknown`
 # means there was no text query to match against, so neither belongs in a
 # subnetwork of matching papers.
+def _doc_pmid(doc) -> str:
+    """A document's bare PMID, from meta or from a ``PMID:`` doc_id.
+
+    **The doc_id fallback is not belt and braces.** PubMed records built by
+    :func:`bioleads.sources._record_to_document` carried their PMID only in
+    ``doc_id`` for a while, so reading ``meta`` alone matched nothing on a real
+    ``--pubmed`` run and every node came out grey. Both now carry it, and this
+    reads either.
+
+    The same rule lives in ``citations._doc_pmid`` and ``sources.document_pmids``.
+    Keep the three in step.
+    """
+    pmid = str((getattr(doc, "meta", None) or {}).get("pmid", "")).strip()
+    if not pmid:
+        doc_id = str(getattr(doc, "doc_id", "") or "")
+        if doc_id.startswith("PMID:"):
+            pmid = doc_id.split("PMID:", 1)[1].strip()
+    return pmid
+
+
 MATCHING_STATES = ("all", "partial")
 
 
@@ -184,7 +204,7 @@ def annotate_citation_graph(g, docs, query: str | None) -> list[str]:
     terms = parse_query_terms(query)
     by_pmid = {}
     for d in docs or []:
-        pmid = str(d.meta.get("pmid") or "").strip()
+        pmid = _doc_pmid(d)
         if pmid:
             by_pmid[pmid] = d
 

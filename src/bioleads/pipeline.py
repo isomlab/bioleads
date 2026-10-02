@@ -9,7 +9,8 @@ import networkx as nx
 
 from . import querymatch, runs
 from .config import Config
-from .sources import Document, load_documents, document_pmids, _check_cancel
+from .sources import (Document, load_documents, document_pmids, _check_cancel,
+                      describe_pubmed_search)
 from .ner import extract_entities
 from .enrichment import rank_terms, TermScore, to_dataframe as terms_df
 from .cooccurrence import build_cooccurrence
@@ -118,12 +119,14 @@ def run_pipeline(
     # silently have put a network round on every run.
     relevance_mode = (documents is None and cfg.expand_strategy == "relevance"
                       and cfg.expand_rounds > 0)
+    pubmed_report: dict = {}
     if documents is not None:
         docs = documents
         say(f"Using {len(docs)} document(s) supplied directly.")
     else:
         say("Loading documents…")
         docs = load_documents(
+            pubmed_report=pubmed_report,
             pubmed_query=pubmed_query, pmids=pmids, refs=refs,
             texts=texts,
             expand_rounds=0 if relevance_mode else cfg.expand_rounds,
@@ -135,7 +138,13 @@ def run_pipeline(
             cancel=cancel, progress=progress,
         )
     if not docs:
-        raise ValueError("No documents loaded. Check your inputs.")
+        # Say which source came up empty and what PubMed made of the query.
+        # "Check your inputs" is true of a typo, a dead network and a query
+        # that simply matches nothing, and those need different fixes.
+        detail = describe_pubmed_search(pubmed_report) if pubmed_query else ""
+        raise ValueError(
+            ("No documents loaded. " + detail).strip()
+            if detail else "No documents loaded. Check your inputs.")
     say(f"Corpus: {len(docs)} document(s).")
 
     if relevance_mode:

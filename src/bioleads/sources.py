@@ -61,6 +61,28 @@ def _sayer(progress):
 DEFAULT_ENTREZ_EMAIL = "disom.biophysics@gmail.com"
 
 
+def describe_pubmed_search(report: dict | None) -> str:
+    """One line saying what PubMed did with a query, for an error message.
+
+    A search that returns nothing is a different problem from a network
+    failure, a bad API key or a parse error, and the three used to be
+    indistinguishable from "No documents loaded. Check your inputs.". PubMed
+    hands back its own translation of the query, which is the thing that
+    explains an empty result: `A AND B` finding nothing says no single record
+    holds both terms, which is a fact about the literature and not a fault.
+    """
+    if not report:
+        return ""
+    parts = [f"PubMed returned {report.get('count', 0)} record(s)"]
+    translation = (report.get("translation") or "").strip()
+    if translation:
+        parts.append(f"for: {translation}")
+    line = " ".join(parts) + "."
+    for note in report.get("warnings") or []:
+        line += f" {note}"
+    return line
+
+
 def fetch_pubmed(
     query: str,
     retmax: int = 500,
@@ -68,12 +90,20 @@ def fetch_pubmed(
     api_key: str | None = None,
     cancel=None,
     progress=None,
+    report: dict | None = None,
 ) -> list[Document]:
     """Fetch records for a PubMed query via Entrez (Biopython).
 
     Each Document holds title + abstract.
     open-access articles in PubMed Central are upgraded to their full body
     text (intro/methods/results); the rest fall back to the abstract.
+
+    `report` is an optional dict filled in with what the search did: ``count``,
+    PubMed's own ``translation`` of the query, and any ``warnings`` it returned.
+    It is an out-parameter rather than a return value so that callers combining
+    several sources keep the plain list, and so an empty PubMed search can be
+    explained without being raised as an error — a run can legitimately draw its
+    corpus from `--refs` while the query matches nothing.
 
     Requires the `pubmed` extra: pip install "bioleads[pubmed]"
     """
@@ -83,9 +113,27 @@ def fetch_pubmed(
     # esearch -> PMIDs
     say(f"PubMed search: {query!r}…")
     with Entrez.esearch(db="pubmed", term=query, retmax=retmax) as h:
-        pmids = Entrez.read(h)["IdList"]
+        res = Entrez.read(h)
+    pmids = list(res.get("IdList", []))
+    if report is not None:
+        notes = []
+        for key in ("WarningList", "ErrorList"):
+            block = res.get(key) or {}
+            for kind, items in (block.items() if hasattr(block, "items") else []):
+                for item in (items or []):
+                    notes.append(f"{kind}: {item}")
+        report.update(
+            query=query,
+            count=int(res.get("Count", len(pmids)) or 0),
+            translation=str(res.get("QueryTranslation", "") or ""),
+            warnings=notes,
+        )
     say(f"  search matched {len(pmids)} record(s)")
     if not pmids:
+        if report and report.get("translation"):
+            say(f"  PubMed read the query as: {report['translation']}")
+        for note in (report or {}).get("warnings") or []:
+            say(f"  PubMed said: {note}")
         return []
     return fetch_pubmed_by_ids(pmids, email=email, api_key=api_key,
                                cancel=cancel, progress=progress)
@@ -588,6 +636,7 @@ def load_documents(
     expand_cache=None,
     cancel=None,
     progress=None,
+    pubmed_report: dict | None = None,
     **pubmed_kwargs,
 ) -> list[Document]:
     """Unified loader. Combine any subset of sources into one document list.
@@ -595,13 +644,17 @@ def load_documents(
     With `expand_rounds > 0`, the PMID-bearing seed documents are grown by
     following citation links (cited references by default) and the newly
     discovered PubMed records are fetched and appended.
+
+    `pubmed_report` is passed through to :func:`fetch_pubmed`; see
+    :func:`describe_pubmed_search`.
     """
     say = _sayer(progress)
     docs: list[Document] = []
     if pubmed_query:
         _check_cancel(cancel)
         docs += fetch_pubmed(pubmed_query, cancel=cancel,
-                             progress=progress, **pubmed_kwargs)
+                             progress=progress, report=pubmed_report,
+                             **pubmed_kwargs)
     if pmids:
         ids = parse_pmid_input(pmids)
         if ids:

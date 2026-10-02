@@ -2112,3 +2112,79 @@ def test_a_non_text_run_leaves_the_graph_uncoloured(tmp_path):
         pytest.skip("no citation graph in this environment")
     assert not any("query_match" in d
                    for _, d in res.citation_graph.nodes(data=True))
+
+
+# ── an empty PubMed search explains itself ──────────────────────────────────────
+# "No documents loaded. Check your inputs." is equally true of a typo, a dead
+# network and a query that simply matches nothing. PubMed hands back its own
+# translation of the query, which is the thing that tells those apart.
+
+class _FakeHandle:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _fake_entrez(payload):
+    """An Entrez stand-in whose esearch returns `payload`."""
+    class _E:
+        @staticmethod
+        def esearch(**kw):
+            return _FakeHandle(payload)
+
+        @staticmethod
+        def read(handle):
+            return handle.payload
+    return lambda email, api_key: (_E, None)
+
+
+_EMPTY_SEARCH = {
+    "Count": "0",
+    "IdList": [],
+    "QueryTranslation": '"TMEM184C"[All Fields] AND "TM184C"[All Fields]',
+    "WarningList": {"OutputMessage": ["No items found."]},
+}
+
+
+def test_fetch_pubmed_reports_what_the_search_did(monkeypatch):
+    import bioleads.sources as S
+    monkeypatch.setattr(S, "_entrez", _fake_entrez(_EMPTY_SEARCH))
+    report: dict = {}
+    docs = S.fetch_pubmed("TMEM184C AND TM184C", report=report)
+
+    assert docs == []
+    assert report["count"] == 0
+    assert report["translation"].startswith('"TMEM184C"[All Fields] AND')
+    assert report["warnings"] == ["OutputMessage: No items found."]
+
+
+def test_the_no_documents_error_names_the_translation(monkeypatch):
+    """The regression this exists for: an AND of two terms no paper shares."""
+    import bioleads.sources as S
+    monkeypatch.setattr(S, "_entrez", _fake_entrez(_EMPTY_SEARCH))
+
+    with pytest.raises(ValueError) as exc:
+        run_pipeline(pubmed_query="TMEM184C AND TM184C", cfg=_cfg())
+
+    msg = str(exc.value)
+    assert "PubMed returned 0 record(s)" in msg
+    assert '"TMEM184C"[All Fields] AND "TM184C"[All Fields]' in msg
+    assert "No items found." in msg
+
+
+def test_a_non_pubmed_run_keeps_the_plain_message():
+    """Nothing to say about PubMed when PubMed was never asked."""
+    with pytest.raises(ValueError) as exc:
+        run_pipeline(texts=[], cfg=_cfg())
+    assert str(exc.value) == "No documents loaded. Check your inputs."
+
+
+def test_describe_pubmed_search_handles_a_missing_report():
+    from bioleads.sources import describe_pubmed_search
+    assert describe_pubmed_search(None) == ""
+    assert describe_pubmed_search({}) == ""

@@ -5,6 +5,26 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### An empty PubMed search now explains itself
+
+- **"No documents loaded. Check your inputs."** was equally true of a typo, a
+  dead network, a bad API key and a query that simply matches nothing. It now
+  carries what PubMed actually did:
+
+  > No documents loaded. PubMed returned 0 record(s) for:
+  > `"TMEM184C"[All Fields] AND "TM184C"[All Fields]`. OutputMessage: No items
+  > found.
+
+- **PubMed's own translation of the query is the useful part.** Seeing an `AND`
+  of two terms is what tells you no single record holds both, which is a fact
+  about the literature rather than a fault to fix. Any `WarningList` or
+  `ErrorList` PubMed returns is carried through too.
+- The Log tab gets the same lines on an empty search even when other sources
+  supplied documents, so a query that quietly matched nothing is visible rather
+  than silent.
+- `fetch_pubmed(..., report=dict)` fills in `count`, `translation` and
+  `warnings`; `describe_pubmed_search(report)` turns it into the sentence.
+
 ### The `latest` symlink is gone; the timestamp is the pointer
 
 - **No more `<out>/latest`.** Runs are identified by the timestamp in their

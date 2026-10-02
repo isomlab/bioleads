@@ -497,3 +497,33 @@ def test_no_query_leaves_the_author_graph_alone():
     g, docs = _author_graph([("1", "TMEM184A", "yes", "Smith A")])
     assert annotate_author_graph(g, docs, None) == []
     assert "query_match" not in g.nodes["Smith A"]
+
+
+# --------------------------------------------------------------------------
+# The expansion gate: keep a discovered paper only if it names a query term
+# --------------------------------------------------------------------------
+
+def test_expansion_gate_keeps_only_papers_naming_a_term():
+    from bioleads.sources import _keep_if_query_terms
+    docs = [_pubmed_doc("1", "TMEM184C and autophagy", "about the protein"),
+            _pubmed_doc("2", "Something else entirely", "unrelated"),
+            _pubmed_doc("3", "A review", "mentions TMEM184C once")]
+    kept = _keep_if_query_terms(docs, "TMEM184C", lambda m: None)
+    assert [d.meta["pmid"] for d in kept] == ["1", "3"]
+
+
+def test_expansion_gate_is_a_no_op_when_the_query_has_no_searchable_term():
+    """A query of nothing but author and journal tags must not wipe the expansion."""
+    from bioleads.sources import _keep_if_query_terms
+    docs = [_pubmed_doc("1", "Anything", "at all")]
+    assert _keep_if_query_terms(docs, 'Isom DG[au] AND "Nature"[ta]', lambda m: None) == docs
+
+
+def test_expansion_gate_matches_the_colouring():
+    """The gate and the node colours must use the same test, or a kept paper
+    could render grey and a dropped one would have been green."""
+    from bioleads.sources import _keep_if_query_terms
+    docs = [_pubmed_doc("1", "Tmem184c in endothelium", "we study it")]
+    kept = _keep_if_query_terms(docs, "TMEM184C", lambda m: None)
+    assert len(kept) == 1                       # case-insensitive, as the colours are
+    assert matched_terms(kept[0].content, parse_query_terms("TMEM184C"))

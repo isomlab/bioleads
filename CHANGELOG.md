@@ -5,6 +5,42 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### The display trim no longer drops the papers the search was about
+
+- **Seeds survive the `max_graph_nodes` trim.** Ranking by in-corpus citations
+  drops exactly the paper a search was for: anything published recently has no
+  in-corpus citations by construction and loses to twenty-year-old reviews.
+- **This was real, not hypothetical.** A `TM184C` run grew to 910 documents and
+  the seed — three weeks old, one global citation — was not among the 150 nodes
+  drawn, was absent from `citation_ranking.csv`, and nothing said so.
+- Seeds are kept first, remaining slots go to the highest-ranked non-seeds, and
+  the message now reports both counts. **If the seeds alone exceed the cap the
+  cap still wins**, and the message says how many seeds were dropped.
+- The same protection covers the **senior-author networks**: an author is a seed
+  author if any of their corpus papers is a seed.
+- Graphs with no `seed` attribute trim exactly as before.
+
+### Expansion can be required to name a query term
+
+- **`expand_require_query_terms` (default on).** With a `--pubmed` query, a paper
+  discovered by citation expansion is kept only if its own title or abstract
+  contains at least one of the query's terms. **Seeds are never filtered**:
+  PubMed may have matched them on a MeSH term or on full text not fetched here.
+- The test is the same literal one that colours the networks, so the gate and
+  the colours can never disagree.
+- A query with no searchable term — all author or journal tags — filters
+  nothing, rather than silently discarding the whole expansion.
+- **Know what this does to a gene-symbol query.** Measured on a real run:
+  `TMEM184C OR TM184C` expanded to 582 discovered papers and **the gate kept
+  none of them**, because PubMed had already found every record containing those
+  strings and they were all seeds. **Expansion finds neighbours, and a paper's
+  neighbours are mostly about other things.** The gate earns its place on a
+  broad query where retrieval is incomplete, not on a rare symbol where it is
+  already exhaustive. The log line says exactly how many were dropped and why.
+- This gates **collection, not the walk**: the next round's frontier is chosen
+  from PMIDs before anything is fetched, so a rejected paper has already
+  contributed its links.
+
 ### An empty PubMed search now explains itself
 
 - **"No documents loaded. Check your inputs."** was equally true of a typo, a

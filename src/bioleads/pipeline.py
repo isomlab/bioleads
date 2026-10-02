@@ -133,6 +133,7 @@ def run_pipeline(
             expand_link=cfg.expand_link,
             expand_source=cfg.expand_source, expand_max=cfg.expand_max,
             expand_cache=citation_cache(cfg),
+            expand_require_query_terms=cfg.expand_require_query_terms,
             retmax=cfg.pubmed_retmax, email=cfg.entrez_email,
             api_key=cfg.entrez_api_key,
             cancel=cancel, progress=progress,

@@ -206,6 +206,42 @@ def fetch_icite(
     return out
 
 
+def _trim_to_top(g: nx.DiGraph, cap: int, noun: str, say, *, key) -> nx.DiGraph:
+    """Trim to `cap` nodes for display, **keeping every seed**.
+
+    Ranking by citations alone drops exactly the papers a search was about. A
+    paper published last month has no in-corpus citations by construction, so
+    the seed that motivated the whole run loses to twenty-year-old reviews and
+    vanishes from the picture without a word. That happened: a search for
+    TM184C grew to 910 documents and the seed, three weeks old, was not among
+    the 150 nodes drawn.
+
+    So seeds are kept first and the remaining slots go to the highest-ranking
+    non-seeds. **If the seeds alone exceed the cap** the cap wins, because a
+    picture of 900 nodes is not a picture, and the message says how many seeds
+    were dropped so it is never silent.
+
+    Nodes with no ``seed`` attribute count as non-seeds, which keeps graphs
+    built some other way behaving exactly as before.
+    """
+    if cap <= 0 or g.number_of_nodes() <= cap:
+        return g
+    seeds = [n for n, d in g.nodes(data=True) if d.get("seed")]
+    others = [n for n, d in g.nodes(data=True) if not d.get("seed")]
+    rank = lambda n: key(g.nodes[n])
+
+    if len(seeds) >= cap:
+        keep = sorted(seeds, key=rank, reverse=True)[:cap]
+        say(f"  trimmed to {cap} {noun}(s) for display: the seeds alone exceed "
+            f"the cap, so {len(seeds) - cap} seed(s) were dropped too.")
+    else:
+        keep = seeds + sorted(others, key=rank, reverse=True)[:cap - len(seeds)]
+        say(f"  trimmed to {len(keep)} {noun}(s) for display: all {len(seeds)} "
+            f"seed(s) kept, plus the top {len(keep) - len(seeds)} of "
+            f"{len(others)} by citations.")
+    return g.subgraph(keep).copy()
+
+
 def _prune_by_degree(g: nx.DiGraph, min_degree: int, noun: str, say) -> nx.DiGraph:
     """Drop nodes whose total degree is below ``min_degree``.
 
@@ -299,6 +335,9 @@ def build_citation_graph(
             global_citations=int(cc) if cc is not None else None,
             url=doc.meta.get("url") or f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
             source=doc.source,
+            # A seed came from the query or the ID list; anything else was added
+            # by citation expansion. The display trim below protects seeds.
+            seed=not bool(doc.meta.get("expanded")),
         )
 
     # Directed edges, intersected with the corpus. references give A→(cited),
@@ -323,18 +362,9 @@ def build_citation_graph(
 
     g = _prune_by_degree(g, cfg.min_paper_degree, "paper", say)
 
-    # Trim to the most-cited papers for visualization sanity (keep the induced
-    # subgraph so edges among the survivors are preserved).
-    if g.number_of_nodes() > cfg.max_graph_nodes:
-        ranked = sorted(
-            g.nodes,
-            key=lambda n: (g.nodes[n]["in_corpus_citations"],
-                           g.nodes[n].get("global_citations") or 0),
-            reverse=True,
-        )
-        g = g.subgraph(ranked[: cfg.max_graph_nodes]).copy()
-        say(f"  trimmed to the top {cfg.max_graph_nodes} most-cited paper(s) "
-            f"for display.")
+    g = _trim_to_top(g, cfg.max_graph_nodes, "paper", say,
+                     key=lambda d: (d.get("in_corpus_citations", 0),
+                                    d.get("global_citations") or 0))
     return g
 
 
@@ -401,8 +431,13 @@ def build_author_citation_graph(
     for pmid, senior in paper_senior.items():
         if not g.has_node(senior):
             g.add_node(senior, author=senior, papers=0, global_citations=0,
-                       in_corpus_citations=0)
+                       in_corpus_citations=0, seed=False)
         g.nodes[senior]["papers"] += 1
+        # An author is a seed author if ANY of their corpus papers is a seed, so
+        # the same trim that protects a new paper protects the lab behind it.
+        if not (pmid_to_doc.get(pmid) and
+                pmid_to_doc[pmid].meta.get("expanded")):
+            g.nodes[senior]["seed"] = True
         g.nodes[senior]["global_citations"] += paper_global.get(pmid, 0)
 
     # senior author → senior author, one edge per (de-duplicated) paper link.
@@ -435,23 +470,16 @@ def build_author_citation_graph(
                 f"{cfg.min_author_papers} corpus paper(s); {len(keep)} left.")
             g = g.subgraph(keep).copy()
 
-    if g.number_of_nodes() > cfg.max_graph_nodes:
-        # Trim by whatever the view is about. Ranking by citations while
-        # displaying paper counts would drop the prolific-but-uncited authors
-        # the paper view exists to show — a lab publishing steadily without
-        # being cited *within this corpus* is exactly the case of interest.
-        second = ("global_citations" if rank_by == "in_corpus_citations"
-                  else "in_corpus_citations")
-        ranked = sorted(
-            g.nodes,
-            key=lambda n: (g.nodes[n].get(rank_by) or 0,
-                           g.nodes[n].get(second) or 0),
-            reverse=True,
-        )
-        g = g.subgraph(ranked[: cfg.max_graph_nodes]).copy()
-        noun = "most-published" if rank_by == "papers" else "most-cited"
-        say(f"  trimmed to the top {cfg.max_graph_nodes} {noun} author(s) "
-            f"for display.")
+    # Trim by whatever the view is about. Ranking by citations while displaying
+    # paper counts would drop the prolific-but-uncited authors the paper view
+    # exists to show — a lab publishing steadily without being cited *within
+    # this corpus* is exactly the case of interest. Seed authors are kept either
+    # way, for the same reason seed papers are.
+    second = ("global_citations" if rank_by == "in_corpus_citations"
+              else "in_corpus_citations")
+    noun = "most-published" if rank_by == "papers" else "most-cited"
+    g = _trim_to_top(g, cfg.max_graph_nodes, noun + " author", say,
+                     key=lambda d: (d.get(rank_by) or 0, d.get(second) or 0))
     return g
 
 

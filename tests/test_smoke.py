@@ -2188,3 +2188,70 @@ def test_describe_pubmed_search_handles_a_missing_report():
     from bioleads.sources import describe_pubmed_search
     assert describe_pubmed_search(None) == ""
     assert describe_pubmed_search({}) == ""
+
+
+# ── the display trim keeps seeds ───────────────────────────────────────────────
+# A paper published last month has no in-corpus citations by construction, so
+# ranking by citations drops exactly the paper a search was about. This happened
+# to a real TM184C run: 910 documents, and the three-week-old seed was not among
+# the 150 nodes drawn.
+
+def _trim_graph(n_seeds, n_others):
+    import networkx as nx
+    g = nx.DiGraph()
+    for i in range(n_seeds):
+        g.add_node(f"seed{i}", in_corpus_citations=0, global_citations=1, seed=True)
+    for i in range(n_others):
+        g.add_node(f"old{i}", in_corpus_citations=50 + i, global_citations=900,
+                   seed=False)
+    return g
+
+
+def _trim(g, cap):
+    from bioleads.citations import _trim_to_top
+    return _trim_to_top(g, cap, "paper", lambda m: None,
+                        key=lambda d: (d.get("in_corpus_citations", 0),
+                                       d.get("global_citations") or 0))
+
+
+def test_an_uncited_seed_survives_the_trim():
+    kept = _trim(_trim_graph(1, 10), 5)
+    assert "seed0" in kept
+    assert kept.number_of_nodes() == 5
+
+
+def test_remaining_slots_go_to_the_highest_ranked_non_seeds():
+    kept = _trim(_trim_graph(1, 10), 5)
+    assert sorted(n for n in kept if n != "seed0") == ["old6", "old7", "old8", "old9"]
+
+
+def test_the_cap_still_wins_when_seeds_alone_exceed_it():
+    """A picture of 900 nodes is not a picture. The cap holds and the message says so."""
+    kept = _trim(_trim_graph(8, 0), 3)
+    assert kept.number_of_nodes() == 3
+
+
+def test_a_graph_with_no_seed_attribute_trims_exactly_as_before():
+    import networkx as nx
+    g = nx.DiGraph()
+    for i in range(6):
+        g.add_node(f"n{i}", in_corpus_citations=i)
+    kept = _trim(g, 2)
+    assert sorted(kept.nodes()) == ["n4", "n5"]
+
+
+def test_nothing_is_trimmed_below_the_cap():
+    g = _trim_graph(1, 2)
+    assert _trim(g, 10).number_of_nodes() == 3
+
+
+def test_seeds_are_marked_on_the_citation_graph(monkeypatch):
+    """The trim can only protect seeds if the graph says which nodes are seeds."""
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    docs = _citation_docs()
+    docs[2].meta["expanded"] = True
+    g = build_citation_graph(docs, Config())
+    if not g.number_of_nodes():
+        pytest.skip("no citation graph in this environment")
+    assert g.nodes["PMID:1"]["seed"] is True
+    assert g.nodes["PMID:3"]["seed"] is False

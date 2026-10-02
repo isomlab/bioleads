@@ -103,6 +103,20 @@ class Config:
     # (docs/benchmark.md). It is one flag away — `--expand-strategy relevance`
     # — and is the one to reach for when corpus cleanliness is what matters.
     expand_strategy: str = "bfs"
+
+    # Keep an expansion-discovered paper only if its own title or abstract
+    # contains at least one of the query's terms. Seeds are never filtered: they
+    # came from the query and PubMed may have matched them on a MeSH term or on
+    # full text never fetched here, so a seed failing a literal test is a fact
+    # about the test, not about the paper.
+    #
+    # Off when there is no text query, because there is nothing to require.
+    #
+    # This gates COLLECTION, not the walk. The frontier for the next round is
+    # chosen from PMIDs before anything is fetched, so a paper that fails the
+    # test has still already contributed its links. Gating the walk is a
+    # separate change.
+    expand_require_query_terms: bool = True
     expand_fwd_rounds: int = 1   # cited_by depth
     expand_back_rounds: int = 1  # references depth
     # Keep this many most-relevant papers *per direction*. Swept on the

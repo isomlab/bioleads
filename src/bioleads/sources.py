@@ -623,6 +623,30 @@ def documents_from_texts(texts: Iterable[str], prefix: str = "doc") -> list[Docu
             for i, t in enumerate(texts)]
 
 
+def _keep_if_query_terms(docs: list[Document], query: str, say) -> list[Document]:
+    """Drop expansion-discovered papers whose text contains no query term.
+
+    Literal, case-insensitive, on title plus abstract — the same test that
+    colours the citation network, so the two always agree.
+
+    **With no parsable terms nothing is dropped.** A query that is entirely
+    author or journal tags yields no searchable term, and silently discarding a
+    whole expansion because of that would be far worse than keeping it.
+    """
+    from .querymatch import matched_terms, parse_query_terms
+
+    terms = parse_query_terms(query)
+    if not terms:
+        say("  query-term filter: the query has no searchable term, so nothing "
+            "was filtered.")
+        return docs
+    kept = [d for d in docs if matched_terms(d.content, terms)]
+    dropped = len(docs) - len(kept)
+    say(f"  query-term filter: kept {len(kept)} of {len(docs)} discovered "
+        f"paper(s); {dropped} contained none of {terms}.")
+    return kept
+
+
 def load_documents(
     *,
     pubmed_query: str | None = None,
@@ -634,6 +658,7 @@ def load_documents(
     expand_source: str = "ncbi",
     expand_max: int = 1000,
     expand_cache=None,
+    expand_require_query_terms: bool = False,
     cancel=None,
     progress=None,
     pubmed_report: dict | None = None,
@@ -647,6 +672,12 @@ def load_documents(
 
     `pubmed_report` is passed through to :func:`fetch_pubmed`; see
     :func:`describe_pubmed_search`.
+
+    With `expand_require_query_terms` and a `pubmed_query`, a paper discovered by
+    expansion is kept only if its own title or abstract contains at least one of
+    the query's terms. **Seeds are never filtered** — they came from the query,
+    and PubMed may have matched them on a MeSH term or on full text not fetched
+    here, so a seed failing a literal test says something about the test.
     """
     say = _sayer(progress)
     docs: list[Document] = []
@@ -702,6 +733,8 @@ def load_documents(
                     cancel=cancel, progress=progress)
                 for d in added:
                     d.meta["expanded"] = True
+                if expand_require_query_terms and pubmed_query:
+                    added = _keep_if_query_terms(added, pubmed_query, say)
                 docs += added
             else:
                 say("  no new records found to add")

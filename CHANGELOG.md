@@ -9,8 +9,12 @@ while the major version is 0, a minor bump may change defaults.
 
 - **`min_paper_degree`, `min_author_degree` and `min_author_papers` no longer
   remove seeds.** A seed is in the picture because the search returned it, not
-  because of how connected it turned out to be, and a paper published last
-  month has no in-corpus citations by construction.
+  because of how connected it turned out to be. **A seed with few neighbours is
+  usually a lightly cited paper and only sometimes a new one**, the uncited case
+  being much the commoner: most papers are cited rarely, few are new at any
+  moment. Neither is a reason to hide the thing that was asked for.
+- The log now says how many spared seeds are cited **outside** this corpus,
+  since that is what separates "not cited yet" from "not much cited".
 - **The exemption is for seeds only.** A non-seed of the same degree is still
   dropped, so the control is not quietly disabled, and the log says how many
   seeds were kept below the threshold rather than leaving it to be noticed.
@@ -48,8 +52,8 @@ while the major version is 0, a minor bump may change defaults.
 ### The display trim no longer drops the papers the search was about
 
 - **Seeds survive the `max_graph_nodes` trim.** Ranking by in-corpus citations
-  drops exactly the paper a search was for: anything published recently has no
-  in-corpus citations by construction and loses to twenty-year-old reviews.
+  drops exactly the paper a search was for: a thinly cited paper, or a recent
+  one, loses to twenty-year-old reviews.
 - **This was real, not hypothetical.** A `TM184C` run grew to 910 documents and
   the seed — three weeks old, one global citation — was not among the 150 nodes
   drawn, was absent from `citation_ranking.csv`, and nothing said so.

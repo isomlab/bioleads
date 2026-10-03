@@ -210,11 +210,17 @@ def _trim_to_top(g: nx.DiGraph, cap: int, noun: str, say, *, key) -> nx.DiGraph:
     """Trim to `cap` nodes for display, **keeping every seed**.
 
     Ranking by citations alone drops exactly the papers a search was about. A
-    paper published last month has no in-corpus citations by construction, so
-    the seed that motivated the whole run loses to twenty-year-old reviews and
-    vanishes from the picture without a word. That happened: a search for
-    TM184C grew to 910 documents and the seed, three weeks old, was not among
-    the 150 nodes drawn.
+    seed with few in-corpus links is usually a **lightly cited** paper and only
+    sometimes a **new** one, the uncited case being much the commoner: most
+    papers are cited rarely, while few are new at any given moment. Either way
+    the seed loses to twenty-year-old reviews and vanishes without a word. That
+    happened: a search for TM184C grew to 910 documents and the seed was not
+    among the 150 nodes drawn.
+
+    **Neither case is a reason to hide it.** Low in-corpus degree is a fact
+    about this corpus, not a verdict on the paper. ``year`` and
+    ``global_citations`` sit on every node and are what tell the two apart, so
+    the hover can say which it is rather than the trim deciding for you.
 
     So seeds are kept first and the remaining slots go to the highest-ranking
     non-seeds. **If the seeds alone exceed the cap** the cap wins, because a
@@ -269,10 +275,11 @@ def _prune_by_degree(g: nx.DiGraph, min_degree: int, noun: str, say) -> nx.DiGra
 
     **Seeds are exempt.** A seed is a paper the search returned or an author of
     one, and it is in the picture because it is what was asked for, not because
-    of how connected it turned out to be. A new paper has no in-corpus citations
-    by construction, so any threshold above zero removes exactly the thing the
-    run was about. Seeds still count toward their neighbours' degree, so
-    exempting them does not inflate anyone else's.
+    of how connected it turned out to be. **A seed with few neighbours is most
+    often simply an uncited paper, and sometimes a new one** — both are ordinary
+    — so any threshold above zero removes the run's own subject along with the
+    noise. Seeds still count toward their neighbours' degree, so exempting them
+    does not inflate anyone else's.
     """
     if min_degree <= 0 or not g.number_of_nodes():
         return g
@@ -287,10 +294,17 @@ def _prune_by_degree(g: nx.DiGraph, min_degree: int, noun: str, say) -> nx.DiGra
         rounds += 1
     dropped = before - g.number_of_nodes()
     if dropped:
-        spared = sum(1 for n, d in g.degree()
-                     if d < min_degree and g.nodes[n].get("seed"))
-        extra = (f" {spared} seed(s) kept below the threshold."
-                 if spared else "")
+        under = [n for n, d in g.degree()
+                 if d < min_degree and g.nodes[n].get("seed")]
+        extra = ""
+        if under:
+            # Say which kind of thinly linked they are, because the reading
+            # differs: a paper cited elsewhere but not here is peripheral to
+            # this corpus, one cited nowhere is lightly cited full stop.
+            cited = sum(1 for n in under
+                        if (g.nodes[n].get("global_citations") or 0) > 0)
+            extra = (f" {len(under)} seed(s) kept below the threshold, "
+                     f"{cited} of them cited outside this corpus.")
         say(f"  dropped {dropped} {noun}(s) below degree {min_degree} "
             f"in {rounds} round(s); {g.number_of_nodes()} left.{extra}")
     if dropped and not g.number_of_nodes():
@@ -446,7 +460,7 @@ def build_author_citation_graph(
                        in_corpus_citations=0, seed=False)
         g.nodes[senior]["papers"] += 1
         # An author is a seed author if ANY of their corpus papers is a seed, so
-        # the same trim that protects a new paper protects the lab behind it.
+        # the same trim that protects a lightly cited paper protects its lab.
         if not (pmid_to_doc.get(pmid) and
                 pmid_to_doc[pmid].meta.get("expanded")):
             g.nodes[senior]["seed"] = True

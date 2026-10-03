@@ -2223,10 +2223,9 @@ def test_describe_pubmed_search_handles_a_missing_report():
 
 
 # ── the display trim keeps seeds ───────────────────────────────────────────────
-# A paper published last month has no in-corpus citations by construction, so
-# ranking by citations drops exactly the paper a search was about. This happened
-# to a real TM184C run: 910 documents, and the three-week-old seed was not among
-# the 150 nodes drawn.
+# Ranking by citations drops exactly the paper a search was about, whether it is
+# thinly cited or simply recent. This happened to a real TM184C run: 910
+# documents, and the seed was not among the 150 nodes drawn.
 
 def _trim_graph(n_seeds, n_others):
     import networkx as nx
@@ -2290,9 +2289,10 @@ def test_seeds_are_marked_on_the_citation_graph(monkeypatch):
 
 
 # ── seeds survive every filter, not just the display trim ──────────────────────
-# A seed is in the picture because it is what was asked for. A paper published
-# last month has no in-corpus citations by construction, so any threshold above
-# zero removes exactly the thing the run was about.
+# A seed is in the picture because it is what was asked for. A seed with few
+# neighbours is usually a lightly cited paper and sometimes a new one, and
+# neither is a reason to hide it, so any threshold above zero would remove
+# exactly the thing the run was about.
 
 def _degree_graph():
     import networkx as nx

@@ -2812,12 +2812,21 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
     zoom = float(re.search(r"ZOOM = ([0-9.]+)", tour).group(1))
     mag = float(re.search(r"MAG = ([0-9.]+)", tour).group(1))
     ring = float(re.search(r"var RING = ([0-9.]+)", tour).group(1))
-    ring_z = float(re.search(r"RING_Z = ([0-9.]+)", tour).group(1))
+    focus_px = float(re.search(r"FOCUS_PX = ([0-9.]+)", tour).group(1))
     assert zoom > 1, "the scene never grows, so nothing looks closer"
     # Plotly markers are sized in screen pixels, so spreading the scene apart
     # leaves every node the size it was. They have to be scaled to match.
     assert mag > 1 and "function magnify(" in tour
-    assert ring_z > ring, "the highlight ring would end up inside the node"
+    # 2D measures 82px across for its focused node on a 1096px canvas. The 3D
+    # marker has to be in that league, and SOLID: a translucent ring left the
+    # node its original size underneath, so zooming never showed the node.
+    assert focus_px >= 82, "the focus node is smaller than 2D's"
+    assert focus_px > ring
+    assert "opacity: 1," in tour, "a translucent ring is not the node"
+
+    # The camera centre is in units of half the aspect ratio, so it has to be
+    # rescaled as the zoom tweens or the focus node drifts off to one side.
+    assert "n.x * k / 2" in tour
 
     # Both coordinate forms are present, and the camera form inverts through
     # the figure's OWN pinned ranges back to the data form.

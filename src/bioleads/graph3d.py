@@ -240,16 +240,23 @@ SCENE_PAD = 0.06          # fraction of each axis span, so markers aren't clippe
 # distance, so the graph gets bigger and the parts that no longer fit simply
 # fall outside the view, exactly as they do when 2D zooms. Every node is still
 # there to pan back to.
-TOUR_ZOOM_3D = 3.5
+TOUR_ZOOM_3D = 7.0
 # **Scaling the scene is still only half of a zoom.** vis.js scales the whole
 # canvas, so in 2D the nodes and edges grow as the view closes in, and that
 # growth is most of what reads as "zoomed in". Plotly's markers are sized in
 # SCREEN pixels, so spreading the scene apart leaves every marker the size it
 # was. They are scaled by hand over the flight to match.
-TOUR_MAGNIFY = 2.5        # node markers at the end of a flight
+# Measured against the 2D tour on a 1096px canvas, where the nodes run 32px
+# to 90px across and the focused one is 82px. 3.5x puts the 3D markers at
+# 24-91px, which is the same graph at the same size.
+TOUR_MAGNIFY = 3.5        # node markers at the end of a flight
 TOUR_EDGE_WIDTH = 2.6     # edge width at the end of a flight
-TOUR_RING = 30            # the highlight ring, unzoomed
-TOUR_RING_ZOOMED = 80
+# The focus marker is SOLID and large, not a translucent ring over the node.
+# 2D recolors and enlarges the node itself, so what you look at is the node;
+# a ring left the node its original size underneath, which is why "zoom in so
+# we can see the actual node" kept going unanswered.
+TOUR_RING = 30            # unzoomed
+TOUR_FOCUS_PX = 100       # at full zoom, against 2D's 82
 
 
 def scene_ranges(pos):
@@ -353,7 +360,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
 (function () {
   var STOPS = __STOPS__, FLIGHT = __FLIGHT__, DWELL = __DWELL__;
   var ZOOM = __ZOOM3D__, MAG = __MAGNIFY__, EDGE_W = __EDGE_W__;
-  var RING = __RING__, RING_Z = __RING_Z__;
+  var RING = __RING__, FOCUS_PX = __FOCUS_PX__;
   var BASE = null, shown = 1;
   var atK = 1, atC = {x: 0, y: 0, z: 0};
   var HOME = {eye: {x: 1.25, y: 1.25, z: 1.25}, center: {x: 0, y: 0, z: 0}};
@@ -395,9 +402,16 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
       return v * f; })]}, [1]);
     Plotly.restyle(el, {"line.width": b.width + (EDGE_W - b.width) * t}, [0]);
     if (el.data.length > 2) {
-      Plotly.restyle(el, {"marker.size": [[RING + (RING_Z - RING) * t]]},
+      Plotly.restyle(el, {"marker.size": [[RING + (FOCUS_PX - RING) * t]]},
                      [el.data.length - 1]);
     }
+  }
+  // **`scene.camera.center` is in units of half the aspect ratio.** A node at
+  // normalised position n sits at n * k / 2, so the centre has to be rescaled
+  // as the zoom tweens or the focus node drifts off to one side -- which is
+  // what it did, further the further in the view went.
+  function centre(n, k) {
+    return {x: n.x * k / 2, y: n.y * k / 2, z: n.z * k / 2};
   }
   function glide(k1, c1, done) {
     // Zoom is the aspect ratio, pan is the camera centre, and the axis ranges
@@ -408,11 +422,12 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     (function frame(now) {
       var t = Math.min(1, (now - t0) / FLIGHT), e = ease(t);
       var k = k0 + (k1 - k0) * e;
-      var c = {x: c0.x + (c1.x - c0.x) * e, y: c0.y + (c1.y - c0.y) * e,
+      var n = {x: c0.x + (c1.x - c0.x) * e, y: c0.y + (c1.y - c0.y) * e,
                z: c0.z + (c1.z - c0.z) * e};
+      var c = centre(n, k);
       // Updated every frame, so an interrupted flight resumes from where it
       // actually got to rather than from where it was aiming.
-      atK = k; atC = c;
+      atK = k; atC = n;
       Plotly.relayout(el, {
         "scene.aspectmode": "manual",
         "scene.aspectratio": {x: k, y: k, z: k},
@@ -441,13 +456,15 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
   }
   function unannotate() { Plotly.relayout(gd(), {"scene.annotations": []}); }
   function light(p) {
-    // A ring drawn on top of the node. Recoloring the node itself would mean
-    // rewriting the whole marker array on every stop.
+    // A solid marker drawn over the node, which is how 2D marks a stop: it
+    // recolors and enlarges the node, so the thing you are looking at IS the
+    // node. Done as an extra trace because recoloring the node itself would
+    // mean rewriting the whole marker array on every stop.
     var el = gd();
     var trace = {x: [p[0]], y: [p[1]], z: [p[2]], mode: "markers",
                  type: "scatter3d", hoverinfo: "skip", showlegend: false,
-                 marker: {size: RING, color: "__HILITE__", opacity: 0.55,
-                          line: {width: 2, color: "#7a0f37"}}};
+                 marker: {size: RING, color: "__HILITE__", opacity: 1,
+                          line: {width: 3, color: "#7a0f37"}}};
     if (el.data.length > 2) { Plotly.deleteTraces(el, el.data.length - 1); }
     Plotly.addTraces(el, trace);
   }
@@ -513,7 +530,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
                   .replace("__ZOOM3D__", str(TOUR_ZOOM_3D))
                   .replace("__MAGNIFY__", str(TOUR_MAGNIFY))
                   .replace("__EDGE_W__", str(TOUR_EDGE_WIDTH))
-                  .replace("__RING_Z__", str(TOUR_RING_ZOOMED))
+                  .replace("__FOCUS_PX__", str(TOUR_FOCUS_PX))
                   .replace("__RING__", str(TOUR_RING))
                   .replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
                   .replace("__DWELL__", str(TOUR_DWELL_MS))

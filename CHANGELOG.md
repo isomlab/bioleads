@@ -20,6 +20,19 @@ while the major version is 0, a minor bump may change defaults.
   `drawGraph()`; the injected script attached nothing and failed silently. It
   now waits for the object.
 
+### The Citation networks defaults are now 3
+
+- **`min_paper_degree`, `min_author_degree` and `min_author_papers` default to
+  3**, matching `expand_rounds`.
+- **Why a non-zero floor is now safe:** seeds are exempt from all three, so the
+  papers a search actually returned can never be hidden by them. Before that
+  exemption existed, any floor above zero risked deleting the run's own subject.
+- An expanded corpus is mostly papers reached once that connect to nothing else.
+  Drawing them makes a hairball. Three connections is roughly where a node
+  starts saying something about the corpus rather than about the walk.
+- **A run that used to draw everything will now draw less.** Set any of them to
+  0 for the old behaviour.
+
 ### `expand_rounds` now defaults to 3
 
 - Expansion is what turns a handful of search hits into a corpus worth drawing a

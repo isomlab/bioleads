@@ -1091,7 +1091,7 @@ def test_senior_author_accumulates_papers_and_edge_weight(monkeypatch):
     docs = _as_expanded([Document(doc_id=f"PMID:{p}", text="x", source="pubmed",
                                   meta={"pmid": p}) for p in ("10", "11", "12")])
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
-    g = build_author_citation_graph(docs, Config())
+    g = build_author_citation_graph(docs, Config(min_author_degree=0))
 
     assert set(g.nodes) == {"Lee L", "Mor M"}
     assert g.nodes["Lee L"]["papers"] == 2
@@ -1116,7 +1116,7 @@ def test_min_paper_degree_drops_isolated_papers(monkeypatch):
                  source="pubmed", meta={"pmid": "4"})])
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
 
-    kept_all = build_citation_graph(docs, Config())
+    kept_all = build_citation_graph(docs, Config(min_paper_degree=0))
     assert kept_all.number_of_nodes() == 4              # 0 = keep everything
 
     g = build_citation_graph(docs, Config(min_paper_degree=1))
@@ -1202,7 +1202,8 @@ def test_min_author_degree_drops_isolated_authors(monkeypatch):
                  source="pubmed", meta={"pmid": "4"})])
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
 
-    assert "Eve E" in build_author_citation_graph(docs, Config()).nodes
+    assert "Eve E" in build_author_citation_graph(
+        docs, Config(min_author_degree=0)).nodes
     g = build_author_citation_graph(docs, Config(min_author_degree=1))
     assert "Eve E" not in g.nodes
     assert set(g.nodes) == {"Alice A", "Bob B", "Dan D"}
@@ -1266,7 +1267,10 @@ def test_degree_threshold_flags(monkeypatch):
 
     base = ["--pmids", "1"]
     args = build_parser().parse_args(base)
-    assert (args.min_paper_degree, args.min_author_degree) == (0, 0)
+    # Track Config rather than a literal: these defaults have moved once and a
+    # test that hard-codes them just has to be edited again.
+    assert (args.min_paper_degree, args.min_author_degree) == (
+        Config.min_paper_degree, Config.min_author_degree)
     args = build_parser().parse_args(
         base + ["--min-paper-degree", "3", "--min-author-degree", "12"])
     assert (args.min_paper_degree, args.min_author_degree) == (3, 12)
@@ -2290,7 +2294,7 @@ def test_seeds_are_marked_on_the_citation_graph(monkeypatch):
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
     docs = _citation_docs()
     docs[2].meta["expanded"] = True
-    g = build_citation_graph(docs, Config())
+    g = build_citation_graph(docs, Config(min_paper_degree=0))
     if not g.number_of_nodes():
         pytest.skip("no citation graph in this environment")
     assert g.nodes["PMID:1"]["seed"] is True

@@ -230,14 +230,22 @@ class Config:
     # becomes an edge between every pair of their authors, so author degrees run
     # an order of magnitude higher. A number that meaningfully thins papers
     # barely touches authors.
-    min_paper_degree: int = 0
-    min_author_degree: int = 0
+    #
+    # **3, not 0.** An expanded corpus is mostly papers that were reached once
+    # and connect to nothing else, and drawing them makes a hairball in which
+    # the structure worth seeing is invisible. Three connections is where a node
+    # starts carrying information about the corpus rather than about the walk.
+    # **Seeds are exempt from this**, which is what makes a non-zero default
+    # safe: the papers the search actually returned are never hidden by it.
+    min_paper_degree: int = 3
+    min_author_degree: int = 3
     # The paper-count view's own floor, counted in corpus papers rather than in
     # citation degree. A degree threshold cannot serve here: a lab publishing
     # steadily that nothing in the corpus cites has degree 0, and that lab is
     # exactly what the view exists to show, so a degree floor would delete its
-    # subject. Filters the picture and the ranking alike.
-    min_author_papers: int = 0
+    # subject. Filters the picture and the ranking alike. 3 for the same reason
+    # as the two above, and seeds are exempt here too.
+    min_author_papers: int = 3
 
     # --- Misc ---
     seed: int = 0

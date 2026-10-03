@@ -5,6 +5,24 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Fixed: the network buttons could feel broken, and 3D had none of them
+
+- **The layout now always stops.** It relied on a single vis.js event,
+  `stabilizationIterationsDone`, which **does not reliably arrive on a large
+  graph**. Until physics stops the main thread is busy enough that every button
+  feels laggy or dead, and the status stayed on *settling…* forever. A second
+  event and a **12-second watchdog** now guarantee a clickable page; the status
+  says `settled (time limit)` when the watchdog is what stopped it.
+- **The 3D views have the tour too** — *Play tour*, *Next*, *Reset view*, and the
+  same ⓘ. They had none of it: no way to reach the most connected node and
+  nowhere to read it.
+- The 3D panel shows **the same record** as the 2D one, built by the same
+  function.
+- **The 3D camera is tweened, not snapped.** Plotly has no camera animation of
+  its own, so the move is stepped over `TOUR_FLIGHT_MS` — the difference between
+  a tour and a slideshow. There is no physics in a Plotly scene, so there is no
+  Pause button there.
+
 ### A guided tour of the most connected nodes
 
 - **Play tour** flies the camera to the most connected node, zooms in and shows

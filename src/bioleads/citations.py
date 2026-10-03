@@ -595,6 +595,13 @@ TOUR_FLIGHT_MS = 2600      # camera travel
 TOUR_DWELL_MS = 11000      # time on a node before moving on
 TOUR_ZOOM = 1.6            # gentler than the 1.9 it started at
 
+# Hard limit on how long the layout may simulate before physics is switched off
+# regardless. vis.js does not always emit `stabilizationIterationsDone` on a
+# large graph, and until physics stops the main thread is busy enough that the
+# buttons feel broken. Better a layout that stopped early than a page that
+# cannot be clicked.
+SETTLE_LIMIT_MS = 12000
+
 
 def _tour_runtime_seconds(stops: int = TOUR_STOPS) -> int:
     """Roughly how long a full tour takes, for telling someone what to record."""
@@ -822,11 +829,19 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     btn.addEventListener("click", function () {
       set(!on, on ? "paused" : "settling\u2026");
     });
-    // Stop on its own once the one-time stabilization is done, so the graph is
-    // still by the time anyone tries to click a node.
-    net.on("stabilizationIterationsDone", function () {
-      if (on) { set(false, "settled"); }
-    });
+    // Stop on its own once the layout has settled. Three ways, because one was
+    // not enough: on a large graph `stabilizationIterationsDone` can fail to
+    // arrive, the simulation then runs forever, and a busy main thread makes
+    // every button feel broken. The watchdog is what guarantees the page
+    // becomes responsive.
+    function settle(note) { if (on) { set(false, note); } }
+    net.on("stabilizationIterationsDone", function () { settle("settled"); });
+    net.on("stabilized", function () { settle("settled"); });
+    var watchdog = setTimeout(function () {
+      settle("settled (time limit)");
+    }, __SETTLE_LIMIT__);
+    // A manual pause or resume takes the watchdog out of the way.
+    btn.addEventListener("click", function () { clearTimeout(watchdog); });
   }
   // `network` is assigned inside drawGraph(); poll briefly rather than assume.
   var tries = 0;
@@ -848,6 +863,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     snippet = snippet.replace("__DWELL__", str(TOUR_DWELL_MS))
     snippet = snippet.replace("__ZOOM__", str(TOUR_ZOOM))
     snippet = snippet.replace("__RECORD_HELP__", RECORD_HELP)
+    snippet = snippet.replace("__SETTLE_LIMIT__", str(SETTLE_LIMIT_MS))
     if "bl-physics" in html:          # already injected
         return
     if "</body>" in html:
@@ -1044,7 +1060,7 @@ def write_citation_html_3d(
     return write_graph_3d(
         g, path, title=title, size_attr="in_corpus_citations", seed=seed,
         color_attr="in_corpus_citations", colors=_match_colors(g),
-        hover=_citation_hover, directed=True,
+        hover=_citation_hover, directed=True, stops=tour_stops(g),
     )
 
 
@@ -1190,5 +1206,5 @@ def write_author_html_3d(
     return write_graph_3d(
         g, path, title=title, size_attr=size_attr, seed=seed,
         color_attr=size_attr, colors=_match_colors(g),
-        hover=_author_hover, directed=True,
+        hover=_author_hover, directed=True, stops=tour_stops(g),
     )

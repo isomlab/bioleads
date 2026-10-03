@@ -123,6 +123,7 @@ def write_graph_3d(
     groups: dict | None = None,
     color_attr: str | None = None,
     colors: dict | None = None,
+    stops: list | None = None,
     hover=None,
     directed: bool = False,
 ) -> str | None:
@@ -132,6 +133,7 @@ def write_graph_3d(
     ----------
     size_attr   node attribute used for marker size (e.g. "count").
     groups      {node: cluster_id} → discrete per-cluster colors (takes priority).
+    stops       tour stops from `citations.tour_stops`, for the guided tour.
     colors      {node: css color} → explicit per-node colors. Outranks both of
                 the above, because it carries a meaning the caller has already
                 decided (query-term match) rather than one derived here.
@@ -215,4 +217,147 @@ def write_graph_3d(
         paper_bgcolor="white",
     )
     fig.write_html(path, include_plotlyjs=True, full_html=True)
+    _inject_tour_3d(path, stops, pos)
     return path
+
+
+def _inject_tour_3d(path: str, stops, pos) -> None:
+    """Give a 3D view the same tour and record panel as the 2D one.
+
+    There is no physics here — Plotly draws a fixed scene — so there is nothing
+    to pause. What was missing is everything else: a way to go to the most
+    connected node, and the node's record where you can read it.
+
+    The camera is moved by ``Plotly.relayout`` on ``scene.camera``, looking at
+    the node from a fixed offset. Plotly has no camera tween, so the move is
+    stepped here over :data:`TOUR_FLIGHT_MS` rather than jumping, which is the
+    difference between a tour and a slideshow.
+    """
+    if not stops:
+        return
+    try:
+        from .citations import (RECORD_HELP, TOUR_DWELL_MS, TOUR_FLIGHT_MS)
+    except Exception:          # pragma: no cover - citations is always present
+        return
+    coords = {n: list(map(float, p)) for n, p in (pos or {}).items()}
+    stops = [dict(st, xyz=coords.get(st["id"])) for st in stops
+             if coords.get(st["id"])]
+    if not stops:
+        return
+
+    block = """
+<style>
+  #bl3-panel {position:fixed; top:12px; right:14px; z-index:9999; width:390px;
+    font:12px/1.45 system-ui,sans-serif; background:#f8fafc;
+    border:1px solid #d7dee6; border-radius:6px; padding:7px 9px;
+    box-shadow:0 1px 3px rgba(0,0,0,.12); color:#1f2a36}
+  #bl3-panel button {font:12px/1.3 system-ui,sans-serif; cursor:pointer;
+    border:1px solid #b9c6bd; background:#fff; border-radius:4px;
+    padding:3px 9px; margin-right:5px}
+  #bl3-help {cursor:help; color:#5b6b7c; border-bottom:1px dotted #9aa8b6}
+  #bl3-info {display:none; margin-top:7px; max-height:60vh; overflow-y:auto;
+    border-top:1px solid #d7dee6; padding-top:6px}
+  #bl3-info .h {margin-bottom:5px; color:#5b6b7c}
+  #bl3-info table {border-collapse:collapse; width:100%}
+  #bl3-info th {text-align:left; vertical-align:top; font-weight:600;
+    color:#5b6b7c; padding:2px 8px 2px 0; white-space:nowrap}
+  #bl3-info td {vertical-align:top; padding:2px 0; word-break:break-word}
+</style>
+<div id="bl3-panel">
+  <button id="bl3-play">Play tour</button>
+  <button id="bl3-next">Next</button>
+  <button id="bl3-reset">Reset view</button>
+  <span id="bl3-help" title="__HELP__">&#9432;</span>
+  <div id="bl3-info"></div>
+</div>
+<script>
+(function () {
+  var STOPS = __STOPS__, FLIGHT = __FLIGHT__, DWELL = __DWELL__;
+  var HOME = {eye: {x: 1.25, y: 1.25, z: 1.25}, center: {x: 0, y: 0, z: 0}};
+  var i = -1, playing = false, timer = null, anim = null;
+  function gd() { return document.querySelector(".plotly-graph-div"); }
+  function ease(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3)/2; }
+  function span(a, b) {
+    // Normalise the node's coordinates so the camera sits a constant distance
+    // away whatever the scene's scale happens to be.
+    var n = Math.sqrt(a*a + b*b) || 1;
+    return n;
+  }
+  function flyTo(p, done) {
+    var el = gd(), from = (el.layout.scene && el.layout.scene.camera) || HOME;
+    var n = Math.sqrt(p[0]*p[0] + p[1]*p[1] + p[2]*p[2]) || 1;
+    var k = 0.55;                       // how close the camera comes
+    var to = {center: {x: p[0], y: p[1], z: p[2]},
+              eye: {x: p[0] + k*p[0]/n + 0.35, y: p[1] + k*p[1]/n + 0.35,
+                    z: p[2] + k*p[2]/n + 0.35}};
+    var t0 = performance.now();
+    cancelAnimationFrame(anim);
+    (function frame(now) {
+      var t = Math.min(1, (now - t0) / FLIGHT), e = ease(t);
+      function mix(a, b) { return a + (b - a) * e; }
+      Plotly.relayout(el, {"scene.camera": {
+        center: {x: mix(from.center ? from.center.x : 0, to.center.x),
+                 y: mix(from.center ? from.center.y : 0, to.center.y),
+                 z: mix(from.center ? from.center.z : 0, to.center.z)},
+        eye: {x: mix(from.eye.x, to.eye.x), y: mix(from.eye.y, to.eye.y),
+              z: mix(from.eye.z, to.eye.z)}}});
+      if (t < 1) { anim = requestAnimationFrame(frame); } else if (done) { done(); }
+    })(t0);
+  }
+  function show(k) {
+    var s = STOPS[k]; if (!s) { return; }
+    var rows = "";
+    for (var r = 0; r < s.record.length; r++) {
+      var v = s.record[r][1];
+      if (/^https?:\/\//.test(v)) {
+        v = '<a href="' + v + '" target="_blank" rel="noopener">' + v + "</a>";
+      }
+      rows += "<tr><th>" + s.record[r][0] + "</th><td>" + v + "</td></tr>";
+    }
+    var info = document.getElementById("bl3-info");
+    info.innerHTML = '<div class="h"><b>' + (k + 1) + " of " + STOPS.length +
+      "</b> &middot; " + s.degree + " connection(s)</div><table>" + rows +
+      "</table>";
+    info.style.display = "block";
+    flyTo(s.xyz);
+  }
+  function step() {
+    i = (i + 1) % STOPS.length;
+    show(i);
+    if (playing) { timer = setTimeout(step, DWELL); }
+  }
+  var play = document.getElementById("bl3-play");
+  document.getElementById("bl3-next").addEventListener("click", function () {
+    playing = false; clearTimeout(timer); play.textContent = "Play tour"; step();
+  });
+  play.addEventListener("click", function () {
+    playing = !playing;
+    play.textContent = playing ? "Stop tour" : "Play tour";
+    clearTimeout(timer);
+    if (playing) { step(); }
+  });
+  document.getElementById("bl3-reset").addEventListener("click", function () {
+    playing = false; clearTimeout(timer); cancelAnimationFrame(anim);
+    play.textContent = "Play tour";
+    document.getElementById("bl3-info").style.display = "none";
+    Plotly.relayout(gd(), {"scene.camera": HOME});
+  });
+})();
+</script>
+"""
+    import json as _json
+    block = (block.replace("__STOPS__", _json.dumps(stops))
+                  .replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
+                  .replace("__DWELL__", str(TOUR_DWELL_MS))
+                  .replace("__HELP__", RECORD_HELP.replace('"', "&quot;")))
+    try:
+        with open(path, encoding="utf-8") as fh:
+            html = fh.read()
+    except OSError:
+        return
+    if "bl3-panel" in html:
+        return
+    html = (html.replace("</body>", block + "</body>", 1) if "</body>" in html
+            else html + block)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(html)

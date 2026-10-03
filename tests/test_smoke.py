@@ -2605,3 +2605,55 @@ def test_the_quoted_tour_runtime_follows_the_pacing():
     from bioleads.citations import RECORD_HELP, TOUR_DWELL_MS, TOUR_STOPS
     total = TOUR_STOPS * TOUR_DWELL_MS // 1000
     assert f"{total // 60} min {total % 60} s" in RECORD_HELP
+
+
+# ── the settle watchdog, and the 3D tour ───────────────────────────────────────
+
+def test_the_layout_stops_even_if_the_event_never_arrives(tmp_path):
+    """vis.js does not always emit stabilizationIterationsDone on a large
+    graph, and until physics stops the main thread is busy enough that every
+    button feels broken. The watchdog is what guarantees a clickable page."""
+    from bioleads.citations import SETTLE_LIMIT_MS
+    html = _written_network(tmp_path)
+    assert f"}}, {SETTLE_LIMIT_MS});" in html
+    assert 'net.on("stabilized"' in html        # a second event, not just one
+    assert "__SETTLE_LIMIT__" not in html
+
+
+def _written_3d(tmp_path, n=7):
+    import networkx as nx
+    from bioleads.citations import write_citation_html_3d
+    g = nx.DiGraph()
+    for i in range(n):
+        g.add_node(f"PMID:{i}", pmid=str(i), in_corpus_citations=i,
+                   title=f"P{i}", global_citations=i)
+    g.add_edges_from([(f"PMID:{n-1}", f"PMID:{j}") for j in range(3)])
+    path = write_citation_html_3d(g, str(tmp_path / "n3.html"))
+    if not path:
+        pytest.skip("plotly not installed")
+    return open(path, encoding="utf-8").read()
+
+
+def test_the_3d_view_has_the_tour_too(tmp_path):
+    """It had none of the controls: no way to reach the most connected node and
+    nowhere to read it."""
+    html = _written_3d(tmp_path)
+    for control in ("bl3-play", "bl3-next", "bl3-reset", "bl3-help"):
+        assert control in html
+    assert not any(x in html for x in ("__STOPS__", "__FLIGHT__", "__HELP__"))
+
+
+def test_the_3d_stops_carry_coordinates_and_the_same_record(tmp_path):
+    import json
+    import re
+    html = _written_3d(tmp_path)
+    stops = json.loads(re.search(r"var STOPS = (\[.*?\]), FLIGHT", html, re.S).group(1))
+    assert stops and len(stops[0]["xyz"]) == 3
+    assert stops[0]["record"] and stops[0]["degree"] >= stops[-1]["degree"]
+
+
+def test_the_3d_camera_is_tweened_not_snapped(tmp_path):
+    """Plotly has no camera tween of its own, and jumping is a slideshow."""
+    html = _written_3d(tmp_path)
+    assert "requestAnimationFrame(frame)" in html
+    assert "Plotly.relayout" in html

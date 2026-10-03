@@ -328,7 +328,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     var rows = "";
     for (var r = 0; r < s.record.length; r++) {
       var v = s.record[r][1];
-      if (/^https?:\/\//.test(v)) {
+      if (/^https?:[/][/]/.test(v)) {
         v = '<a href="' + v + '" target="_blank" rel="noopener">' + v + "</a>";
       }
       rows += "<tr><th>" + s.record[r][0] + "</th><td>" + v + "</td></tr>";

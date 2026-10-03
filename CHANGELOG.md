@@ -5,6 +5,34 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Colours that work for red-green colour blindness
+
+- **Green and amber are gone.** That is the one pair a red-green colour blind
+  reader cannot separate, and roughly **one man in twelve** is. Matches are now
+  **Okabe-Ito blue `#0072B2`** and **orange `#E69F00`**, which stay apart under
+  deuteranopia, protanopia and tritanopia.
+- They differ in **lightness** as well as hue, so they survive a greyscale print.
+  A test asserts the gap.
+- The tour highlight is Okabe-Ito **reddish purple `#CC79A7`**, and the size and
+  border changes carry the signal on their own — the part that works whatever a
+  reader can see.
+
+### The tour panel says what identifies a paper, and stops there
+
+- **Title, authors, PMID, year, journal.** Nothing else. The panel is read at a
+  glance while the camera is moving; the counts, match detail and link stay on
+  the hover.
+- **An abbreviated byline that always keeps the senior author**:
+  `Roy S, Huang H … Kornberg TB (4 authors)`. The last name in a biomedical
+  byline is the lab the work came from, and it is what a plain truncation throws
+  away first.
+
+### Tour pacing is two numbers now, not one
+
+- **The camera is slower (4.2 s) and the wait after it lands is shorter
+  (3.2 s).** Both at once, which the old single `TOUR_DWELL_MS` could not do:
+  slowing the zoom used to eat the reading time.
+
 ### Fixed: the 2D controls never ran at all
 
 - **A syntax error in the injected script.** `"<div class=\"x\">"` written in a

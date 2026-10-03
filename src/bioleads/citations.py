@@ -53,6 +53,23 @@ def _as_id_list(val) -> list[str]:
     return [str(x).strip() for x in val if str(x).strip()]
 
 
+def abbreviate_authors(names: list[str], keep: int = 3) -> str:
+    """A short byline that always keeps the senior author.
+
+    `Roy S, Huang H \u2026 Kornberg TB (5 authors)`. The last name in a
+    biomedical byline is the lab the work came from, which is the one a reader
+    scanning a network actually wants, and it is the name a plain truncation
+    throws away first.
+    """
+    names = [n for n in (names or []) if n]
+    if not names:
+        return ""
+    if len(names) <= keep:
+        return ", ".join(names)
+    head = ", ".join(names[:keep - 1])
+    return f"{head} \u2026 {names[-1]} ({len(names)} authors)"
+
+
 def _parse_authors(val) -> list[str]:
     """Normalize an iCite ``authors`` value into a de-duplicated list of names.
 
@@ -360,6 +377,7 @@ def build_citation_graph(
             year=str(rec.get("year") or doc.meta.get("year") or "").strip(),
             journal=(rec.get("journal") or doc.meta.get("journal") or "").strip(),
             global_citations=int(cc) if cc is not None else None,
+            authors=abbreviate_authors(_parse_authors(rec.get("authors"))),
             url=doc.meta.get("url") or f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
             source=doc.source,
             # A seed came from the query or the ID list; anything else was added
@@ -591,9 +609,14 @@ TOUR_STOPS = 10
 
 # Tour pacing. The first version flew in 1.4 s and moved on after 4.2 s, which
 # is long enough to see that something happened and not long enough to read it.
-TOUR_FLIGHT_MS = 2600      # camera travel
-TOUR_DWELL_MS = 11000      # time on a node before moving on
+TOUR_FLIGHT_MS = 4200      # camera travel, slower so the move can be followed
+TOUR_HOLD_MS = 3200        # time to read the record, AFTER the camera arrives
 TOUR_ZOOM = 1.6            # gentler than the 1.9 it started at
+
+# Total time on a stop. Keeping the hold separate from the flight is what lets
+# the zoom be slowed and the advance be quickened at the same time: when the
+# two were one number, a slower camera meant less reading time.
+TOUR_DWELL_MS = TOUR_FLIGHT_MS + TOUR_HOLD_MS
 
 # Hard limit on how long the layout may simulate before physics is switched off
 # regardless. vis.js does not always emit `stabilizationIterationsDone` on a
@@ -605,7 +628,11 @@ SETTLE_LIMIT_MS = 12000
 # The node the tour is looking at. Selection alone is too quiet to find on a
 # crowded graph, so the current node is recoloured and enlarged and put back
 # when the tour moves on.
-TOUR_HIGHLIGHT = "#d81b60"
+#
+# Okabe-Ito reddish purple, chosen to sit apart from both match colours under
+# red-green colour blindness. **The size and border changes carry the signal on
+# their own**, which is the part that works whatever a reader can see.
+TOUR_HIGHLIGHT = "#CC79A7"
 
 
 def _tour_runtime_seconds(stops: int = TOUR_STOPS) -> int:
@@ -632,24 +659,17 @@ RECORD_HELP = (
 
 # The node record, in the order it reads best. A label of None means the raw
 # attribute name is unsuitable for display and the entry is skipped.
+# Deliberately short. The tour panel is read at a glance while the camera is
+# moving, so it carries what identifies a paper and nothing else; the hover
+# still has the counts and the match detail for anyone who wants them.
 _RECORD_FIELDS = [
     ("title", "Title"),
-    ("author", "Author"),
+    ("author", "Author"),          # author networks have this instead of a title
+    ("authors", "Authors"),
     ("pmid", "PMID"),
     ("year", "Year"),
     ("journal", "Journal"),
     ("papers", "Papers in corpus"),
-    ("in_corpus_citations", "Cited within corpus"),
-    ("global_citations", "Global citations"),
-    ("query_match", "Query match"),
-    ("query_terms_matched", "Query terms found"),
-    ("query_match_count", "Terms matched"),
-    ("query_papers_matched", "Papers naming a term"),
-    ("query_papers_total", "Papers by this author"),
-    ("seed", "From the search"),
-    ("expanded", "Added by expansion"),
-    ("source", "Source"),
-    ("url", "Link"),
 ]
 
 
@@ -802,7 +822,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
       var rows = "";
       for (var r = 0; r < s.record.length; r++) {
         var val = s.record[r][1];
-        if (/^https?:\/\//.test(val)) {
+        if (/^https?:[/][/]/.test(val)) {
           val = '<a href="' + val + '" target="_blank" rel="noopener">' +
                 val + "</a>";
         }

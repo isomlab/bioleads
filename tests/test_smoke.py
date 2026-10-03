@@ -2546,30 +2546,42 @@ def test_the_tour_turns_physics_off_before_flying(tmp_path):
     assert "net.focus(s.id" in html
 
 
-def test_a_tour_stop_carries_the_whole_record_not_a_summary():
-    """The point of stopping on a node is to read it, not to be told its title
-    again, so the tour shows every field the node carries."""
+def test_a_tour_stop_identifies_the_paper_and_stops_there():
+    """The panel is read at a glance while the camera is moving, so it carries
+    what identifies a paper and nothing else. The counts and the match detail
+    stay on the hover."""
     import networkx as nx
     from bioleads.citations import tour_stops
     g = nx.DiGraph()
     g.add_node("PMID:1", pmid="1", title="A paper", year="2026", journal="Nature",
+               authors="Roy S \u2026 Kornberg TB (9 authors)",
                in_corpus_citations=4, global_citations=1, source="pubmed",
                url="https://pubmed.ncbi.nlm.nih.gov/1/", seed=True,
                query_match="all", query_terms_matched="TM184C")
     g.add_node("PMID:2", pmid="2", title="B", in_corpus_citations=0)
     g.add_edge("PMID:1", "PMID:2")
     labels = [r[0] for r in tour_stops(g, 1)[0]["record"]]
-    for expected in ("Title", "PMID", "Year", "Journal", "Cited within corpus",
-                     "Global citations", "Query match", "Source", "Link"):
-        assert expected in labels
+    assert labels == ["Title", "Authors", "PMID", "Year", "Journal"]
 
 
-def test_the_record_skips_empty_fields_and_spells_out_booleans():
+def test_the_record_skips_empty_fields():
     from bioleads.citations import node_record
     rows = dict(node_record("n", {"pmid": "1", "journal": "", "year": None,
-                                  "seed": False, "title": "T"}))
+                                  "title": "T"}))
     assert "Journal" not in rows and "Year" not in rows   # a blank row says nothing
-    assert rows["From the search"] == "no"                # not "False"
+    assert rows["Title"] == "T"
+
+
+def test_the_senior_author_survives_abbreviation():
+    """The last name in a biomedical byline is the lab, and a plain truncation
+    throws it away first."""
+    from bioleads.citations import abbreviate_authors
+    out = abbreviate_authors(["Roy S", "Huang H", "Liu S", "Kornberg TB"])
+    assert out.startswith("Roy S")
+    assert "Kornberg TB" in out
+    assert "(4 authors)" in out
+    assert abbreviate_authors(["Roy S", "Kornberg TB"]) == "Roy S, Kornberg TB"
+    assert abbreviate_authors([]) == ""
 
 
 def test_a_node_with_nothing_to_show_still_gets_a_row():
@@ -2580,9 +2592,13 @@ def test_a_node_with_nothing_to_show_still_gets_a_row():
 def test_the_tour_is_paced_to_be_read(tmp_path):
     """It flew in 1.4 s and moved on after 4.2 s, which is long enough to see
     that something happened and not long enough to read it."""
-    from bioleads.citations import TOUR_FLIGHT_MS, TOUR_DWELL_MS
-    assert TOUR_FLIGHT_MS >= 2000
-    assert TOUR_DWELL_MS >= 8000
+    from bioleads.citations import TOUR_FLIGHT_MS, TOUR_HOLD_MS, TOUR_DWELL_MS
+    # The camera is slow enough to follow, the wait after it lands is short.
+    # Keeping them separate is what lets both be true at once: when the two were
+    # one number, slowing the zoom ate the reading time.
+    assert TOUR_FLIGHT_MS >= 3500
+    assert TOUR_HOLD_MS <= 4000
+    assert TOUR_DWELL_MS == TOUR_FLIGHT_MS + TOUR_HOLD_MS
     html = _written_network(tmp_path)
     assert f"duration: {TOUR_FLIGHT_MS}" in html
     assert f"setTimeout(step, {TOUR_DWELL_MS})" in html
@@ -2716,3 +2732,18 @@ def test_the_visited_node_is_marked_in_3d(tmp_path):
     assert TOUR_HIGHLIGHT in html
     assert "Plotly.addTraces" in html and "Plotly.deleteTraces" in html
     assert "__HILITE__" not in html
+
+
+def test_the_match_colours_are_not_red_green():
+    """Green against amber is the one pair a red-green colour blind reader
+    cannot separate, and roughly one man in twelve is."""
+    from bioleads.querymatch import MATCH_COLORS
+    from bioleads.citations import TOUR_HIGHLIGHT
+    assert MATCH_COLORS["all"] == "#0072B2"       # Okabe-Ito blue
+    assert MATCH_COLORS["partial"] == "#E69F00"   # Okabe-Ito orange
+    # Blue and orange differ in lightness too, so they survive greyscale.
+    def lum(h):
+        r, g, b = (int(h[i:i + 2], 16) for i in (1, 3, 5))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    assert abs(lum(MATCH_COLORS["all"]) - lum(MATCH_COLORS["partial"])) > 40
+    assert TOUR_HIGHLIGHT not in MATCH_COLORS.values()

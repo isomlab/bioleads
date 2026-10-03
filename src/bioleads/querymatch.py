@@ -214,13 +214,19 @@ def classify(n_matched: int, n_terms: int) -> str:
     return "all" if n_matched == n_terms else "partial"
 
 
+# Blue and orange, not green and amber. **Green against amber is the one pair a
+# red-green colour blind reader cannot separate**, and roughly one man in twelve
+# is. These are Okabe-Ito, which stays distinguishable under deuteranopia,
+# protanopia and tritanopia, and the two differ in lightness as well as hue so
+# they survive a greyscale print too.
+#
 # Grey for "none" matches the unclustered grey in the term scatter, so the two
 # views read the same way: grey is always "not in the thing being shown".
 MATCH_COLORS = {
-    "all": "#1a7f37",       # green: contains every query term
-    "partial": "#d4a017",   # amber: some
-    "none": "#bbbbbb",      # grey: none
-    "unknown": "#2b6cb0",   # blue: nothing to match against (no text query)
+    "all": "#0072B2",       # blue: contains every query term
+    "partial": "#E69F00",   # orange: some
+    "none": "#BBBBBB",      # grey: none
+    "unknown": "#5B6B7C",   # slate: nothing to match against (no text query)
 }
 
 

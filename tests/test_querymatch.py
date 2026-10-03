@@ -700,3 +700,27 @@ class _FakeHandleQM:
 
     def __exit__(self, *exc):
         return False
+
+
+def test_a_single_seed_profile_is_not_alphabetical():
+    """With one seed every term has document frequency 1, so ranking on that
+    alone collapses to alphabetical order — a profile of words from a to c.
+
+    One seed is exactly the setting worth using when a query returns a mixed
+    bag, so this case has to work. Total frequency breaks the tie.
+    """
+    from bioleads.sources import seed_profile
+    doc = _pubmed_doc("1", "Zebra regulator of autophagy",
+                      "autophagy autophagy autophagy and an aardvark")
+    # Alphabetically "aardvark" would lead; by frequency "autophagy" does.
+    assert seed_profile([doc], top_n=1, n_terms=1) == ["autophagy"]
+    assert seed_profile([doc], top_n=1, n_terms=3)[0] == "autophagy"
+
+
+def test_document_frequency_still_outranks_raw_frequency():
+    """Across several seeds the shared term wins even if another is repeated."""
+    from bioleads.sources import seed_profile
+    docs = [_pubmed_doc("1", "a", "lysosome autophagy autophagy autophagy autophagy"),
+            _pubmed_doc("2", "b", "lysosome elsewhere"),
+            _pubmed_doc("3", "c", "lysosome again")]
+    assert seed_profile(docs, n_terms=1) == ["lysosome"]

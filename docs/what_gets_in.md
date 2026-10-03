@@ -104,9 +104,19 @@ fetched, so **a paper that is later rejected has already contributed its links.*
 | `terms` | its title or abstract literally contains at least one query term. **Needs a query; with `--pmids` alone it filters nothing** |
 | `off` | always |
 
-**The profile** is the terms the chosen seeds share, weighted by **how many seeds mention a
-term, not how often**: a word used forty times in one paper describes that paper, a word
-used once in each of eight describes the topic. The score is the **share of the profile a
+**The profile is a list of terms compiled from the seed papers' own text** — content words
+from their titles and abstracts, lowercased, three letters or more, with abstract
+boilerplate removed. It is built from the seeds themselves, not from the query, which is why
+this gate works with `--pmids` and no query at all.
+
+Terms are ranked by **how many seeds mention them**, then by **how often in total**, then
+alphabetically. Document frequency leads because a word used once in each of eight seeds
+describes the topic while a word used forty times in one describes that paper. **The second
+key matters more than it looks: with a single seed every term has a document frequency of
+one, so without it the profile collapses to the first sixty content words alphabetically.**
+
+At the defaults the bar is concrete: a profile of **60** terms, and a candidate is kept if it
+contains **6** of them. The score is the **share of the profile a
 candidate contains**, which reads plainly — 0.10 means the paper names a tenth of what the
 seeds are about — and does not reward length, because the denominator is the profile.
 

@@ -5,6 +5,23 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Fixed: a single-seed profile was alphabetical
+
+- **`expand_seed_profile_n = 1` built its profile from the first sixty content
+  words from *a* to *c*.** With one seed every term has a document frequency of
+  one, so ranking on that alone had nothing left to sort by. The real profile
+  began *accumulate, accumulation-a, activities, along, alphafold2, ancient,
+  annotation…*
+- Total frequency now breaks the tie, so the same seed yields *tm184c,
+  gpcr-like, intercellular, protein, autophagic, autophagy, beta-arrestin,
+  connectivity, conserved, exchange, gpcr, grk, homology…*
+- **One seed is exactly the setting worth using when a query returns a mixed
+  bag**, so this was broken where it was most needed. It still produced
+  on-topic results, because an abstract's vocabulary is topical whichever sixty
+  words you take, which is why nothing looked wrong.
+- Document frequency still leads across several seeds: a term shared by all of
+  them outranks one repeated in a single paper.
+
 ### `docs/what_gets_in.md`
 
 - **Every gate a paper or an author has to clear, in order, with the defaults.**

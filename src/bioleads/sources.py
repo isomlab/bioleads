@@ -669,18 +669,29 @@ def seed_profile(seed_docs, *, top_n: int = 0, n_terms: int = 60) -> list[str]:
     Built from the first `top_n` seeds in corpus order, which for a PubMed query
     is PubMed's own relevance order. `top_n = 0` uses all of them.
 
-    **Terms are weighted by how many seeds mention them, not by how often.** A
-    word used once in each of eight seeds describes the topic; a word used
-    forty times in one seed describes that paper. Ties break alphabetically so
-    the profile is reproducible.
+    **Terms are ranked by how many seeds mention them, then by how often.** A
+    word used once in each of eight seeds describes the topic, so document
+    frequency leads; a word used forty times in one seed describes that paper,
+    so total frequency only breaks ties. Alphabetical order breaks what is left,
+    to keep the profile reproducible.
+
+    **The second key is not decoration.** With a single seed every term has a
+    document frequency of one, so ranking on that alone collapses to
+    alphabetical: the profile becomes the first `n_terms` content words from
+    *a* to *c*, which is not a profile. Since one seed is exactly the setting
+    worth using when a query returns a mixed bag, that case has to work.
     """
     docs = list(seed_docs)[:top_n] if top_n and top_n > 0 else list(seed_docs)
     from collections import Counter
-    df: Counter = Counter()
+    df: Counter = Counter()          # seeds mentioning the term
+    tf: Counter = Counter()          # total occurrences across those seeds
     for d in docs:
-        df.update(_content_words(getattr(d, "content", "")))
-    ranked = sorted(df.items(), key=lambda kv: (-kv[1], kv[0]))
-    return [t for t, _ in ranked[:n_terms]]
+        words = _WORD.findall((getattr(d, "content", "") or "").lower())
+        kept = [w for w in words if w not in _PROFILE_STOP]
+        df.update(set(kept))
+        tf.update(kept)
+    ranked = sorted(df, key=lambda t: (-df[t], -tf[t], t))
+    return ranked[:n_terms]
 
 
 def seed_rank_key(doc, terms) -> tuple:

@@ -743,6 +743,23 @@ def tour_stops(g, n: int = TOUR_STOPS) -> list[dict]:
 # **One card, both views.** The 2D and 3D tours each used to build their own
 # markup, so a change to one quietly left the other looking like the previous
 # version. The CSS and the renderer live here and are injected into both.
+# The focus color comes up and goes down with a flight rather than snapping on,
+# so a stop reads as arriving somewhere instead of as a light switch. The quiet
+# end is the highlight mixed most of the way to white, so it is one hue
+# throughout and only the intensity moves. **Lives here, not in graph3d**: the
+# 2D page needs it too and must not import the Plotly module to get it.
+TOUR_DIM_MIX = 0.72
+
+
+def dim_color(hex_color: str, toward_white: float = TOUR_DIM_MIX) -> str:
+    """The quiet end of the focus ramp: one hue, mixed toward white."""
+    h = hex_color.lstrip("#")
+    rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    out = [max(0, min(255, int(round(v + (255 - v) * toward_white))))
+           for v in rgb]
+    return "#%02x%02x%02x" % tuple(out)
+
+
 CARD_CSS = """
   /* Every class is bl- prefixed. pyvis ships Bootstrap, whose own `.row` and
      `.hd` captured the card and stacked each label above its value. */
@@ -860,7 +877,7 @@ __CARD_JS__
     var panel = document.getElementById("bl-tour-info");
     var card = document.getElementById("bl-node-card");
     var play = document.getElementById("bl-tour-play");
-    var at = null, landed = false, cardTimer = null;
+    var at = null, landed = false, cardTimer = null, ramp = null;
     var CARD_FADE = 460;
     function showCard() {
       clearTimeout(cardTimer);
@@ -884,23 +901,64 @@ __CARD_JS__
     // than its better-cited neighbours while claiming to be the subject.
     var MAXV = 1;
     nodes.forEach(function (n) { MAXV = Math.max(MAXV, n.value || 1); });
+    // **The focus colour is a ramp, not a switch.** vis.js will recolour a
+    // selected node and its edges for free, but it does it instantly, and from
+    // one stop to the next that reads as a jump. The node and its edges are
+    // coloured by hand instead, blended from a pale version of the highlight
+    // up to the full one over the flight.
+    var edges = net.body.data.edges;
+    function hex(c) {
+      return [parseInt(c.substr(1, 2), 16), parseInt(c.substr(3, 2), 16),
+              parseInt(c.substr(5, 2), 16)];
+    }
+    function blend(a, b, u) {
+      var x = hex(a), y = hex(b), o = "#";
+      for (var i = 0; i < 3; i++) {
+        var v = Math.round(x[i] + (y[i] - x[i]) * u).toString(16);
+        o += v.length < 2 ? "0" + v : v;
+      }
+      return o;
+    }
     function unlight() {
-      if (lit) { nodes.update({id: lit.id, color: lit.color, size: lit.size,
-                               value: lit.value, borderWidth: lit.borderWidth});
-                 lit = null; }
+      if (!lit) { return; }
+      nodes.update({id: lit.id, color: lit.color, size: lit.size,
+                    value: lit.value, borderWidth: lit.borderWidth});
+      // Written back from what each edge actually had, not reset to a global
+      // default: an edge may carry its own colour.
+      if (lit.edges.length) { edges.update(lit.edges); }
+      lit = null;
     }
     function light(id) {
       unlight();
       var n = nodes.get(id);
+      var ids = net.getConnectedEdges(id);
+      var was = [];
+      for (var i = 0; i < ids.length; i++) {
+        var e = edges.get(ids[i]);
+        if (e) { was.push({id: e.id, color: e.color, width: e.width}); }
+      }
       lit = {id: id, color: n.color, size: n.size, value: n.value,
-             borderWidth: n.borderWidth};
+             borderWidth: n.borderWidth, edges: was, ids: ids};
       // A white rim, not a dark one: the focus node should read as lifted off
       // the graph rather than outlined on it.
-      nodes.update({id: id, color: {background: "__HILITE__",
-                                    border: "#ffffff", highlight:
-                                    {background: "__HILITE__", border: "#ffffff"}},
-                    value: MAXV * 1.9, size: (n.size || 10) * 1.9,
+      nodes.update({id: id, value: MAXV * 1.9, size: (n.size || 10) * 1.9,
                     borderWidth: 4});
+      tint(0);
+    }
+    function tint(u) {
+      if (!lit) { return; }
+      var c = blend("__DIM__", "__HILITE__", u);
+      nodes.update({id: lit.id,
+                    color: {background: c, border: "#ffffff",
+                            highlight: {background: c, border: "#ffffff"}}});
+      var upd = [];
+      for (var i = 0; i < lit.ids.length; i++) {
+        upd.push({id: lit.ids[i],
+                  color: {color: c, highlight: c, hover: c, inherit: false,
+                          opacity: 1},
+                  width: 1 + 1.4 * u});
+      }
+      if (upd.length) { edges.update(upd); }
     }
     // Canvas coordinates survive panning and zooming; DOM coordinates do not.
     // So the card is positioned from the node's canvas position on every
@@ -930,8 +988,21 @@ __CARD_JS__
       var s = STOPS[k];
       if (!s) { return; }
       net.setOptions({physics: {enabled: false}});
-      light(s.id);
-      net.selectNodes([s.id]);
+      // The previous stop fades out, the new one is swapped in at the palest
+      // point of the ramp and fades up, so the eye sees one focus hand over to
+      // the next rather than a node changing colour.
+      clearInterval(ramp);
+      var SWAP = 0.38, t0 = Date.now(), swapped = false;
+      ramp = setInterval(function () {
+        var t = Math.min(1, (Date.now() - t0) / __FLIGHT__);
+        if (t < SWAP) {
+          tint(1 - t / SWAP);
+        } else {
+          if (!swapped) { swapped = true; light(s.id); }
+          tint((t - SWAP) / (1 - SWAP));
+        }
+        if (t >= 1) { clearInterval(ramp); ramp = null; }
+      }, 40);
       // The card goes away for the duration of the flight. Showing it first
       // means reading a card that is still travelling.
       at = s; landed = false; hideCard();
@@ -968,7 +1039,14 @@ __CARD_JS__
       playing = false; clearTimeout(timer); play.textContent = "Play tour";
       panel.style.display = "none";
       at = null; landed = false; hideCard();
-      unlight();
+      // Dim down over the flight home rather than switching off.
+      clearInterval(ramp);
+      var r0 = Date.now();
+      ramp = setInterval(function () {
+        var t = Math.min(1, (Date.now() - r0) / __FLIGHT__);
+        tint(1 - t);
+        if (t >= 1) { clearInterval(ramp); ramp = null; unlight(); }
+      }, 40);
       net.unselectAll();
       net.fit({animation: {duration: 1400, easingFunction: "easeInOutCubic"}});
     });
@@ -1033,6 +1111,7 @@ __CARD_JS__
     snippet = snippet.replace("__ZOOM__", str(TOUR_ZOOM))
     snippet = snippet.replace("__RECORD_HELP__", RECORD_HELP)
     snippet = snippet.replace("__SETTLE_LIMIT__", str(SETTLE_LIMIT_MS))
+    snippet = snippet.replace("__DIM__", dim_color(TOUR_HIGHLIGHT))
     snippet = snippet.replace("__HILITE__", TOUR_HIGHLIGHT)
     if "bl-physics" in html:          # already injected
         return

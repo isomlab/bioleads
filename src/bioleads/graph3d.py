@@ -261,11 +261,6 @@ TOUR_ZOOM_3D = 26.0
 # lot of white. Growing the aspect ratio is the only lever, and it is the same
 # one the tour uses.
 TOUR_HOME_ZOOM = 2.4
-# The focus color comes up and goes down with the flight rather than snapping
-# on, so a stop reads as arriving somewhere instead of as a light switch. These
-# are the two ends of that ramp; the dim end is the highlight mixed most of the
-# way to white, so it is the same hue throughout and only the intensity moves.
-TOUR_DIM_MIX = 0.72
 # **Scaling the scene is still only half of a zoom.** vis.js scales the whole
 # canvas, so in 2D the nodes and edges grow as the view closes in, and that
 # growth is most of what reads as "zoomed in". Plotly's markers are sized in
@@ -361,20 +356,6 @@ def unit_sphere(segments=TOUR_SPHERE_SEGMENTS):
     return xs, ys, zs
 
 
-def dim_color(hex_color: str, toward_white: float = TOUR_DIM_MIX) -> str:
-    """The quiet end of the focus ramp: one hue, mixed toward white.
-
-    Taking the dim end from the same color keeps the ramp a change in intensity
-    rather than a change in hue, which is what reads as one thing getting
-    brighter instead of two different marks.
-    """
-    h = hex_color.lstrip("#")
-    rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
-    out = [max(0, min(255, int(round(v + (255 - v) * toward_white))))
-           for v in rgb]
-    return "#%02x%02x%02x" % tuple(out)
-
-
 def _sphere_payload():
     xs, ys, zs = unit_sphere()
     return {"x": xs, "y": ys, "z": zs}
@@ -427,7 +408,8 @@ def _inject_tour_3d(path: str, stops, pos, sizes=None, segments=None) -> None:
         return
     try:
         from .citations import (CARD_CSS, CARD_JS, RECORD_HELP,
-                                TOUR_DWELL_MS, TOUR_FLIGHT_MS, TOUR_HIGHLIGHT)
+                                TOUR_DWELL_MS, TOUR_FLIGHT_MS, TOUR_HIGHLIGHT,
+                                dim_color)
     except Exception:          # pragma: no cover - citations is always present
         return
     # **Two coordinate systems, and mixing them up is the bug to watch for.**
@@ -598,7 +580,12 @@ __CARD_JS__
   function centre(n, k) {
     return {x: n.x * k / 2, y: n.y * k / 2, z: n.z * k / 2};
   }
-  function glide(k1, c1, done) {
+  // Where in a flight the old focus has faded out far enough to be swapped
+  // for the new one. The exchange happens at the palest point of the ramp, so
+  // what the eye sees is one highlight fading down and another coming up, not
+  // a node changing colour.
+  var SWAP = 0.38;
+  function glide(k1, c1, done, onFrame) {
     // Zoom is the aspect ratio, pan is the camera centre, and the axis ranges
     // are never touched -- so the whole network stays in the figure however
     // far in a stop goes.
@@ -627,11 +614,28 @@ __CARD_JS__
       var u = ZOOM > HOME_K
         ? Math.max(0, Math.min(1, (k - HOME_K) / (ZOOM - HOME_K))) : 1;
       magnify(1 + (MAG - 1) * u, t >= 1);
-      tint(u, t >= 1);
+      if (onFrame) { onFrame(t); }
       if (t < 1) { anim = requestAnimationFrame(frame); } else if (done) { done(); }
     })(t0);
   }
-  function flyTo(p, done) { glide(ZOOM, {x: p[0], y: p[1], z: p[2]}, done); }
+  function flyTo(s, done) {
+    // The focus ramp runs on the flight's own progress, not on the zoom. From
+    // one stop to the next the zoom does not change at all, so a ramp tied to
+    // it would jump straight to full and the colour would snap.
+    var swapped = false;
+    glide(ZOOM, {x: s.cam[0], y: s.cam[1], z: s.cam[2]}, done, function (t) {
+      if (t < SWAP) {
+        tint(1 - t / SWAP, false);         // the previous stop fades out
+      } else {
+        if (!swapped) {
+          swapped = true;
+          clearLit();
+          light(s.xyz, s.px, s.seg);
+        }
+        tint((t - SWAP) / (1 - SWAP), t >= 1);
+      }
+    });
+  }
   var cardTimer = null;
   function annotate(s) {
     var card = document.getElementById("bl3-card");
@@ -716,11 +720,6 @@ __CARD_JS__
   function unlight() { clearLit(); }
   function show(k) {
     var s = STOPS[k]; if (!s) { return; }
-    light(s.xyz, s.px, s.seg);
-    // The ring is a brand-new trace, drawn at its unzoomed size. If the view
-    // is already magnified from the previous stop it has to be brought up to
-    // match, or the marker it is meant to circle sits outside it.
-    magnify(shown, true);
     unannotate();          // the old card must not ride along during the flight
     var rows = "";
     for (var r = 0; r < s.record.length; r++) {
@@ -738,7 +737,7 @@ __CARD_JS__
     // The label waits for the camera. Annotating first means reading a card
     // that is sliding across the screen. `cam`, not `xyz`: this one is the
     // camera centre.
-    flyTo(s.cam, function () { annotate(s); });
+    flyTo(s, function () { annotate(s); });
   }
   function step() {
     i = (i + 1) % STOPS.length;
@@ -765,7 +764,9 @@ __CARD_JS__
     // The highlight dims down on the way out instead of being switched off:
     // the overlays stay until the flight home has finished, and the tint ramp
     // takes them back to the quiet end as the aspect ratio falls.
-    glide(HOME_K, {x: 0, y: 0, z: 0}, unlight);
+    glide(HOME_K, {x: 0, y: 0, z: 0}, unlight, function (t) {
+      tint(1 - t, t >= 1);                 // dim down over the flight home
+    });
     Plotly.relayout(gd(), {"scene.camera": HOME});
   });
 })();

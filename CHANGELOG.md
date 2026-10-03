@@ -40,11 +40,22 @@ while the major version is 0, a minor bump may change defaults.
   just sits small in the middle of a lot of white. The aspect ratio is the only
   lever, and it is the one the tour already uses. *Reset view* returns here.
 - **The focus color ramps up and down with the flight** instead of switching
-  on. The sphere and the lit edges start at the highlight mixed most of the way
-  to white and are blended to full strength by the same eased progress that
-  drives the camera, so a stop reads as arriving somewhere. Taking the quiet end
-  from the same hue keeps it a change in intensity rather than two different
-  marks.
+  on, in **both** views, on the opening zoom and on every move from one node to
+  the next. The focus node and its edges start at the highlight mixed most of
+  the way to white and are blended to full strength over the flight. Taking the
+  quiet end from the same hue keeps it a change in intensity rather than two
+  different marks.
+- **The ramp runs on the flight's progress, not on the zoom.** From one stop to
+  the next the zoom does not change at all, so a ramp tied to it jumped straight
+  to full and the color snapped, which is the thing the ramp was added to avoid.
+- **The handover happens at the palest point.** The previous stop fades down
+  over the first 38% of a flight, the new one is swapped in there and fades up
+  over the rest, so the eye sees one highlight give way to another rather than a
+  node changing color.
+- 2D colors the node and its edges by hand for this. vis.js will recolor a
+  selected node and its connections for free, but only instantly. The original
+  per-edge colors are saved and written back, rather than reset to a default, so
+  an edge that carries its own color keeps it.
 - **The record card fades in and out in both views.** Fading out needs the
   `display:none` held back until the transition finishes, or the element is gone
   before it has faded and the card snaps off the screen however long the CSS

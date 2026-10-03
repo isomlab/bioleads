@@ -2841,7 +2841,11 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
     # node and the only reason it grows is that the camera came closer. A fixed
     # fraction of the graph made every focus node the same enormous ball and hid
     # what a node's size means here.
-    assert "sphereRadius(px)" in tour and "light(s.xyz, s.px," in tour
+    assert "sphereRadius(px)" in tour and "light(s.xyz, s.px, s.seg)" in tour
+    # The focus colour runs on the FLIGHT's progress, not on the zoom. From one
+    # stop to the next the zoom does not change at all, so a ramp tied to it
+    # would jump straight to full and the colour would snap.
+    assert "var SWAP" in tour and "tint(1 - t / SWAP" in tour
     assert "var SR" not in tour, "the fixed sphere fraction is back"
     assert across > 2, (
         "the cube does not fill the viewport: the default camera sits back, so "
@@ -2861,7 +2865,8 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
     stops = json.loads(re.search(r"var STOPS = (\[.*\]), FLIGHT = ", tour,
                                  re.S).group(1))
     assert stops and all(s.get("xyz") and s.get("cam") for s in stops)
-    assert "flyTo(s.cam," in tour, "the camera is not given the camera form"
+    assert "x: s.cam[0], y: s.cam[1], z: s.cam[2]" in tour, \
+        "the camera is not given the camera form"
 
     ranges = [[float(v) for v in m]
               for m in re.findall(r'"range":\s*\[([-\d.e]+),\s*([-\d.e]+)\]',

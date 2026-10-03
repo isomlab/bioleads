@@ -2845,7 +2845,10 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
     # The focus colour runs on the FLIGHT's progress, not on the zoom. From one
     # stop to the next the zoom does not change at all, so a ramp tied to it
     # would jump straight to full and the colour would snap.
-    assert "var SWAP" in tour and "tint(1 - t / sw" in tour
+    assert "var SWAP" in tour and "var d = 1 - t / sw;" in tour
+    # The card rides the same ramp as the colour, so they read as one arrival
+    # rather than a highlight coming up and a card appearing after it.
+    assert "cardFade(u);" in tour and "cardFade(d);" in tour
     # With nothing lit there is nothing to fade out, so the handover is skipped
     # and the opening zoom fades up over the whole flight instead of the last
     # 62% of it.

@@ -73,11 +73,11 @@ while the major version is 0, a minor bump may change defaults.
   options and by the restore, so the two cannot drift apart.
 - After four stops exactly one node and its eight edges are tinted, which is
   the stop currently being shown, and after *Reset view* nothing is.
-- **The record card fades in and out in both views.** Fading out needs the
-  `display:none` held back until the transition finishes, or the element is gone
-  before it has faded and the card snaps off the screen however long the CSS
-  says it should take.
-- *Reset view* now dims the highlight down over the flight home and removes the
+- **The record card is on that same ramp**, in both views, so it fades in and
+  out exactly with the focus node and its edges. Driven separately the two
+  drifted: the highlight came up over the flight and the card appeared at the
+  end of it, which read as two events rather than one arrival.
+- *Reset view* dims the highlight down over the flight home and removes the
   overlay traces when it lands, rather than switching them off at the start.
 - **Hold 3.2 s → 2.0 s** in both views, so the step from node to node is
   quicker without the camera moving any faster.

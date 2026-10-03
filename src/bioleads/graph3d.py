@@ -472,9 +472,7 @@ __CARD_CSS__
     border:1px solid rgba(255,255,255,.65); border-radius:16px;
     padding:18px 20px 16px; color:#16202b;
     box-shadow:0 18px 50px rgba(16,26,40,.18), 0 2px 6px rgba(16,26,40,.06);
-    opacity:0; transform:translateY(-50%) translateX(14px);
-    transition:opacity .5s ease-out, transform .5s cubic-bezier(.2,.7,.3,1)}
-  #bl3-card.on {opacity:1; transform:translateY(-50%) translateX(0)}
+    opacity:0; transform:translateY(-50%) translateX(14px)}
 </style>
 <div id="bl3-panel">
   <button id="bl3-play">Play tour</button>
@@ -492,7 +490,7 @@ __CARD_JS__
   var SPH = __SPHERE__, SPAN = __SPAN__;
   var ORBIT = __ORBIT__ * Math.PI / 180, ACROSS = __ACROSS__;
   var HILITE = "__HILITE__", DIM = "__DIM__";
-  var EDGE_LIT_W = 3.4, tinted = -1, CARD_FADE = 520;
+  var EDGE_LIT_W = 3.4, tinted = -1;
   var BASE = null, shown = 1;
   var HOME_K = __HOME_K__;
   var atK = HOME_K, atC = {x: 0, y: 0, z: 0};
@@ -630,38 +628,44 @@ __CARD_JS__
     var sw = (gd().data.length > 2) ? SWAP : 0;
     glide(ZOOM, {x: s.cam[0], y: s.cam[1], z: s.cam[2]}, done, function (t) {
       if (t < sw) {
-        tint(1 - t / sw, false);           // the previous stop fades out
+        var d = 1 - t / sw;                // the previous stop fades out
+        tint(d, false);
+        cardFade(d);
       } else {
         if (!swapped) {
           swapped = true;
           clearLit();
           light(s.xyz, s.px, s.seg);
+          cardText(s);
         }
         // Eased, like the camera. A linear ramp starts and stops abruptly
         // against a flight that does not.
-        tint(ease((t - sw) / (1 - sw)), t >= 1);
+        var u = ease((t - sw) / (1 - sw));
+        tint(u, t >= 1);
+        cardFade(u);
       }
     });
   }
-  var cardTimer = null;
-  function annotate(s) {
+  // **The card is on the same ramp as the focus colour**, not on a CSS
+  // transition of its own. Driven separately the two drifted: the highlight
+  // came up over the flight and the card appeared at the end of it, so they
+  // read as two events rather than one arrival.
+  function cardText(s) {
     var card = document.getElementById("bl3-card");
-    clearTimeout(cardTimer);
     card.innerHTML = BL_CARD(s.record);
-    card.style.display = "block";
-    void card.offsetWidth;                 // commit before the transition
-    card.classList.add("on");
   }
-  function unannotate() {
-    // Fades out rather than vanishing. `display:none` has to wait for the
-    // transition to finish, or the element is gone before it has faded and the
-    // card snaps off the screen however long the CSS says it should take.
+  function cardFade(u) {
+    // **Visibility follows u, it is not a precondition for it.** Hiding at
+    // u <= 0 and then refusing to act on a hidden card meant the first frame
+    // of a fade-IN, where the eased value is exactly 0, switched the card off
+    // and every later frame returned early. The 3D card never appeared on an
+    // opening flight; 2D escaped only because its timer's first tick is
+    // already past 0.
     var card = document.getElementById("bl3-card");
-    clearTimeout(cardTimer);
-    if (card.style.display !== "block") { return; }
-    card.classList.remove("on");
-    cardTimer = setTimeout(function () { card.style.display = "none"; },
-                           CARD_FADE);
+    card.style.display = u > 0 ? "block" : "none";
+    card.style.opacity = u;
+    card.style.transform = "translateY(-50%) translateX(" +
+      (14 * (1 - u)).toFixed(2) + "px)";
   }
   function sphereRadius(px) {
     // Sized so that at the end of the flight the sphere is exactly as wide as
@@ -727,7 +731,6 @@ __CARD_JS__
   function unlight() { clearLit(); }
   function show(k) {
     var s = STOPS[k]; if (!s) { return; }
-    unannotate();          // the old card must not ride along during the flight
     var rows = "";
     for (var r = 0; r < s.record.length; r++) {
       var v = s.record[r][1];
@@ -744,7 +747,7 @@ __CARD_JS__
     // The label waits for the camera. Annotating first means reading a card
     // that is sliding across the screen. `cam`, not `xyz`: this one is the
     // camera centre.
-    flyTo(s, function () { annotate(s); });
+    flyTo(s);
   }
   function step() {
     i = (i + 1) % STOPS.length;
@@ -766,13 +769,14 @@ __CARD_JS__
   document.getElementById("bl3-reset").addEventListener("click", function () {
     playing = false; clearTimeout(timer); cancelAnimationFrame(anim);
     play.textContent = "Play tour";
-    unannotate();
     document.getElementById("bl3-info").style.display = "none";
     // The highlight dims down on the way out instead of being switched off:
     // the overlays stay until the flight home has finished, and the tint ramp
     // takes them back to the quiet end as the aspect ratio falls.
     glide(HOME_K, {x: 0, y: 0, z: 0}, unlight, function (t) {
-      tint(1 - ease(t), t >= 1);           // dim down over the flight home
+      var d = 1 - ease(t);                 // dim down over the flight home
+      tint(d, t >= 1);
+      cardFade(d);
     });
     Plotly.relayout(gd(), {"scene.camera": HOME});
   });

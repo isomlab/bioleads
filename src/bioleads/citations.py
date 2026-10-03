@@ -849,9 +849,7 @@ __CARD_CSS__
     border:1px solid rgba(255,255,255,.65); border-radius:16px;
     padding:18px 20px 16px; pointer-events:auto;
     box-shadow:0 18px 50px rgba(16,26,40,.18), 0 2px 6px rgba(16,26,40,.06);
-    opacity:0; transform:translateX(10px);
-    transition:opacity .45s ease-out, transform .45s cubic-bezier(.2,.7,.3,1)}
-  #bl-node-card.on {opacity:1; transform:translateX(0)}
+    opacity:0; transform:translateX(10px)}
 </style>
 <div id="bl-physics">
   <button id="bl-physics-toggle">Pause layout</button>
@@ -882,22 +880,19 @@ __CARD_JS__
     var panel = document.getElementById("bl-tour-info");
     var card = document.getElementById("bl-node-card");
     var play = document.getElementById("bl-tour-play");
-    var at = null, landed = false, cardTimer = null, ramp = null;
-    var CARD_FADE = 460;
-    function showCard() {
-      clearTimeout(cardTimer);
-      card.style.display = "block";
-      void card.offsetWidth;               // commit before the transition
-      card.classList.add("on");
+    var at = null, ramp = null;
+    // **The card is on the same ramp as the focus colour**, not on a CSS
+    // transition of its own. Driven separately the two drifted: the highlight
+    // came up over the flight and the card appeared at the end of it, so they
+    // read as two events rather than one arrival.
+    function cardText(s) {
+      card.innerHTML = BL_CARD(s.record);
     }
-    function hideCard() {
-      // Fades out rather than vanishing. `display:none` has to wait for the
-      // transition, or the card is gone before it has faded.
-      clearTimeout(cardTimer);
-      if (card.style.display !== "block") { return; }
-      card.classList.remove("on");
-      cardTimer = setTimeout(function () { card.style.display = "none"; },
-                             CARD_FADE);
+    function cardFade(u) {
+      // Visibility follows u rather than gating it; see the note in graph3d.
+      card.style.display = u > 0 ? "block" : "none";
+      card.style.opacity = u;
+      card.style.transform = "translateX(" + (10 * (1 - u)).toFixed(2) + "px)";
     }
     var nodes = net.body.data.nodes;
     // **`value` is what sizes a vis.js node, not `size`.** When a node carries
@@ -992,12 +987,11 @@ __CARD_JS__
     // redraw rather than once, which is what keeps it beside its node when
     // the view moves afterwards.
     function place() {
-      if (!landed || !at) { hideCard(); return; }
+      if (!at) { return; }
       var pos = net.getPositions([at.id])[at.id];
-      if (!pos) { card.style.display = "none"; return; }
+      if (!pos) { return; }
       var dom = net.canvasToDOM(pos);
       var box = net.body.container.getBoundingClientRect();
-      showCard();
       var w = card.offsetWidth, h = card.offsetHeight;
       // Clear the marker itself. `size` is in canvas units, so it has to be
       // scaled: at tour zoom a big node is tens of pixels across, and a fixed
@@ -1027,31 +1021,29 @@ __CARD_JS__
       ramp = setInterval(function () {
         var t = Math.min(1, (Date.now() - t0) / __FLIGHT__);
         if (t < sw) {
-          tint(1 - t / sw);
+          var d = 1 - t / sw;
+          tint(d);
+          cardFade(d);
         } else {
-          if (!swapped) { swapped = true; light(s.id); }
+          if (!swapped) { swapped = true; light(s.id); cardText(s); }
           // Eased, like the camera. A linear ramp starts and stops abruptly
           // against a flight that does not.
-          tint(ease((t - sw) / (1 - sw)));
+          var u = ease((t - sw) / (1 - sw));
+          tint(u);
+          cardFade(u);
+          place();
         }
         if (t >= 1) { clearInterval(ramp); ramp = null; }
       }, 25);
       // The card goes away for the duration of the flight. Showing it first
       // means reading a card that is still travelling.
-      at = s; landed = false; hideCard();
+      at = s;
       net.focus(s.id, {scale: __ZOOM__, animation:
         {duration: __FLIGHT__, easingFunction: "easeInOutCubic"}});
-      card.innerHTML = BL_CARD(s.record);
       panel.innerHTML = '<div class="bl-tour-head"><b>' + (k + 1) + " of " +
         STOPS.length + "</b> &middot; " + s.degree + " connection(s) &middot; " +
         (s.label || "") + "</div>";
       panel.style.display = "block";
-      // `animationFinished` is the real signal; the timer is the fallback,
-      // because a focus that is interrupted never fires the event at all.
-      var mine = s;
-      var land = function () { if (at === mine) { landed = true; place(); } };
-      net.once("animationFinished", land);
-      setTimeout(land, __FLIGHT__ + 120);
     }
     net.on("afterDrawing", place);
     function step() {
@@ -1071,13 +1063,15 @@ __CARD_JS__
     document.getElementById("bl-tour-reset").addEventListener("click", function () {
       playing = false; clearTimeout(timer); play.textContent = "Play tour";
       panel.style.display = "none";
-      at = null; landed = false; hideCard();
+      at = null;
       // Dim down over the flight home rather than switching off.
       clearInterval(ramp);
       var r0 = Date.now();
       ramp = setInterval(function () {
         var t = Math.min(1, (Date.now() - r0) / __FLIGHT__);
-        tint(1 - ease(t));
+        var d = 1 - ease(t);
+        tint(d);
+        cardFade(d);
         if (t >= 1) { clearInterval(ramp); ramp = null; unlight(); }
       }, 40);
       net.unselectAll();

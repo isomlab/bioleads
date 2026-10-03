@@ -2811,18 +2811,18 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
 
     zoom = float(re.search(r"ZOOM = ([0-9.]+)", tour).group(1))
     mag = float(re.search(r"MAG = ([0-9.]+)", tour).group(1))
-    ring = float(re.search(r"var RING = ([0-9.]+)", tour).group(1))
-    focus_px = float(re.search(r"FOCUS_PX = ([0-9.]+)", tour).group(1))
+    focus_f = float(re.search(r"FOCUS_F = ([0-9.]+)", tour).group(1))
     assert zoom > 1, "the scene never grows, so nothing looks closer"
     # Plotly markers are sized in screen pixels, so spreading the scene apart
     # leaves every node the size it was. They have to be scaled to match.
     assert mag > 1 and "function magnify(" in tour
-    # 2D measures 82px across for its focused node on a 1096px canvas. The 3D
-    # marker has to be in that league, and SOLID: a translucent ring left the
-    # node its original size underneath, so zooming never showed the node.
-    assert focus_px >= 82, "the focus node is smaller than 2D's"
-    assert focus_px > ring
-    assert "opacity: 1," in tour, "a translucent ring is not the node"
+    # The focus node is drawn in HTML and sized as a FRACTION of the viewport.
+    # A WebGL marker large enough to fill the screen renders as a visible
+    # polygon with the edge trace drawn straight across it, and a marker sized
+    # in fixed pixels fills a laptop window but is lost on a large monitor.
+    assert 0.3 <= focus_f <= 0.8, "the focus node does not fill the view"
+    assert "bl3-focus" in tour and "border-radius:50%" in html
+    assert "sceneCentre" in tour, "the disc has no position to be drawn at"
 
     # The camera centre is in units of half the aspect ratio, so it has to be
     # rescaled as the zoom tweens or the focus node drifts off to one side.
@@ -2846,3 +2846,49 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
             assert abs(back - s["xyz"][i]) < 1e-6, (
                 f"axis {i}: camera {s['cam'][i]} inverts to {back}, "
                 f"not {s['xyz'][i]}")
+
+
+def test_2d_tour_has_no_arrowheads_and_sizes_the_focus_by_value():
+    """Two silent failures in the 2D view, both invisible to the old tests.
+
+    Arrowheads on a dense citation network stack into a texture that reads as
+    noise, not as direction. The graph is still directed and the hover still
+    says "cites"; only the ornament is gone.
+
+    And **`value` is what sizes a vis.js node, not `size`.** When a node
+    carries a value, vis recomputes `size` from it on every redraw, so the
+    tour's `size` multiplier did nothing and the focused node stayed smaller
+    than its better-cited neighbours while claiming to be the subject.
+    """
+    pytest.importorskip("pyvis")
+    import json
+    import re
+    import tempfile
+
+    import networkx as nx
+
+    from bioleads import citations
+
+    g = nx.DiGraph()
+    for i in range(6):
+        g.add_node(f"PMID:{i}", pmid=str(i), title=f"P{i}", in_corpus_citations=i)
+    g.add_edges_from([("PMID:5", f"PMID:{j}") for j in range(3)])
+
+    with tempfile.TemporaryDirectory() as d:
+        out = citations.write_citation_html(g, os.path.join(d, "t.html"),
+                                            title="t")
+        html = open(out, encoding="utf-8").read()
+
+    edges = json.loads(re.search(r"edges = new vis\.DataSet\((\[.*?\])\);",
+                                 html, re.S).group(1))
+    assert edges, "no edges to check"
+    assert all(e.get("arrows") == "" for e in edges), "arrowheads are back"
+    # Direction is still recorded, just not drawn.
+    assert all("cites" in (e.get("title") or "") for e in edges)
+
+    tour = [m.group(1) for m in
+            re.finditer(r"<script[^>]*>(.*?)</script>", html, re.S)
+            if "bl-tour-play" in m.group(1)][0]
+    assert "value: MAXV" in tour, "the focus node is sized by `size`, which vis"\
+                                  " overwrites from `value` on every redraw"
+    assert "value: lit.value" in tour, "unlight leaves the node enlarged"

@@ -167,7 +167,9 @@ def write_graph_3d(
         ez += [za, zb, None]
     edge_trace = go.Scatter3d(
         x=ex, y=ey, z=ez, mode="lines",
-        line=dict(color="rgba(90,110,150,0.55)", width=1.5),
+        # Quiet, but it has to survive the zoomed-out view: at 0.40 alpha the
+        # edges disappeared entirely once Reset view pulled back.
+        line=dict(color="rgba(103,126,166,0.55)", width=1.4),
         hoverinfo="none", showlegend=False,
     )
 
@@ -184,7 +186,7 @@ def write_graph_3d(
     # A dark outline keeps every node visible (even faint, low-value ones)
     # against the white background.
     marker = dict(size=marker_sizes, opacity=0.95,
-                  line=dict(width=0.8, color="rgba(40,40,40,0.65)"))
+                  line=dict(width=1.2, color="rgba(255,255,255,0.9)"))
     if colors:
         marker["color"] = [colors.get(n, "#2b6cb0") for n in nodes]
     elif groups:
@@ -195,7 +197,11 @@ def write_graph_3d(
         # "bottom" of the distribution doesn't vanish; high values go dark navy.
         marker["colorscale"] = [[0.0, "#6baed6"], [1.0, "#08306b"]]
         marker["showscale"] = True
-        marker["colorbar"] = dict(title=color_attr.replace("_", " "))
+        marker["colorbar"] = dict(
+            title=dict(text=color_attr.replace("_", " "),
+                       font=dict(size=11, color="#5b6b7c")),
+            thickness=10, len=0.45, x=0.99, xpad=0, outlinewidth=0,
+            tickfont=dict(size=10, color="#5b6b7c"))
     else:
         marker["color"] = "#2b6cb0"
 
@@ -214,7 +220,8 @@ def write_graph_3d(
     _r = scene_ranges(pos)
     axes = ([dict(axis, range=list(r)) for r in _r] if _r else [axis] * 3)
     fig.update_layout(
-        title=heading,
+        title=dict(text=heading, font=dict(size=15, color="#1f2a36"), x=0.012,
+                   xanchor="left"),
         # aspectmode="cube" fixes the scene to a unit cube, which is what makes
         # a node's normalised position a camera centre that actually centres it.
         scene=dict(xaxis=axes[0], yaxis=axes[1], zaxis=axes[2],
@@ -253,10 +260,15 @@ TOUR_MAGNIFY = 3.5        # node markers at the end of a flight
 TOUR_EDGE_WIDTH = 2.6     # edge width at the end of a flight
 # The focus marker is SOLID and large, not a translucent ring over the node.
 # 2D recolors and enlarges the node itself, so what you look at is the node;
-# a ring left the node its original size underneath, which is why "zoom in so
-# we can see the actual node" kept going unanswered.
+# a ring left the node its original size underneath.
+#
+# **Its size is a fraction of the viewport, not a fixed number of pixels.** A
+# constant that fills a laptop window is lost on a large monitor, and "the
+# node should fill most of the screen" is a statement about the screen. 0.55
+# of the shorter side leaves room for the record card beside it.
 TOUR_RING = 30            # unzoomed
-TOUR_FOCUS_PX = 100       # at full zoom, against 2D's 82
+TOUR_FOCUS_FRACTION = 0.55
+TOUR_FOCUS_MIN_PX = 120
 
 
 def scene_ranges(pos):
@@ -282,6 +294,21 @@ def scene_ranges(pos):
         pad = ((hi - lo) or 1.0) * SCENE_PAD
         out.append([lo - pad, hi + pad])
     return out
+
+
+def _lighten(hex_color: str, amount: float) -> str:
+    """Shift a #rrggbb toward white (amount > 0) or black (amount < 0).
+
+    Only used to build the focus disc's gradient from the one highlight color,
+    so the shading cannot drift away from the color the 2D view uses.
+    """
+    h = hex_color.lstrip("#")
+    rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    out = []
+    for v in rgb:
+        t = v + (255 - v) * amount if amount >= 0 else v * (1 + amount)
+        out.append(max(0, min(255, int(round(t)))))
+    return "#%02x%02x%02x" % tuple(out)
 
 
 def _inject_tour_3d(path: str, stops, pos) -> None:
@@ -333,21 +360,41 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
 
     block = """
 <style>
-  #bl3-panel {position:fixed; top:12px; right:14px; z-index:9999; width:390px;
-    font:12px/1.45 system-ui,sans-serif; background:#f8fafc;
-    border:1px solid #d7dee6; border-radius:6px; padding:7px 9px;
-    box-shadow:0 1px 3px rgba(0,0,0,.12); color:#1f2a36}
-  #bl3-panel button {font:12px/1.3 system-ui,sans-serif; cursor:pointer;
-    border:1px solid #b9c6bd; background:#fff; border-radius:4px;
-    padding:3px 9px; margin-right:5px}
-  #bl3-help {cursor:help; color:#5b6b7c; border-bottom:1px dotted #9aa8b6}
-  #bl3-info {display:none; margin-top:7px; max-height:60vh; overflow-y:auto;
-    border-top:1px solid #d7dee6; padding-top:6px}
-  #bl3-info .h {margin-bottom:5px; color:#5b6b7c}
-  #bl3-info table {border-collapse:collapse; width:100%}
-  #bl3-info th {text-align:left; vertical-align:top; font-weight:600;
-    color:#5b6b7c; padding:2px 8px 2px 0; white-space:nowrap}
-  #bl3-info td {vertical-align:top; padding:2px 0; word-break:break-word}
+  #bl3-panel {position:fixed; top:14px; right:16px; z-index:9999;
+    font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
+      sans-serif;
+    background:rgba(255,255,255,.88); -webkit-backdrop-filter:blur(8px);
+    backdrop-filter:blur(8px); border:0; border-radius:10px; padding:8px 10px;
+    box-shadow:0 4px 16px rgba(20,32,48,.10); color:#1f2a36}
+  #bl3-panel button {font:inherit; cursor:pointer; border:0;
+    background:rgba(31,42,54,.06); color:#1f2a36; border-radius:7px;
+    padding:5px 11px; margin-right:5px; transition:background .15s}
+  #bl3-panel button:hover {background:rgba(31,42,54,.12)}
+  #bl3-help {cursor:help; color:#8795a4}
+  #bl3-info {display:none; margin-top:8px; color:#5b6b7c;
+    letter-spacing:.01em}
+  /* **The focus node is drawn in HTML, not as a Plotly marker.** A WebGL
+     marker big enough to fill the screen renders as a visible polygon, and
+     the edge trace draws straight across it. A div is a perfect circle at
+     any size and sits above the canvas, so nothing cuts through it. */
+  #bl3-focus {display:none; position:fixed; z-index:9998; border-radius:50%;
+    pointer-events:none; opacity:0; transform:scale(.55);
+    transition:opacity .45s ease-out, transform .55s cubic-bezier(.2,.7,.3,1)}
+  #bl3-focus.on {opacity:1; transform:scale(1)}
+  #bl3-card {display:none; position:fixed; z-index:10000; width:330px;
+    max-height:60vh; overflow-y:auto;
+    font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
+      sans-serif;
+    background:rgba(255,255,255,.90); -webkit-backdrop-filter:blur(10px);
+    backdrop-filter:blur(10px); border:0; border-radius:10px;
+    padding:11px 13px; color:#1f2a36;
+    box-shadow:0 6px 22px rgba(20,32,48,.14)}
+  #bl3-card table {border-collapse:collapse; width:100%}
+  #bl3-card th {text-align:left; vertical-align:top; font-weight:400;
+    color:#8795a4; padding:3px 10px 3px 0; white-space:nowrap}
+  #bl3-card td {vertical-align:top; padding:3px 0; word-break:break-word}
+  #bl3-card a {color:#0072B2; text-decoration:none}
+  #bl3-card a:hover {text-decoration:underline}
 </style>
 <div id="bl3-panel">
   <button id="bl3-play">Play tour</button>
@@ -356,11 +403,13 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
   <span id="bl3-help" title="__HELP__">&#9432;</span>
   <div id="bl3-info"></div>
 </div>
+<div id="bl3-focus"></div>
+<div id="bl3-card"></div>
 <script>
 (function () {
   var STOPS = __STOPS__, FLIGHT = __FLIGHT__, DWELL = __DWELL__;
   var ZOOM = __ZOOM3D__, MAG = __MAGNIFY__, EDGE_W = __EDGE_W__;
-  var RING = __RING__, FOCUS_PX = __FOCUS_PX__;
+  var RING = __RING__, FOCUS_F = __FOCUS_F__, FOCUS_MIN = __FOCUS_MIN__;
   var BASE = null, shown = 1;
   var atK = 1, atC = {x: 0, y: 0, z: 0};
   var HOME = {eye: {x: 1.25, y: 1.25, z: 1.25}, center: {x: 0, y: 0, z: 0}};
@@ -402,7 +451,9 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
       return v * f; })]}, [1]);
     Plotly.restyle(el, {"line.width": b.width + (EDGE_W - b.width) * t}, [0]);
     if (el.data.length > 2) {
-      Plotly.restyle(el, {"marker.size": [[RING + (FOCUS_PX - RING) * t]]},
+      // The GL marker only has to mark the node during the flight; the disc
+      // that fills the screen on arrival is HTML.
+      Plotly.restyle(el, {"marker.size": [[RING * (1 + t)]]},
                      [el.data.length - 1]);
     }
   }
@@ -438,23 +489,52 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     })(t0);
   }
   function flyTo(p, done) { glide(ZOOM, {x: p[0], y: p[1], z: p[2]}, done); }
-  function annotate(s) {
-    // A scene annotation is anchored in the data, so it travels with the node
-    // as the camera moves instead of sitting in a corner of the window.
-    var lines = [];
-    for (var r = 0; r < s.record.length; r++) {
-      lines.push("<b>" + s.record[r][0] + "</b>  " + s.record[r][1]);
-    }
-    Plotly.relayout(gd(), {"scene.annotations": [{
-      x: s.xyz[0], y: s.xyz[1], z: s.xyz[2],
-      text: lines.join("<br>"), showarrow: true, arrowhead: 2, arrowsize: 1,
-      arrowwidth: 1.2, arrowcolor: "#5b6b7c", ax: 90, ay: 0,
-      align: "left", xanchor: "left", bgcolor: "rgba(255,255,255,0.94)",
-      bordercolor: "#d7dee6", borderwidth: 1, borderpad: 6,
-      font: {size: 11, color: "#1f2a36"}
-    }]});
+  function sceneCentre() {
+    // **The tour always flies the node to the camera centre, so the focus node
+    // is at the centre of the scene's domain.** That makes its screen position
+    // exact arithmetic instead of a projection, which Plotly does not expose.
+    var el = gd(), r = el.getBoundingClientRect();
+    var dm = (el._fullLayout.scene || {}).domain || {x: [0, 1], y: [0, 1]};
+    return {x: r.left + (dm.x[0] + dm.x[1]) / 2 * r.width,
+            y: r.top + (1 - (dm.y[0] + dm.y[1]) / 2) * r.height,
+            size: Math.max(FOCUS_MIN, Math.round(
+              FOCUS_F * Math.min(r.width, r.height)))};
   }
-  function unannotate() { Plotly.relayout(gd(), {"scene.annotations": []}); }
+  function annotate(s) {
+    var c = sceneCentre(), disc = document.getElementById("bl3-focus");
+    var card = document.getElementById("bl3-card");
+    disc.style.width = disc.style.height = c.size + "px";
+    disc.style.left = (c.x - c.size / 2) + "px";
+    disc.style.top = (c.y - c.size / 2) + "px";
+    disc.style.background = "radial-gradient(circle at 36% 30%, " +
+      "__HILITE_LIGHT__ 0%, __HILITE__ 62%, __HILITE_DARK__ 100%)";
+    disc.style.boxShadow = "0 18px 50px rgba(20,32,48,.22)";
+    disc.style.display = "block";
+    void disc.offsetWidth;                 // commit before the transition
+    disc.classList.add("on");
+    var rows = "";
+    for (var r = 0; r < s.record.length; r++) {
+      var v = s.record[r][1];
+      if (/^https?:[/][/]/.test(v)) {
+        v = '<a href="' + v + '" target="_blank" rel="noopener">' + v + "</a>";
+      }
+      rows += "<tr><th>" + s.record[r][0] + "</th><td>" + v + "</td></tr>";
+    }
+    card.innerHTML = "<table>" + rows + "</table>";
+    card.style.display = "block";
+    // Clear of the disc, on its right, and inside the window.
+    var w = card.offsetWidth, h = card.offsetHeight;
+    var x = Math.min(c.x + c.size / 2 + 22, window.innerWidth - w - 12);
+    card.style.left = Math.max(12, x) + "px";
+    card.style.top = Math.min(Math.max(12, c.y - h / 2),
+                              window.innerHeight - h - 12) + "px";
+  }
+  function unannotate() {
+    var disc = document.getElementById("bl3-focus");
+    disc.classList.remove("on");
+    disc.style.display = "none";
+    document.getElementById("bl3-card").style.display = "none";
+  }
   function light(p) {
     // A solid marker drawn over the node, which is how 2D marks a stop: it
     // recolors and enlarges the node, so the thing you are looking at IS the
@@ -464,7 +544,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     var trace = {x: [p[0]], y: [p[1]], z: [p[2]], mode: "markers",
                  type: "scatter3d", hoverinfo: "skip", showlegend: false,
                  marker: {size: RING, color: "__HILITE__", opacity: 1,
-                          line: {width: 3, color: "#7a0f37"}}};
+                          line: {width: 4, color: "#ffffff"}}};
     if (el.data.length > 2) { Plotly.deleteTraces(el, el.data.length - 1); }
     Plotly.addTraces(el, trace);
   }
@@ -530,11 +610,14 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
                   .replace("__ZOOM3D__", str(TOUR_ZOOM_3D))
                   .replace("__MAGNIFY__", str(TOUR_MAGNIFY))
                   .replace("__EDGE_W__", str(TOUR_EDGE_WIDTH))
-                  .replace("__FOCUS_PX__", str(TOUR_FOCUS_PX))
+                  .replace("__FOCUS_F__", str(TOUR_FOCUS_FRACTION))
+                  .replace("__FOCUS_MIN__", str(TOUR_FOCUS_MIN_PX))
                   .replace("__RING__", str(TOUR_RING))
                   .replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
                   .replace("__DWELL__", str(TOUR_DWELL_MS))
                   .replace("__HELP__", RECORD_HELP.replace('"', "&quot;"))
+                  .replace("__HILITE_LIGHT__", _lighten(TOUR_HIGHLIGHT, 0.34))
+                  .replace("__HILITE_DARK__", _lighten(TOUR_HIGHLIGHT, -0.26))
                   .replace("__HILITE__", TOUR_HIGHLIGHT))
     try:
         with open(path, encoding="utf-8") as fh:

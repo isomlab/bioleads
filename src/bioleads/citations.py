@@ -763,29 +763,36 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     """
     snippet = """
 <style>
-  #bl-physics {position:fixed; top:12px; right:14px; z-index:9999;
-    font:12px/1.3 system-ui,sans-serif; background:#f8fafc;
-    border:1px solid #d7dee6; border-radius:6px; padding:6px 8px;
-    box-shadow:0 1px 3px rgba(0,0,0,.12)}
-  #bl-physics button {font:12px/1.3 system-ui,sans-serif; cursor:pointer;
-    border:1px solid #b9c6bd; background:#fff; border-radius:4px;
-    padding:3px 9px}
-  #bl-physics span {color:#5b6b7c; margin-left:7px}
+  #bl-physics {position:fixed; top:14px; right:16px; z-index:9999;
+    font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
+      sans-serif;
+    background:rgba(255,255,255,.88); -webkit-backdrop-filter:blur(8px);
+    backdrop-filter:blur(8px); border:0; border-radius:10px; padding:8px 10px;
+    box-shadow:0 4px 16px rgba(20,32,48,.10); color:#1f2a36}
+  #bl-physics button {font:inherit; cursor:pointer; border:0;
+    background:rgba(31,42,54,.06); color:#1f2a36; border-radius:7px;
+    padding:5px 11px; transition:background .15s}
+  #bl-physics button:hover {background:rgba(31,42,54,.12)}
+  #bl-physics span {color:#8795a4; margin-left:7px}
   #bl-tour-controls button {margin-left:5px}
-  #bl-tour-help {cursor:help; margin-left:6px; color:#5b6b7c;
-    font-size:13px; border-bottom:1px dotted #9aa8b6}
-  #bl-tour-info {display:none; margin-top:7px; border-top:1px solid #d7dee6;
-    padding-top:6px; color:#5b6b7c; max-width:300px}
+  #bl-tour-help {cursor:help; margin-left:6px; color:#8795a4; font-size:13px}
+  #bl-tour-info {display:none; margin-top:8px; color:#5b6b7c;
+    max-width:320px; letter-spacing:.01em}
   /* The record itself rides next to the node, not in the corner. */
   #bl-node-card {display:none; position:fixed; z-index:10000; width:330px;
-    max-height:60vh; overflow-y:auto; font:12px/1.35 system-ui,sans-serif;
-    background:rgba(255,255,255,.96); border:1px solid #d7dee6;
-    border-radius:6px; padding:7px 9px; color:#1f2a36;
-    box-shadow:0 2px 6px rgba(0,0,0,.15); pointer-events:auto}
+    max-height:60vh; overflow-y:auto;
+    font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
+      sans-serif;
+    background:rgba(255,255,255,.90); -webkit-backdrop-filter:blur(10px);
+    backdrop-filter:blur(10px); border:0; border-radius:10px;
+    padding:11px 13px; color:#1f2a36;
+    box-shadow:0 6px 22px rgba(20,32,48,.14); pointer-events:auto}
   #bl-node-card table {border-collapse:collapse; width:100%}
-  #bl-node-card th {text-align:left; vertical-align:top; font-weight:600;
-    color:#5b6b7c; padding:2px 8px 2px 0; white-space:nowrap}
-  #bl-node-card td {vertical-align:top; padding:2px 0; word-break:break-word}
+  #bl-node-card th {text-align:left; vertical-align:top; font-weight:400;
+    color:#8795a4; padding:3px 10px 3px 0; white-space:nowrap}
+  #bl-node-card td {vertical-align:top; padding:3px 0; word-break:break-word}
+  #bl-node-card a {color:#0072B2; text-decoration:none}
+  #bl-node-card a:hover {text-decoration:underline}
 </style>
 <div id="bl-physics">
   <button id="bl-physics-toggle">Pause layout</button>
@@ -812,18 +819,29 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     var play = document.getElementById("bl-tour-play");
     var at = null, landed = false;
     var nodes = net.body.data.nodes;
+    // **`value` is what sizes a vis.js node, not `size`.** When a node carries
+    // a value, vis recomputes `size` from it on every redraw, so enlarging the
+    // focus node by writing `size` did nothing at all -- it stayed smaller
+    // than its better-cited neighbours while claiming to be the subject.
+    var MAXV = 1;
+    nodes.forEach(function (n) { MAXV = Math.max(MAXV, n.value || 1); });
     function unlight() {
       if (lit) { nodes.update({id: lit.id, color: lit.color, size: lit.size,
-                               borderWidth: lit.borderWidth}); lit = null; }
+                               value: lit.value, borderWidth: lit.borderWidth});
+                 lit = null; }
     }
     function light(id) {
       unlight();
       var n = nodes.get(id);
-      lit = {id: id, color: n.color, size: n.size, borderWidth: n.borderWidth};
+      lit = {id: id, color: n.color, size: n.size, value: n.value,
+             borderWidth: n.borderWidth};
+      // A white rim, not a dark one: the focus node should read as lifted off
+      // the graph rather than outlined on it.
       nodes.update({id: id, color: {background: "__HILITE__",
-                                    border: "#7a0f37", highlight:
-                                    {background: "__HILITE__", border: "#7a0f37"}},
-                    size: (n.size || 10) * 1.6, borderWidth: 3});
+                                    border: "#ffffff", highlight:
+                                    {background: "__HILITE__", border: "#ffffff"}},
+                    value: MAXV * 1.9, size: (n.size || 10) * 1.9,
+                    borderWidth: 4});
     }
     // Canvas coordinates survive panning and zooming; DOM coordinates do not.
     // So the card is positioned from the node's canvas position on every
@@ -907,7 +925,15 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
   }
   function wire(net) {
     // Tooltips should wait for the cursor to stop, not fire on the way past.
-    net.setOptions({interaction: {hover: true, tooltipDelay: __TOOLTIP_DELAY__}});
+    // The edge colors are set here too: selecting a node makes vis.js repaint
+    // its edges in the highlight color, and the default is a heavy maroon that
+    // slashes across the whole picture.
+    net.setOptions({
+      interaction: {hover: true, tooltipDelay: __TOOLTIP_DELAY__},
+      edges: {width: 1, selectionWidth: 1, smooth: {roundness: 0.2},
+              color: {color: "rgba(126,148,184,0.50)", highlight: "__HILITE__",
+                      hover: "__HILITE__", inherit: false, opacity: 1}},
+      nodes: {borderWidth: 1.5, color: {border: "rgba(255,255,255,0.95)"}}});
     if (STOPS.length) { tour(net); }
     var btn = document.getElementById("bl-physics-toggle");
     var lbl = document.getElementById("bl-physics-state");
@@ -1111,7 +1137,11 @@ def write_citation_html(
                          value=cit + 1, size=size,
                          title="\n".join(tip_lines), **kw)
         for a, b in g.edges():
-            net.add_edge(a, b, title="cites", arrows="to")
+            # No arrowheads. On a network this dense they stack into a
+            # texture that reads as noise rather than as direction, and the
+            # direction is in the hover and the heading. The graph is still
+            # directed; only the ornament is gone.
+            net.add_edge(a, b, title="cites", arrows="")
     net.force_atlas_2based(spring_length=120)
     net.write_html(path, notebook=False, open_browser=False)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
@@ -1281,7 +1311,7 @@ def write_author_html(
             net.add_node(n, label=d.get("author") or n, value=v + 1, size=size,
                          title="\n".join(_author_tip_lines(n, d)), **kw)
         for a, b, ed in g.edges(data=True):
-            net.add_edge(a, b, title=f"cites ×{ed.get('weight', 1)}", arrows="to")
+            net.add_edge(a, b, title=f"cites ×{ed.get('weight', 1)}", arrows="")
     net.force_atlas_2based(spring_length=120)
     net.write_html(path, notebook=False, open_browser=False)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>

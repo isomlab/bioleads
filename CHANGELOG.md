@@ -99,6 +99,19 @@ while the major version is 0, a minor bump may change defaults.
 - The baseline sizes are also captured before the first flight rather than
   lazily inside `magnify`, where they were already a frame late.
 
+### Fixed: the tours were ranked on a degree nobody can see
+
+- **`g.degree()` counts in plus out**, so on these directed graphs two authors
+  who cite each other count twice. One line is drawn between them, the tour
+  lights one edge, and the panel's "N connection(s)" claimed a number the
+  picture contradicted.
+- It also **reordered the tour against what a reader would count**, which is
+  what made the senior-author tours look unranked: an author with 8 by that
+  measure but 6 neighbours was visited before one with 7 and 7.
+- Both the ranking and the count are **distinct neighbours** now, which is
+  exactly what the lit edges draw. A test asserts the two are equal, so they
+  cannot drift apart again.
+
 ### A stop lights the node's own edges, in both views
 
 - **The 3D tour now shows which papers the focus node connects to.** 2D has had

@@ -3038,15 +3038,20 @@ def test_3d_tour_lights_the_focus_node_s_own_edges():
                                  re.S).group(1))
     top = stops[0]
     assert top["id"] == "PMID:6"
-    assert top["degree"] == 4, "setup changed"
 
     # Three distinct neighbours, each one segment of two points plus a None.
     seg = top["seg"]
     assert len(seg["x"]) == 9, seg["x"]
     assert seg["x"][2] is None and seg["x"][5] is None
     assert len(seg["y"]) == len(seg["x"]) == len(seg["z"])
-    # The reciprocal pair is one edge on screen, not two drawn over each other.
-    assert top["degree"] > len(seg["x"]) // 3
+
+    # **The count the panel shows is the count the picture supports.** The
+    # reciprocal pair is one line, not two drawn over each other, and the stop
+    # claims 3 connections rather than the 4 that `g.degree()` reports for a
+    # directed graph. A number a reader cannot verify by counting is worse
+    # than no number, and ranking on it reordered the tour against the picture.
+    assert top["degree"] == 3, "in+out degree is back"
+    assert top["degree"] == len(seg["x"]) // 3
 
     # Both overlay traces come off together, or deleting by index unlights the
     # wrong one.

@@ -713,12 +713,25 @@ def tour_stops(g, n: int = TOUR_STOPS) -> list[dict]:
     the second is what a tour of a network should follow. Ties break on the
     size attribute so the bigger of two equally connected papers goes first.
 
+    **Distinct neighbours, not `g.degree()`.** These graphs are directed, and
+    `degree` counts in plus out, so two authors who cite each other count
+    twice. That is a degree nobody can see: one line is drawn between them,
+    the tour lights one edge, and the panel's "N connection(s)" claimed a
+    number the picture contradicted. It also reordered the tour against what a
+    reader would count, which is what made the author tours look unranked --
+    an author with 8 by that measure and 6 neighbours was visited before one
+    with 7 and 7.
+
     Each stop carries the same text the hover shows, so the tour and the
     tooltip can never tell different stories.
     """
     if not g.number_of_nodes():
         return []
-    deg = dict(g.degree())
+    if g.is_directed():
+        deg = {x: len((set(g.predecessors(x)) | set(g.successors(x))) - {x})
+               for x in g.nodes}
+    else:
+        deg = {x: len(set(g.neighbors(x)) - {x}) for x in g.nodes}
     author = "author" in next(iter(g.nodes(data=True)))[1]
     size_key = "papers" if author and "papers" in next(iter(g.nodes(data=True)))[1] \
         else "in_corpus_citations"

@@ -724,7 +724,7 @@ def seed_rank_key(doc, terms) -> tuple:
     return (1 if in_title else 0, total, distinct)
 
 
-def rank_seeds(seed_docs, query: str | None):
+def rank_seeds(seed_docs, query: str | None, translation: str | None = None):
     """Order seeds so that "the top n" means something.
 
     **Arrival order is not a ranking.** E-utilities sorts by recency unless
@@ -742,10 +742,13 @@ def rank_seeds(seed_docs, query: str | None):
     it is still Best Match, and inventing a ranking would be worse than keeping
     one somebody else computed.
     """
-    from .querymatch import parse_query_terms
+    from .querymatch import query_terms as _query_terms
 
     docs = list(seed_docs)
-    terms = parse_query_terms(query) if query else []
+    terms = _query_terms(query, translation) if (query or translation) else []
+    # Ranking counts occurrences, so a group is flattened here: every surface
+    # form of a concept counts toward it, which is the point of the expansion.
+    terms = [f for t in terms for f in (t if isinstance(t, (list, tuple)) else [t])]
     if not terms:
         return docs
     scored = [(seed_rank_key(d, terms), i, d) for i, d in enumerate(docs)]
@@ -828,7 +831,8 @@ def _keep_if_like_seeds(docs, seed_docs, *, top_n, n_terms, min_share, say):
     return kept
 
 
-def _keep_if_query_terms(docs: list[Document], query: str, say) -> list[Document]:
+def _keep_if_query_terms(docs: list[Document], query: str, say,
+                         translation: str | None = None) -> list[Document]:
     """Drop expansion-discovered papers whose text contains no query term.
 
     Literal, case-insensitive, on title plus abstract — the same test that
@@ -838,17 +842,18 @@ def _keep_if_query_terms(docs: list[Document], query: str, say) -> list[Document
     author or journal tags yields no searchable term, and silently discarding a
     whole expansion because of that would be far worse than keeping it.
     """
-    from .querymatch import matched_terms, parse_query_terms
+    from .querymatch import matched_terms, query_terms as _query_terms
 
-    terms = parse_query_terms(query)
+    terms = _query_terms(query, translation)
     if not terms:
         say("  query-term filter: the query has no searchable term, so nothing "
             "was filtered.")
         return docs
     kept = [d for d in docs if matched_terms(d.content, terms)]
     dropped = len(docs) - len(kept)
+    shown = [t[0] if isinstance(t, (list, tuple)) else t for t in terms]
     say(f"  query-term filter: kept {len(kept)} of {len(docs)} discovered "
-        f"paper(s); {dropped} contained none of {terms}.")
+        f"paper(s); {dropped} contained none of {shown}.")
     return kept
 
 
@@ -948,11 +953,14 @@ def load_documents(
                 for d in added:
                     d.meta["expanded"] = True
                 if expand_gate == "terms" and pubmed_query:
-                    added = _keep_if_query_terms(added, pubmed_query, say)
+                    added = _keep_if_query_terms(
+                        added, pubmed_query, say,
+                        (pubmed_report or {}).get("translation"))
                 elif expand_gate == "seeds":
                     seed_docs = rank_seeds(
                         [d for d in docs if not d.meta.get("expanded")],
-                        pubmed_query)
+                        pubmed_query,
+                        (pubmed_report or {}).get("translation"))
                     if expand_seed_profile_n and seed_docs:
                         top = seed_docs[:expand_seed_profile_n]
                         # With no query there is nothing to rank on, so the

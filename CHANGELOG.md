@@ -5,6 +5,32 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Matching uses PubMed's own expansion of the query
+
+- **Searching `cytoneme` now colours a paper that says `cytonemes`.** The terms
+  come from `esearch`'s `QueryTranslation` — the search PubMed actually ran —
+  rather than from the words typed into the box, so plurals and PubMed's synonym
+  mapping arrive without anyone adding a `*`.
+- Measured on a live `cytoneme` search: **12 of 12 fetched papers matched with
+  the expansion, 11 of 12 without.** The missing one says only "cytonemes".
+- **A term is now a group of surface forms**, and a paper matches the concept if
+  it contains any of them. Flattening would have been wrong: `classify` would
+  then demand every form, so a paper saying only the plural could never be
+  green.
+- `AND` and `NOT` separate concepts; `OR` joins forms of one. The first form
+  labels the group, chosen for readability — PubMed emits artifacts like
+  `"nanotube s"` and a hover should not report that.
+- **Two kinds of form are dropped.** `[MeSH Terms]` and other indexed fields,
+  because a heading assigned by an indexer often appears nowhere in the abstract
+  and matching on it would mark a paper for something its text does not say. And
+  expansions past six forms: PubMed turns `tunneling` into nine words including
+  `tunnelization`, so the group collapses to `tunnel*`, which covers the same
+  ground in one.
+- Feeds the colouring, the `terms` gate and the seed ranking alike, so **all
+  three now agree with retrieval** instead of second-guessing it.
+- Falls back to reading the raw query whenever there is no translation: a
+  `--pmids` run, or a search that failed before `esearch` answered.
+
 ### The networks have a physics switch
 
 - **Physics starts on load, as it always did, and a button pauses and resumes

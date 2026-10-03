@@ -771,3 +771,95 @@ def test_asking_for_more_seeds_than_exist_uses_all_of_them():
     docs = [_pubmed_doc(str(i), f"Paper {i} about autophagy", "lysosome") for i in (1, 2, 3)]
     assert seed_profile(docs, top_n=10, n_terms=3) == seed_profile(docs, top_n=0, n_terms=3)
     assert seed_profile(docs, top_n=999, n_terms=3) == seed_profile(docs, n_terms=3)
+
+
+# --------------------------------------------------------------------------
+# PubMed's own query translation as the source of terms
+# --------------------------------------------------------------------------
+
+CYTONEME_TR = '"cytoneme"[All Fields] OR "cytonemes"[All Fields]'
+TNT_TR = ('("tunnel"[All Fields] OR "tunneled"[All Fields] OR '
+          '"tunneling"[All Fields] OR "tunnelings"[All Fields] OR '
+          '"tunnelization"[All Fields] OR "tunnelized"[All Fields] OR '
+          '"tunnelled"[All Fields] OR "tunnelling"[All Fields] OR '
+          '"tunnels"[All Fields]) AND ("nanotube s"[All Fields] OR '
+          '"nanotubes"[MeSH Terms] OR "nanotubes"[All Fields] OR '
+          '"nanotube"[All Fields])')
+
+
+def test_a_plural_and_a_singular_become_one_concept():
+    """The question this exists for: searching cytoneme must colour a paper
+    that says cytonemes."""
+    from bioleads.querymatch import terms_from_translation
+    assert terms_from_translation(CYTONEME_TR) == [["cytoneme", "cytonemes"]]
+
+
+def test_a_group_matches_on_any_of_its_forms_and_reports_one_label():
+    from bioleads.querymatch import terms_from_translation
+    groups = terms_from_translation(CYTONEME_TR)
+    assert matched_terms("Cytonemes carry Shh.", groups) == ["cytoneme"]
+    assert matched_terms("A single cytoneme.", groups) == ["cytoneme"]
+    assert matched_terms("Filopodia only.", groups) == []
+
+
+def test_a_paper_with_the_plural_is_green_not_partial():
+    """Flattening the groups would break this: classify would demand every
+    surface form, so a paper saying only the plural could never be green."""
+    from bioleads.querymatch import terms_from_translation
+    groups = terms_from_translation(CYTONEME_TR)
+    hits = matched_terms("Cytonemes carry Shh.", groups)
+    assert classify(len(hits), len(groups)) == "all"
+
+
+def test_and_separates_concepts_while_or_joins_forms():
+    from bioleads.querymatch import terms_from_translation
+    groups = terms_from_translation(TNT_TR)
+    assert len(groups) == 2
+    assert matched_terms("Tunneling nanotubes connect cells.", groups) == \
+        [groups[0][0], groups[1][0]]
+
+
+def test_an_oversized_expansion_collapses_to_a_truncation():
+    """PubMed turned `tunneling` into nine words. Keeping the shortest bare
+    would match none of them, since the test is on word boundaries."""
+    from bioleads.querymatch import terms_from_translation
+    groups = terms_from_translation(TNT_TR)
+    assert groups[0] == ["tunnel*"]
+    assert matched_terms("tunnelling nanotubes", groups[:1]) == ["tunnel*"]
+
+
+def test_mesh_forms_are_dropped():
+    """A MeSH heading is assigned by an indexer and often appears nowhere in
+    the abstract, so matching on it would mark a paper for something its text
+    does not say."""
+    from bioleads.querymatch import terms_from_translation
+    groups = terms_from_translation('"autophagy"[MeSH Terms]')
+    assert groups == []
+
+
+def test_author_and_journal_tags_are_still_dropped():
+    from bioleads.querymatch import terms_from_translation
+    assert terms_from_translation('"Isom DG"[Author] AND "Nature"[Journal]') == []
+
+
+def test_the_readable_form_labels_the_group():
+    """PubMed emits artifacts like "nanotube s"; a hover must not report that."""
+    from bioleads.querymatch import terms_from_translation
+    groups = terms_from_translation(TNT_TR)
+    assert groups[1][0] == "nanotube"
+
+
+def test_it_falls_back_to_the_raw_query_without_a_translation():
+    from bioleads.querymatch import query_terms
+    assert query_terms("cytoneme", None) == ["cytoneme"]
+    assert query_terms("cytoneme", "") == ["cytoneme"]
+    assert query_terms("cytoneme", CYTONEME_TR) == [["cytoneme", "cytonemes"]]
+
+
+def test_annotation_returns_one_label_per_concept():
+    doc = _pubmed_doc("1", "Cytonemes in development", "they carry Shh")
+    g = nx.DiGraph()
+    g.add_node("PMID:1", pmid="1")
+    labels = annotate_citation_graph(g, [doc], "cytoneme", CYTONEME_TR)
+    assert labels == ["cytoneme"]
+    assert g.nodes["PMID:1"]["query_match"] == "all"

@@ -199,14 +199,16 @@ def run_pipeline(
         author_graph = build_author_citation_graph(
             docs, cfg, prefetched=prefetched, cancel=cancel, progress=progress)
         if pubmed_query and author_graph is not None:
-            querymatch.annotate_author_graph(author_graph, docs, pubmed_query)
+            querymatch.annotate_author_graph(author_graph, docs, pubmed_query,
+                                             pubmed_report.get("translation"))
         # Mark which papers literally contain the query's terms. Only meaningful
         # for a text search, so a --pmids or --refs run leaves the graph
         # uncoloured rather than colouring everything "none", which would read
         # as a finding instead of as "nothing was asked".
         if pubmed_query and citation_graph is not None:
             query_terms = querymatch.annotate_citation_graph(
-                citation_graph, docs, pubmed_query)
+                citation_graph, docs, pubmed_query,
+                pubmed_report.get("translation"))
             if query_terms:
                 hit = sum(1 for _, d in citation_graph.nodes(data=True)
                           if d.get("query_match") in ("all", "partial"))
@@ -324,7 +326,8 @@ def run_pipeline(
                 docs, cfg, prefetched=prefetched, rank_by="papers",
                 cancel=cancel, progress=progress)
             if pubmed_query and paper_graph is not None:
-                querymatch.annotate_author_graph(paper_graph, docs, pubmed_query)
+                querymatch.annotate_author_graph(paper_graph, docs, pubmed_query,
+                                                 pubmed_report.get("translation"))
             if paper_graph is not None and paper_graph.number_of_nodes():
                 aprank_csv = os.path.join(out_dir, "author_paper_ranking.csv")
                 authors_df(paper_graph, by="papers").to_csv(aprank_csv, index=False)

@@ -52,6 +52,13 @@ while the major version is 0, a minor bump may change defaults.
   over the first 38% of a flight, the new one is swapped in there and fades up
   over the rest, so the eye sees one highlight give way to another rather than a
   node changing color.
+- **With nothing lit there is nothing to hand over**, so the opening zoom skips
+  the swap and fades up over the whole flight. Leaving it in cost that first
+  ramp more than a third of its length and made the highlight appear abruptly
+  part-way through, which is what still read as snappy.
+- **The ramp is eased, like the camera**, and in 2D the focus node's size and
+  border grow over the flight rather than being written in one go. That jump
+  was most of what remained of the snap however smoothly the color faded.
 - 2D colors the node and its edges by hand for this. vis.js will recolor a
   selected node and its connections for free, but only instantly.
 

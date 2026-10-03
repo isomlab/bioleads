@@ -2845,7 +2845,11 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
     # The focus colour runs on the FLIGHT's progress, not on the zoom. From one
     # stop to the next the zoom does not change at all, so a ramp tied to it
     # would jump straight to full and the colour would snap.
-    assert "var SWAP" in tour and "tint(1 - t / SWAP" in tour
+    assert "var SWAP" in tour and "tint(1 - t / sw" in tour
+    # With nothing lit there is nothing to fade out, so the handover is skipped
+    # and the opening zoom fades up over the whole flight instead of the last
+    # 62% of it.
+    assert "(gd().data.length > 2) ? SWAP : 0" in tour
     assert "var SR" not in tour, "the fixed sphere fraction is back"
     assert across > 2, (
         "the cube does not fill the viewport: the default camera sits back, so "
@@ -2922,8 +2926,11 @@ def test_2d_tour_has_no_arrowheads_and_sizes_the_focus_by_value():
     tour = [m.group(1) for m in
             re.finditer(r"<script[^>]*>(.*?)</script>", html, re.S)
             if "bl-tour-play" in m.group(1)][0]
-    assert "value: MAXV" in tour, "the focus node is sized by `size`, which vis"\
-                                  " overwrites from `value` on every redraw"
+    assert "v1: MAXV * 1.9" in tour, "the focus node is sized by `size`, which"\
+                                     " vis overwrites from `value` on redraw"
+    # Grown over the flight rather than written in one go: the jump was most of
+    # what still read as snappy however smoothly the colour faded.
+    assert "value: lit.v0 + (lit.v1 - lit.v0) * u" in tour
     assert "value: lit.value" in tour, "unlight leaves the node enlarged"
 
 

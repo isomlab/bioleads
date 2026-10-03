@@ -530,7 +530,7 @@ __CARD_JS__
     // using the same eased progress as the flight itself.
     var el = gd();
     if (el.data.length < 4) { return; }
-    if (!force && Math.abs(u - tinted) < 0.06) { return; }
+    if (!force && Math.abs(u - tinted) < 0.03) { return; }
     tinted = u;
     var c = blend(DIM, HILITE, u), b = base();
     Plotly.restyle(el, {colorscale: [[[0, c], [1, c]]]}, [el.data.length - 1]);
@@ -623,16 +623,23 @@ __CARD_JS__
     // one stop to the next the zoom does not change at all, so a ramp tied to
     // it would jump straight to full and the colour would snap.
     var swapped = false;
+    // **With nothing lit there is nothing to fade out**, so the handover is
+    // skipped and the new focus fades up over the WHOLE flight. Leaving the
+    // swap in cost the opening zoom more than a third of its ramp and made the
+    // highlight appear abruptly part-way through.
+    var sw = (gd().data.length > 2) ? SWAP : 0;
     glide(ZOOM, {x: s.cam[0], y: s.cam[1], z: s.cam[2]}, done, function (t) {
-      if (t < SWAP) {
-        tint(1 - t / SWAP, false);         // the previous stop fades out
+      if (t < sw) {
+        tint(1 - t / sw, false);           // the previous stop fades out
       } else {
         if (!swapped) {
           swapped = true;
           clearLit();
           light(s.xyz, s.px, s.seg);
         }
-        tint((t - SWAP) / (1 - SWAP), t >= 1);
+        // Eased, like the camera. A linear ramp starts and stops abruptly
+        // against a flight that does not.
+        tint(ease((t - sw) / (1 - sw)), t >= 1);
       }
     });
   }
@@ -765,7 +772,7 @@ __CARD_JS__
     // the overlays stay until the flight home has finished, and the tint ramp
     // takes them back to the quiet end as the aspect ratio falls.
     glide(HOME_K, {x: 0, y: 0, z: 0}, unlight, function (t) {
-      tint(1 - t, t >= 1);                 // dim down over the flight home
+      tint(1 - ease(t), t >= 1);           // dim down over the flight home
     });
     Plotly.relayout(gd(), {"scene.camera": HOME});
   });

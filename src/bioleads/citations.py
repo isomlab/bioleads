@@ -920,6 +920,7 @@ __CARD_JS__
     var EDGE_REST = {color: EDGE_BASE, highlight: "__HILITE__",
                      hover: "__HILITE__", inherit: false, opacity: 1};
     var EDGE_REST_W = 1;
+    function ease(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3)/2; }
     function hex(c) {
       return [parseInt(c.substr(1, 2), 16), parseInt(c.substr(3, 2), 16),
               parseInt(c.substr(5, 2), 16)];
@@ -958,19 +959,25 @@ __CARD_JS__
         if (e) { was.push({id: e.id, color: e.color, width: e.width}); }
       }
       lit = {id: id, color: n.color, size: n.size, value: n.value,
-             borderWidth: n.borderWidth, edges: was, ids: ids};
-      // A white rim, not a dark one: the focus node should read as lifted off
-      // the graph rather than outlined on it.
-      nodes.update({id: id, value: MAXV * 1.9, size: (n.size || 10) * 1.9,
-                    borderWidth: 4});
+             borderWidth: n.borderWidth, edges: was, ids: ids,
+             // The resting geometry, so the growth can be interpolated. It
+             // used to be written in one go, and that jump was most of what
+             // still read as snappy however smoothly the colour faded.
+             v0: n.value || 1, s0: n.size || 10, b0: n.borderWidth || 1.5,
+             v1: MAXV * 1.9, s1: (n.size || 10) * 1.9, b1: 4};
       tint(0);
     }
     function tint(u) {
       if (!lit) { return; }
       var c = blend("__DIM__", "__HILITE__", u);
+      // A white rim, not a dark one: the focus node should read as lifted off
+      // the graph rather than outlined on it.
       nodes.update({id: lit.id,
                     color: {background: c, border: "#ffffff",
-                            highlight: {background: c, border: "#ffffff"}}});
+                            highlight: {background: c, border: "#ffffff"}},
+                    value: lit.v0 + (lit.v1 - lit.v0) * u,
+                    size: lit.s0 + (lit.s1 - lit.s0) * u,
+                    borderWidth: lit.b0 + (lit.b1 - lit.b0) * u});
       var upd = [];
       for (var i = 0; i < lit.ids.length; i++) {
         upd.push({id: lit.ids[i],
@@ -1012,17 +1019,23 @@ __CARD_JS__
       // point of the ramp and fades up, so the eye sees one focus hand over to
       // the next rather than a node changing colour.
       clearInterval(ramp);
-      var SWAP = 0.38, t0 = Date.now(), swapped = false;
+      // **With nothing lit there is nothing to fade out**, so the handover is
+      // skipped and the new focus fades up over the WHOLE flight. Leaving the
+      // swap in cost the opening zoom more than a third of its ramp and made
+      // the highlight appear abruptly part-way through.
+      var sw = lit ? 0.38 : 0, t0 = Date.now(), swapped = false;
       ramp = setInterval(function () {
         var t = Math.min(1, (Date.now() - t0) / __FLIGHT__);
-        if (t < SWAP) {
-          tint(1 - t / SWAP);
+        if (t < sw) {
+          tint(1 - t / sw);
         } else {
           if (!swapped) { swapped = true; light(s.id); }
-          tint((t - SWAP) / (1 - SWAP));
+          // Eased, like the camera. A linear ramp starts and stops abruptly
+          // against a flight that does not.
+          tint(ease((t - sw) / (1 - sw)));
         }
         if (t >= 1) { clearInterval(ramp); ramp = null; }
-      }, 40);
+      }, 25);
       // The card goes away for the duration of the flight. Showing it first
       // means reading a card that is still travelling.
       at = s; landed = false; hideCard();
@@ -1064,7 +1077,7 @@ __CARD_JS__
       var r0 = Date.now();
       ramp = setInterval(function () {
         var t = Math.min(1, (Date.now() - r0) / __FLIGHT__);
-        tint(1 - t);
+        tint(1 - ease(t));
         if (t >= 1) { clearInterval(ramp); ramp = null; unlight(); }
       }, 40);
       net.unselectAll();

@@ -42,6 +42,28 @@ the corpus size and nothing else explains the gap, this is usually why.
 **On a run with no expansion, every document is a seed.** That has consequences further
 down: see [the warning in Part 3](#when-the-thresholds-do-nothing).
 
+### With `--pmids` or `--refs` and no query
+
+Worth its own paragraph, because three things behave differently and only one of them is
+obvious.
+
+- **Order is yours.** `parse_pmid_input` strips any `PMID:` prefix, splits on whitespace,
+  commas or semicolons, and de-duplicates **keeping first-seen order**. `@file.txt` is read
+  the same way. No `esearch` runs, so there is no Best Match — you named the papers.
+- **Seed ranking does nothing.** It ranks on query terms and there are none, so the list is
+  returned untouched and no `seed_rank` is set. **`expand_seed_profile_n` therefore means
+  "the first n PMIDs as you listed them."** That is real control if your list is ordered by
+  importance, and a trap if you pasted an unordered export. **Put the papers you mean
+  first.**
+- **The `seeds` gate still works, and this is the point:** its terms are compiled from the
+  seed papers' own text, not from a query, so it needs no query at all. The `terms` gate, by
+  contrast, is guarded on there being a query and **silently filters nothing**.
+- **No colouring and no matches network**, since annotation is guarded on the query too. With
+  nothing asked, every node would be "unknown", which would read as a finding rather than as
+  "nothing was asked".
+- The same abstract rule applies: `fetch_pubmed_by_ids` reports **"retrieved N document(s)
+  with usable text"**, and N can be smaller than the number of IDs pasted.
+
 ### 4. Seed ranking
 
 Seeds are ranked by `sources.seed_rank_key`, used to choose which build the relevance
@@ -78,8 +100,8 @@ fetched, so **a paper that is later rejected has already contributed its links.*
 
 | `expand_gate` | A discovered paper is kept if… |
 |---|---|
-| **`seeds`** *(default)* | it contains at least `expand_seed_min_share` (default **0.10**) of a profile built from the top `expand_seed_profile_n` ranked seeds |
-| `terms` | its title or abstract literally contains at least one query term |
+| **`seeds`** *(default)* | it contains at least `expand_seed_min_share` (default **0.10**) of a profile built from the top `expand_seed_profile_n` ranked seeds. **Needs no query — the profile comes from the seeds' own text** |
+| `terms` | its title or abstract literally contains at least one query term. **Needs a query; with `--pmids` alone it filters nothing** |
 | `off` | always |
 
 **The profile** is the terms the chosen seeds share, weighted by **how many seeds mention a

@@ -902,11 +902,22 @@ def load_documents(
                         pubmed_query)
                     if expand_seed_profile_n and seed_docs:
                         top = seed_docs[:expand_seed_profile_n]
-                        say("  profile seeds, most on-topic first:")
-                        for d in top:
-                            mark = "title" if d.meta.get("seed_title_hit") else "text"
-                            say(f"    {d.meta.get('seed_rank')}. "
-                                f"{d.meta.get('seed_query_hits', 0)}x in {mark}: "
+                        # With no query there is nothing to rank on, so the
+                        # seeds are in the order they were supplied and saying
+                        # "0x in text" about them would be a lie.
+                        ranked = top[0].meta.get("seed_rank") is not None
+                        say("  profile seeds, most on-topic first:" if ranked
+                            else "  profile seeds, in the order supplied "
+                                 "(no query to rank on):")
+                        for i, d in enumerate(top, start=1):
+                            if ranked:
+                                mark = ("title" if d.meta.get("seed_title_hit")
+                                        else "text")
+                                detail = (f"{d.meta.get('seed_query_hits', 0)}x "
+                                          f"in {mark}: ")
+                            else:
+                                detail = ""
+                            say(f"    {d.meta.get('seed_rank', i)}. {detail}"
                                 f"{(d.title or d.doc_id)[:66]}")
                     added = _keep_if_like_seeds(
                         added, seed_docs, top_n=expand_seed_profile_n,

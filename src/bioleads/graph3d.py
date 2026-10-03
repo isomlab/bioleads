@@ -255,8 +255,12 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
         rng = [(hi[i] - lo[i]) or 1.0 for i in range(3)]
         coords = {n: [2 * (p[i] - lo[i]) / rng[i] - 1 for i in range(3)]
                   for n, p in raw.items()}
-    stops = [dict(st, xyz=coords.get(st["id"])) for st in stops
-             if coords.get(st["id"])]
+    # Two coordinate systems, and they are not interchangeable. The camera
+    # centre is in the scene's normalised space; a scene annotation is anchored
+    # in DATA space. Carrying both is cheaper than converting in JavaScript and
+    # makes which-is-which explicit.
+    stops = [dict(st, xyz=coords.get(st["id"]), xyzData=raw.get(st["id"]))
+             for st in stops if coords.get(st["id"])]
     if not stops:
         return
 
@@ -304,7 +308,9 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     // sits a fixed distance away along a constant direction, which keeps every
     // stop framed the same way instead of depending on where the node happens
     // to be in the scene.
-    var d = 0.8;
+    // 0.35, not 0.8: at 0.8 the node was centred but still small, which is
+    // being shown where it is rather than being shown what it is.
+    var d = 0.35;
     var to = {center: {x: p[0], y: p[1], z: p[2]},
               eye: {x: p[0] + d, y: p[1] + d, z: p[2] + d}};
     var t0 = performance.now();
@@ -321,6 +327,23 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
       if (t < 1) { anim = requestAnimationFrame(frame); } else if (done) { done(); }
     })(t0);
   }
+  function annotate(s) {
+    // A scene annotation is anchored in the data, so it travels with the node
+    // as the camera moves instead of sitting in a corner of the window.
+    var lines = [];
+    for (var r = 0; r < s.record.length; r++) {
+      lines.push("<b>" + s.record[r][0] + "</b>  " + s.record[r][1]);
+    }
+    Plotly.relayout(gd(), {"scene.annotations": [{
+      x: s.xyzData[0], y: s.xyzData[1], z: s.xyzData[2],
+      text: lines.join("<br>"), showarrow: true, arrowhead: 2, arrowsize: 1,
+      arrowwidth: 1.2, arrowcolor: "#5b6b7c", ax: 70, ay: -70,
+      align: "left", xanchor: "left", bgcolor: "rgba(255,255,255,0.94)",
+      bordercolor: "#d7dee6", borderwidth: 1, borderpad: 6,
+      font: {size: 11, color: "#1f2a36"}
+    }]});
+  }
+  function unannotate() { Plotly.relayout(gd(), {"scene.annotations": []}); }
   function light(p) {
     // A ring drawn on top of the node. Recoloring the node itself would mean
     // rewriting the whole marker array on every stop.
@@ -339,6 +362,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
   function show(k) {
     var s = STOPS[k]; if (!s) { return; }
     light(s.xyz);
+    annotate(s);
     var rows = "";
     for (var r = 0; r < s.record.length; r++) {
       var v = s.record[r][1];
@@ -349,8 +373,8 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     }
     var info = document.getElementById("bl3-info");
     info.innerHTML = '<div class="h"><b>' + (k + 1) + " of " + STOPS.length +
-      "</b> &middot; " + s.degree + " connection(s)</div><table>" + rows +
-      "</table>";
+      "</b> &middot; " + s.degree + " connection(s) &middot; " +
+      (s.label || "") + "</div>";
     info.style.display = "block";
     flyTo(s.xyz);
   }
@@ -373,6 +397,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     playing = false; clearTimeout(timer); cancelAnimationFrame(anim);
     play.textContent = "Play tour";
     unlight();
+    unannotate();
     document.getElementById("bl3-info").style.display = "none";
     Plotly.relayout(gd(), {"scene.camera": HOME});
   });

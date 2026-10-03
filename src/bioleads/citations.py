@@ -738,6 +738,49 @@ def tour_stops(g, n: int = TOUR_STOPS) -> list[dict]:
     return stops
 
 
+# **One card, both views.** The 2D and 3D tours each used to build their own
+# markup, so a change to one quietly left the other looking like the previous
+# version. The CSS and the renderer live here and are injected into both.
+CARD_CSS = """
+  /* Every class is bl- prefixed. pyvis ships Bootstrap, whose own `.row` and
+     `.hd` captured the card and stacked each label above its value. */
+  .bl-card {font:13px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",
+      system-ui,sans-serif; color:#16202b}
+  .bl-card .bl-hd {font-size:15.5px; line-height:1.34; font-weight:600;
+    letter-spacing:-.011em; margin:0 0 11px; color:#0f1821}
+  .bl-card .bl-rule {height:1px; margin:0 0 11px;
+    background:linear-gradient(90deg, __HILITE__ 0%, rgba(0,0,0,.07) 36%,
+      rgba(0,0,0,0) 100%)}
+  .bl-card .bl-row {display:flex; gap:12px; padding:2.5px 0; margin:0}
+  .bl-card .bl-lbl {flex:0 0 76px; max-width:76px; font-size:10.5px;
+    text-transform:uppercase; letter-spacing:.07em; color:#93a1b0;
+    padding-top:2px}
+  .bl-card .bl-val {flex:1 1 auto; min-width:0; word-break:break-word;
+    color:#16202b}
+  .bl-card a {color:#0072B2; text-decoration:none}
+  .bl-card a:hover {text-decoration:underline}
+"""
+
+CARD_JS = """
+window.BL_CARD = function (record) {
+  // The title is the headline, everything else is quiet metadata beneath it.
+  // A flat label/value table gave the journal the same weight as the paper.
+  var head = "", rows = "";
+  for (var r = 0; r < record.length; r++) {
+    var lab = record[r][0], v = String(record[r][1]);
+    if (/^https?:[/][/]/.test(v)) {
+      v = '<a href="' + v + '" target="_blank" rel="noopener">' + v + "</a>";
+    }
+    if (!head && lab === "Title") { head = v; continue; }
+    rows += '<div class="bl-row"><div class="bl-lbl">' + lab +
+            '</div><div class="bl-val">' + v + "</div></div>";
+  }
+  return (head ? '<div class="bl-hd">' + head + "</div>" : "") +
+         '<div class="bl-rule"></div>' + rows;
+};
+"""
+
+
 def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     """Give the page a physics switch, settle the layout, and calm the tooltips.
 
@@ -763,7 +806,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     """
     snippet = """
 <style>
-  #bl-physics {position:fixed; top:14px; right:16px; z-index:9999;
+  #bl-physics {position:fixed; bottom:16px; left:16px; z-index:9999;
     font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
       sans-serif;
     background:rgba(255,255,255,.88); -webkit-backdrop-filter:blur(8px);
@@ -778,21 +821,17 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
   #bl-tour-help {cursor:help; margin-left:6px; color:#8795a4; font-size:13px}
   #bl-tour-info {display:none; margin-top:8px; color:#5b6b7c;
     max-width:320px; letter-spacing:.01em}
+__CARD_CSS__
   /* The record itself rides next to the node, not in the corner. */
-  #bl-node-card {display:none; position:fixed; z-index:10000; width:330px;
-    max-height:60vh; overflow-y:auto;
-    font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
-      sans-serif;
-    background:rgba(255,255,255,.90); -webkit-backdrop-filter:blur(10px);
-    backdrop-filter:blur(10px); border:0; border-radius:10px;
-    padding:11px 13px; color:#1f2a36;
-    box-shadow:0 6px 22px rgba(20,32,48,.14); pointer-events:auto}
-  #bl-node-card table {border-collapse:collapse; width:100%}
-  #bl-node-card th {text-align:left; vertical-align:top; font-weight:400;
-    color:#8795a4; padding:3px 10px 3px 0; white-space:nowrap}
-  #bl-node-card td {vertical-align:top; padding:3px 0; word-break:break-word}
-  #bl-node-card a {color:#0072B2; text-decoration:none}
-  #bl-node-card a:hover {text-decoration:underline}
+  #bl-node-card {display:none; position:fixed; z-index:10000; width:344px;
+    max-height:72vh; overflow-y:auto;
+    background:rgba(255,255,255,.82); -webkit-backdrop-filter:blur(18px)
+      saturate(140%); backdrop-filter:blur(18px) saturate(140%);
+    border:1px solid rgba(255,255,255,.65); border-radius:16px;
+    padding:18px 20px 16px; pointer-events:auto;
+    box-shadow:0 18px 50px rgba(16,26,40,.18), 0 2px 6px rgba(16,26,40,.06);
+    opacity:0; transition:opacity .45s ease-out}
+  #bl-node-card.on {opacity:1}
 </style>
 <div id="bl-physics">
   <button id="bl-physics-toggle">Pause layout</button>
@@ -805,8 +844,9 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
   </span>
   <div id="bl-tour-info"></div>
 </div>
-<div id="bl-node-card"></div>
+<div id="bl-node-card" class="bl-card"></div>
 <script type="text/javascript">
+__CARD_JS__
 (function () {
   var on = true;
   var STOPS = __TOUR_STOPS__;
@@ -848,12 +888,16 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     // redraw rather than once, which is what keeps it beside its node when
     // the view moves afterwards.
     function place() {
-      if (!landed || !at) { card.style.display = "none"; return; }
+      if (!landed || !at) {
+        card.classList.remove("on"); card.style.display = "none"; return;
+      }
       var pos = net.getPositions([at.id])[at.id];
       if (!pos) { card.style.display = "none"; return; }
       var dom = net.canvasToDOM(pos);
       var box = net.body.container.getBoundingClientRect();
       card.style.display = "block";
+      void card.offsetWidth;
+      card.classList.add("on");
       var w = card.offsetWidth, h = card.offsetHeight;
       // Clear the marker itself. `size` is in canvas units, so it has to be
       // scaled: at tour zoom a big node is tens of pixels across, and a fixed
@@ -875,19 +919,11 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
       net.selectNodes([s.id]);
       // The card goes away for the duration of the flight. Showing it first
       // means reading a card that is still travelling.
-      at = s; landed = false; card.style.display = "none";
+      at = s; landed = false;
+      card.classList.remove("on"); card.style.display = "none";
       net.focus(s.id, {scale: __ZOOM__, animation:
         {duration: __FLIGHT__, easingFunction: "easeInOutCubic"}});
-      var rows = "";
-      for (var r = 0; r < s.record.length; r++) {
-        var val = s.record[r][1];
-        if (/^https?:[/][/]/.test(val)) {
-          val = '<a href="' + val + '" target="_blank" rel="noopener">' +
-                val + "</a>";
-        }
-        rows += "<tr><th>" + s.record[r][0] + "</th><td>" + val + "</td></tr>";
-      }
-      card.innerHTML = "<table>" + rows + "</table>";
+      card.innerHTML = BL_CARD(s.record);
       panel.innerHTML = '<div class="bl-tour-head"><b>' + (k + 1) + " of " +
         STOPS.length + "</b> &middot; " + s.degree + " connection(s) &middot; " +
         (s.label || "") + "</div>";
@@ -917,7 +953,8 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     document.getElementById("bl-tour-reset").addEventListener("click", function () {
       playing = false; clearTimeout(timer); play.textContent = "Play tour";
       panel.style.display = "none";
-      at = null; landed = false; card.style.display = "none";
+      at = null; landed = false;
+      card.classList.remove("on"); card.style.display = "none";
       unlight();
       net.unselectAll();
       net.fit({animation: {duration: 1400, easingFunction: "easeInOutCubic"}});
@@ -974,6 +1011,8 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
             html = f.read()
     except OSError:
         return
+    snippet = snippet.replace("__CARD_CSS__", CARD_CSS)
+    snippet = snippet.replace("__CARD_JS__", CARD_JS)
     snippet = snippet.replace("__TOOLTIP_DELAY__", str(TOOLTIP_DELAY_MS))
     snippet = snippet.replace("__TOUR_STOPS__", json.dumps(stops or []))
     snippet = snippet.replace("__FLIGHT__", str(TOUR_FLIGHT_2D_MS))

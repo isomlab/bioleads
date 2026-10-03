@@ -2811,18 +2811,22 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
 
     zoom = float(re.search(r"ZOOM = ([0-9.]+)", tour).group(1))
     mag = float(re.search(r"MAG = ([0-9.]+)", tour).group(1))
-    focus_f = float(re.search(r"FOCUS_F = ([0-9.]+)", tour).group(1))
+    sphere_r = float(re.search(r"SR = ([0-9.]+)", tour).group(1))
+    orbit = float(re.search(r"ORBIT = ([0-9.]+)", tour).group(1))
     assert zoom > 1, "the scene never grows, so nothing looks closer"
     # Plotly markers are sized in screen pixels, so spreading the scene apart
     # leaves every node the size it was. They have to be scaled to match.
     assert mag > 1 and "function magnify(" in tour
-    # The focus node is drawn in HTML and sized as a FRACTION of the viewport.
-    # A WebGL marker large enough to fill the screen renders as a visible
-    # polygon with the edge trace drawn straight across it, and a marker sized
-    # in fixed pixels fills a laptop window but is lost on a large monitor.
-    assert 0.3 <= focus_f <= 0.8, "the focus node does not fill the view"
-    assert "bl3-focus" in tour and "border-radius:50%" in html
-    assert "sceneCentre" in tour, "the disc has no position to be drawn at"
+    # **The focus node is a real sphere in the scene.** Markers never grow as
+    # the camera comes in, and an HTML overlay is a flat sticker that does not
+    # rotate or shade. Only something in the data gets bigger because the view
+    # got closer, which is what was asked for.
+    assert 0.02 <= sphere_r <= 0.2, "the focus sphere is not sized sanely"
+    assert '"surface"' in tour, "the focus node is not in the scene"
+    # Mesh3d renders its own triangle edges here, giving a wireframe globe that
+    # no contour/flatshading/normals-epsilon setting removed.
+    assert "mesh3d" not in tour
+    assert orbit > 0, "the flight only dollies, it never turns"
 
     # The camera centre is in units of half the aspect ratio, so it has to be
     # rescaled as the zoom tweens or the focus node drifts off to one side.
@@ -2892,3 +2896,58 @@ def test_2d_tour_has_no_arrowheads_and_sizes_the_focus_by_value():
     assert "value: MAXV" in tour, "the focus node is sized by `size`, which vis"\
                                   " overwrites from `value` on every redraw"
     assert "value: lit.value" in tour, "unlight leaves the node enlarged"
+
+
+def test_unit_sphere_is_a_sphere():
+    """Round, closed, and a grid -- checked here rather than in a render."""
+    import math
+
+    from bioleads.graph3d import TOUR_SPHERE_SEGMENTS, unit_sphere
+
+    xs, ys, zs = unit_sphere()
+    lon, lat = TOUR_SPHERE_SEGMENTS
+    assert len(xs) == lat + 1 and len(xs[0]) == lon + 1, "not a closed grid"
+    assert len(ys) == len(xs) and len(zs) == len(xs)
+    for row_x, row_y, row_z in zip(xs, ys, zs):
+        for x, y, z in zip(row_x, row_y, row_z):
+            assert abs(math.sqrt(x * x + y * y + z * z) - 1) < 2e-4
+    # The seam column repeats the first, or the surface has a slit in it.
+    assert xs[5][0] == xs[5][-1] and ys[5][0] == ys[5][-1]
+
+
+def test_both_tours_share_one_card_and_keep_clear_of_bootstrap():
+    """One card design for both views, with class names that cannot collide.
+
+    pyvis ships Bootstrap, whose own `.row` captured the card and stacked
+    every label above its value -- in the 2D page only, so the two views drifted
+    apart while each looked fine on its own.
+    """
+    from bioleads.citations import CARD_CSS, CARD_JS
+
+    assert ".bl-row" in CARD_CSS and ".bl-lbl" in CARD_CSS
+    for generic in (" .row ", " .hd ", " .lbl ", " .val ", " .rule "):
+        assert generic not in CARD_CSS, f"{generic.strip()} can collide"
+    assert "bl-row" in CARD_JS and "bl-hd" in CARD_JS
+
+    pytest.importorskip("pyvis")
+    pytest.importorskip("plotly")
+    import tempfile
+
+    import networkx as nx
+
+    from bioleads import citations
+
+    g = nx.DiGraph()
+    for i in range(4):
+        g.add_node(f"PMID:{i}", pmid=str(i), title=f"P{i}", in_corpus_citations=i)
+    g.add_edges_from([("PMID:3", f"PMID:{j}") for j in range(2)])
+
+    with tempfile.TemporaryDirectory() as d:
+        two = open(citations.write_citation_html(
+            g, os.path.join(d, "a.html"), title="t"), encoding="utf-8").read()
+        three = open(citations.write_citation_html_3d(
+            g, os.path.join(d, "b.html"), title="t"), encoding="utf-8").read()
+    for page in (two, three):
+        assert "window.BL_CARD" in page and ".bl-card .bl-row" in page
+        # Controls belong in a bottom corner, out of the picture.
+        assert "bottom:16px; left:16px" in page

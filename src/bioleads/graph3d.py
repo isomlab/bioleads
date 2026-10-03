@@ -258,17 +258,22 @@ TOUR_ZOOM_3D = 7.0
 # 24-91px, which is the same graph at the same size.
 TOUR_MAGNIFY = 3.5        # node markers at the end of a flight
 TOUR_EDGE_WIDTH = 2.6     # edge width at the end of a flight
-# The focus marker is SOLID and large, not a translucent ring over the node.
-# 2D recolors and enlarges the node itself, so what you look at is the node;
-# a ring left the node its original size underneath.
+# **The focus node is a real sphere in the scene, not a marker and not an
+# overlay.** Markers are sized in screen pixels, so they never grow as the
+# camera comes in; an HTML disc does grow, but it is a flat sticker pasted
+# over the picture that does not rotate, does not shade and hides whatever is
+# behind it. A Mesh3d sphere lives in the data: the zoom makes it bigger the
+# way moving towards something makes it bigger, and the orbit turns it.
 #
-# **Its size is a fraction of the viewport, not a fixed number of pixels.** A
-# constant that fills a laptop window is lost on a large monitor, and "the
-# node should fill most of the screen" is a statement about the screen. 0.55
-# of the shorter side leaves room for the record card beside it.
-TOUR_RING = 30            # unzoomed
-TOUR_FOCUS_FRACTION = 0.55
-TOUR_FOCUS_MIN_PX = 120
+# Its radius is a fraction of the graph's span, PER AXIS, so it is round on
+# screen. The axes have different data ranges but are drawn into the same
+# cube, so a sphere of equal radius in data units renders as an ellipsoid.
+TOUR_SPHERE_FRACTION = 0.072
+TOUR_SPHERE_SEGMENTS = (48, 24)
+# How far the camera swings around the node while it flies in. A tour that
+# only dollies looks like a slideshow; a little rotation reads as moving
+# through the network.
+TOUR_ORBIT_DEG = 55.0
 
 
 def scene_ranges(pos):
@@ -296,19 +301,40 @@ def scene_ranges(pos):
     return out
 
 
-def _lighten(hex_color: str, amount: float) -> str:
-    """Shift a #rrggbb toward white (amount > 0) or black (amount < 0).
+def unit_sphere(segments=TOUR_SPHERE_SEGMENTS):
+    """A unit sphere as three ``(lat+1) x (lon+1)`` grids for a ``Surface``.
 
-    Only used to build the focus disc's gradient from the one highlight color,
-    so the shading cannot drift away from the color the 2D view uses.
+    **Not a ``Mesh3d``.** A mesh renders its own triangle edges here, so the
+    focus node came out as a wireframe globe, and no combination of
+    ``contour.show``, ``flatshading`` or the normals epsilons removed them. A
+    ``Surface`` over the same parametric grid shades smoothly with no lines.
+
+    Built in Python so the page carries the geometry rather than the code to
+    make it, and so the grid can be checked by a test instead of by looking at
+    a render.
     """
-    h = hex_color.lstrip("#")
-    rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
-    out = []
-    for v in rgb:
-        t = v + (255 - v) * amount if amount >= 0 else v * (1 + amount)
-        out.append(max(0, min(255, int(round(t)))))
-    return "#%02x%02x%02x" % tuple(out)
+    import math
+
+    lon, lat = segments
+    xs, ys, zs = [], [], []
+    for a in range(lat + 1):                      # pole to pole
+        phi = math.pi * a / lat
+        sp, cp = math.sin(phi), math.cos(phi)
+        rx, ry, rz = [], [], []
+        for b in range(lon + 1):                  # the seam column repeats
+            th = 2 * math.pi * b / lon
+            rx.append(round(sp * math.cos(th), 4))
+            ry.append(round(sp * math.sin(th), 4))
+            rz.append(round(cp, 4))
+        xs.append(rx)
+        ys.append(ry)
+        zs.append(rz)
+    return xs, ys, zs
+
+
+def _sphere_payload():
+    xs, ys, zs = unit_sphere()
+    return {"x": xs, "y": ys, "z": zs}
 
 
 def _inject_tour_3d(path: str, stops, pos) -> None:
@@ -326,8 +352,8 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     if not stops:
         return
     try:
-        from .citations import (RECORD_HELP, TOUR_DWELL_MS, TOUR_FLIGHT_MS,
-                                TOUR_HIGHLIGHT)
+        from .citations import (CARD_CSS, CARD_JS, RECORD_HELP,
+                                TOUR_DWELL_MS, TOUR_FLIGHT_MS, TOUR_HIGHLIGHT)
     except Exception:          # pragma: no cover - citations is always present
         return
     # **Two coordinate systems, and mixing them up is the bug to watch for.**
@@ -360,7 +386,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
 
     block = """
 <style>
-  #bl3-panel {position:fixed; top:14px; right:16px; z-index:9999;
+  #bl3-panel {position:fixed; bottom:16px; left:16px; z-index:9999;
     font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
       sans-serif;
     background:rgba(255,255,255,.88); -webkit-backdrop-filter:blur(8px);
@@ -373,28 +399,19 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
   #bl3-help {cursor:help; color:#8795a4}
   #bl3-info {display:none; margin-top:8px; color:#5b6b7c;
     letter-spacing:.01em}
-  /* **The focus node is drawn in HTML, not as a Plotly marker.** A WebGL
-     marker big enough to fill the screen renders as a visible polygon, and
-     the edge trace draws straight across it. A div is a perfect circle at
-     any size and sits above the canvas, so nothing cuts through it. */
-  #bl3-focus {display:none; position:fixed; z-index:9998; border-radius:50%;
-    pointer-events:none; opacity:0; transform:scale(.55);
-    transition:opacity .45s ease-out, transform .55s cubic-bezier(.2,.7,.3,1)}
-  #bl3-focus.on {opacity:1; transform:scale(1)}
-  #bl3-card {display:none; position:fixed; z-index:10000; width:330px;
-    max-height:60vh; overflow-y:auto;
-    font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
-      sans-serif;
-    background:rgba(255,255,255,.90); -webkit-backdrop-filter:blur(10px);
-    backdrop-filter:blur(10px); border:0; border-radius:10px;
-    padding:11px 13px; color:#1f2a36;
-    box-shadow:0 6px 22px rgba(20,32,48,.14)}
-  #bl3-card table {border-collapse:collapse; width:100%}
-  #bl3-card th {text-align:left; vertical-align:top; font-weight:400;
-    color:#8795a4; padding:3px 10px 3px 0; white-space:nowrap}
-  #bl3-card td {vertical-align:top; padding:3px 0; word-break:break-word}
-  #bl3-card a {color:#0072B2; text-decoration:none}
-  #bl3-card a:hover {text-decoration:underline}
+__CARD_CSS__
+  /* The record sits at the right edge, clear of the sphere however large it
+     grows, and fades in when the camera lands. */
+  #bl3-card {display:none; position:fixed; right:28px; top:50%; z-index:10000;
+    width:344px; max-height:72vh; overflow-y:auto;
+    background:rgba(255,255,255,.82); -webkit-backdrop-filter:blur(18px)
+      saturate(140%); backdrop-filter:blur(18px) saturate(140%);
+    border:1px solid rgba(255,255,255,.65); border-radius:16px;
+    padding:18px 20px 16px; color:#16202b;
+    box-shadow:0 18px 50px rgba(16,26,40,.18), 0 2px 6px rgba(16,26,40,.06);
+    opacity:0; transform:translateY(-50%) translateX(14px);
+    transition:opacity .5s ease-out, transform .6s cubic-bezier(.2,.7,.3,1)}
+  #bl3-card.on {opacity:1; transform:translateY(-50%) translateX(0)}
 </style>
 <div id="bl3-panel">
   <button id="bl3-play">Play tour</button>
@@ -403,13 +420,14 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
   <span id="bl3-help" title="__HELP__">&#9432;</span>
   <div id="bl3-info"></div>
 </div>
-<div id="bl3-focus"></div>
-<div id="bl3-card"></div>
+<div id="bl3-card" class="bl-card"></div>
 <script>
+__CARD_JS__
 (function () {
   var STOPS = __STOPS__, FLIGHT = __FLIGHT__, DWELL = __DWELL__;
   var ZOOM = __ZOOM3D__, MAG = __MAGNIFY__, EDGE_W = __EDGE_W__;
-  var RING = __RING__, FOCUS_F = __FOCUS_F__, FOCUS_MIN = __FOCUS_MIN__;
+  var SPH = __SPHERE__, SPAN = __SPAN__, SR = __SPHERE_R__;
+  var ORBIT = __ORBIT__ * Math.PI / 180;
   var BASE = null, shown = 1;
   var atK = 1, atC = {x: 0, y: 0, z: 0};
   var HOME = {eye: {x: 1.25, y: 1.25, z: 1.25}, center: {x: 0, y: 0, z: 0}};
@@ -439,8 +457,9 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     return BASE;
   }
   function magnify(f) {
-    // Markers are screen-sized, so they have to be grown by hand to match the
-    // narrowing window. Applied in steps rather than every frame: on a large
+    // The ordinary nodes are markers, sized in screen pixels, so they have to
+    // be grown by hand as the view closes in. Applied in steps rather than
+    // every frame: on a large
     // graph a per-frame restyle rewrites the whole size buffer and the flight
     // stutters, and at this speed the steps are not visible.
     var el = gd(), b = base();
@@ -450,12 +469,8 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     Plotly.restyle(el, {"marker.size": [b.size.map(function (v) {
       return v * f; })]}, [1]);
     Plotly.restyle(el, {"line.width": b.width + (EDGE_W - b.width) * t}, [0]);
-    if (el.data.length > 2) {
-      // The GL marker only has to mark the node during the flight; the disc
-      // that fills the screen on arrival is HTML.
-      Plotly.restyle(el, {"marker.size": [[RING * (1 + t)]]},
-                     [el.data.length - 1]);
-    }
+    // The focus sphere needs nothing here: it is in the data, so the zoom
+    // grows it on its own.
   }
   // **`scene.camera.center` is in units of half the aspect ratio.** A node at
   // normalised position n sits at n * k / 2, so the centre has to be rescaled
@@ -468,7 +483,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     // Zoom is the aspect ratio, pan is the camera centre, and the axis ranges
     // are never touched -- so the whole network stays in the figure however
     // far in a stop goes.
-    var el = gd(), k0 = atK, c0 = atC, dir = heading(), t0 = performance.now();
+    var el = gd(), k0 = atK, c0 = atC, d0 = heading(), t0 = performance.now();
     cancelAnimationFrame(anim);
     (function frame(now) {
       var t = Math.min(1, (now - t0) / FLIGHT), e = ease(t);
@@ -476,6 +491,12 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
       var n = {x: c0.x + (c1.x - c0.x) * e, y: c0.y + (c1.y - c0.y) * e,
                z: c0.z + (c1.z - c0.z) * e};
       var c = centre(n, k);
+      // Swing around the node while coming in. A tour that only dollies reads
+      // as a slideshow; the turn is what makes it feel like moving through
+      // the network rather than cutting between stills.
+      var a = ORBIT * e * (k1 > k0 ? 1 : -1);
+      var ca = Math.cos(a), sa = Math.sin(a);
+      var dir = [d0[0] * ca - d0[1] * sa, d0[0] * sa + d0[1] * ca, d0[2]];
       // Updated every frame, so an interrupted flight resumes from where it
       // actually got to rather than from where it was aiming.
       atK = k; atC = n;
@@ -489,62 +510,46 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     })(t0);
   }
   function flyTo(p, done) { glide(ZOOM, {x: p[0], y: p[1], z: p[2]}, done); }
-  function sceneCentre() {
-    // **The tour always flies the node to the camera centre, so the focus node
-    // is at the centre of the scene's domain.** That makes its screen position
-    // exact arithmetic instead of a projection, which Plotly does not expose.
-    var el = gd(), r = el.getBoundingClientRect();
-    var dm = (el._fullLayout.scene || {}).domain || {x: [0, 1], y: [0, 1]};
-    return {x: r.left + (dm.x[0] + dm.x[1]) / 2 * r.width,
-            y: r.top + (1 - (dm.y[0] + dm.y[1]) / 2) * r.height,
-            size: Math.max(FOCUS_MIN, Math.round(
-              FOCUS_F * Math.min(r.width, r.height)))};
-  }
   function annotate(s) {
-    var c = sceneCentre(), disc = document.getElementById("bl3-focus");
     var card = document.getElementById("bl3-card");
-    disc.style.width = disc.style.height = c.size + "px";
-    disc.style.left = (c.x - c.size / 2) + "px";
-    disc.style.top = (c.y - c.size / 2) + "px";
-    disc.style.background = "radial-gradient(circle at 36% 30%, " +
-      "__HILITE_LIGHT__ 0%, __HILITE__ 62%, __HILITE_DARK__ 100%)";
-    disc.style.boxShadow = "0 18px 50px rgba(20,32,48,.22)";
-    disc.style.display = "block";
-    void disc.offsetWidth;                 // commit before the transition
-    disc.classList.add("on");
-    var rows = "";
-    for (var r = 0; r < s.record.length; r++) {
-      var v = s.record[r][1];
-      if (/^https?:[/][/]/.test(v)) {
-        v = '<a href="' + v + '" target="_blank" rel="noopener">' + v + "</a>";
-      }
-      rows += "<tr><th>" + s.record[r][0] + "</th><td>" + v + "</td></tr>";
-    }
-    card.innerHTML = "<table>" + rows + "</table>";
+    card.innerHTML = BL_CARD(s.record);
     card.style.display = "block";
-    // Clear of the disc, on its right, and inside the window.
-    var w = card.offsetWidth, h = card.offsetHeight;
-    var x = Math.min(c.x + c.size / 2 + 22, window.innerWidth - w - 12);
-    card.style.left = Math.max(12, x) + "px";
-    card.style.top = Math.min(Math.max(12, c.y - h / 2),
-                              window.innerHeight - h - 12) + "px";
+    void card.offsetWidth;                 // commit before the transition
+    card.classList.add("on");
   }
   function unannotate() {
-    var disc = document.getElementById("bl3-focus");
-    disc.classList.remove("on");
-    disc.style.display = "none";
-    document.getElementById("bl3-card").style.display = "none";
+    var card = document.getElementById("bl3-card");
+    card.classList.remove("on");
+    card.style.display = "none";
   }
   function light(p) {
-    // A solid marker drawn over the node, which is how 2D marks a stop: it
-    // recolors and enlarges the node, so the thing you are looking at IS the
-    // node. Done as an extra trace because recoloring the node itself would
-    // mean rewriting the whole marker array on every stop.
+    // A real sphere, in the data. It grows because the camera comes closer,
+    // which is the whole point: a marker would stay the same size however far
+    // in the flight went, and an overlay would be a sticker on the glass.
+    //
+    // Scaled per axis by the span, because the three axes have different data
+    // ranges but are drawn into one cube -- equal radii in data units would
+    // render as an ellipsoid.
     var el = gd();
-    var trace = {x: [p[0]], y: [p[1]], z: [p[2]], mode: "markers",
-                 type: "scatter3d", hoverinfo: "skip", showlegend: false,
-                 marker: {size: RING, color: "__HILITE__", opacity: 1,
-                          line: {width: 4, color: "#ffffff"}}};
+    var rx = SPAN[0] * SR, ry = SPAN[1] * SR, rz = SPAN[2] * SR;
+    var X = [], Y = [], Z = [];
+    for (var a = 0; a < SPH.x.length; a++) {
+      var ax = [], ay = [], az = [];
+      for (var b = 0; b < SPH.x[a].length; b++) {
+        ax.push(p[0] + SPH.x[a][b] * rx);
+        ay.push(p[1] + SPH.y[a][b] * ry);
+        az.push(p[2] + SPH.z[a][b] * rz);
+      }
+      X.push(ax); Y.push(ay); Z.push(az);
+    }
+    var trace = {type: "surface", x: X, y: Y, z: Z,
+                 colorscale: [[0, "__HILITE__"], [1, "__HILITE__"]],
+                 showscale: false, hoverinfo: "skip", showlegend: false,
+                 contours: {x: {show: false}, y: {show: false},
+                            z: {show: false}},
+                 lighting: {ambient: 0.60, diffuse: 0.85, specular: 0.14,
+                            roughness: 0.80, fresnel: 0.05},
+                 lightposition: {x: -1e4, y: 1e4, z: 1e4}};
     if (el.data.length > 2) { Plotly.deleteTraces(el, el.data.length - 1); }
     Plotly.addTraces(el, trace);
   }
@@ -606,18 +611,20 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
 </script>
 """
     import json as _json
-    block = (block.replace("__STOPS__", _json.dumps(stops))
+    block = (block.replace("__CARD_CSS__", CARD_CSS)
+                  .replace("__CARD_JS__", CARD_JS)
+                  .replace("__STOPS__", _json.dumps(stops))
                   .replace("__ZOOM3D__", str(TOUR_ZOOM_3D))
                   .replace("__MAGNIFY__", str(TOUR_MAGNIFY))
                   .replace("__EDGE_W__", str(TOUR_EDGE_WIDTH))
-                  .replace("__FOCUS_F__", str(TOUR_FOCUS_FRACTION))
-                  .replace("__FOCUS_MIN__", str(TOUR_FOCUS_MIN_PX))
-                  .replace("__RING__", str(TOUR_RING))
+                  .replace("__SPHERE__", _json.dumps(_sphere_payload()))
+                  .replace("__SPHERE_R__", str(TOUR_SPHERE_FRACTION))
+                  .replace("__ORBIT__", str(TOUR_ORBIT_DEG))
+                  .replace("__SPAN__", _json.dumps(
+                      [b[1] - b[0] for b in bounds]))
                   .replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
                   .replace("__DWELL__", str(TOUR_DWELL_MS))
                   .replace("__HELP__", RECORD_HELP.replace('"', "&quot;"))
-                  .replace("__HILITE_LIGHT__", _lighten(TOUR_HIGHLIGHT, 0.34))
-                  .replace("__HILITE_DARK__", _lighten(TOUR_HIGHLIGHT, -0.26))
                   .replace("__HILITE__", TOUR_HIGHLIGHT))
     try:
         with open(path, encoding="utf-8") as fh:

@@ -31,6 +31,13 @@ while the major version is 0, a minor bump may change defaults.
 - Falls back to reading the raw query whenever there is no translation: a
   `--pmids` run, or a search that failed before `esearch` answered.
 
+### Node tooltips wait for the cursor to stop
+
+- **The hover was too sensitive.** vis.js defaults to a 300 ms tooltip delay,
+  which fires while the cursor is still travelling, so on a dense graph the
+  tooltips flicker up one after another and reading any single node is a
+  struggle. Raised to **700 ms** (`citations.TOOLTIP_DELAY_MS`).
+
 ### The networks have a physics switch
 
 - **Physics starts on load, as it always did, and a button pauses and resumes

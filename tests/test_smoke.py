@@ -2477,3 +2477,13 @@ def test_physics_also_stops_on_its_own(tmp_path):
 def test_the_control_is_injected_once(tmp_path):
     html = _written_network(tmp_path)
     assert html.count('id="bl-physics"') == 1
+
+
+def test_the_tooltip_waits_for_the_cursor_to_stop(tmp_path):
+    """vis.js defaults to 300 ms, which fires while the cursor is still moving;
+    on a dense graph the tooltips flicker up one after another."""
+    from bioleads.citations import TOOLTIP_DELAY_MS
+    html = _written_network(tmp_path)
+    assert TOOLTIP_DELAY_MS >= 500
+    assert f"tooltipDelay: {TOOLTIP_DELAY_MS}" in html
+    assert "__TOOLTIP_DELAY__" not in html      # the placeholder was substituted

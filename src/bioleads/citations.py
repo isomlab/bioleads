@@ -579,8 +579,15 @@ def authors_to_dataframe(graph: nx.DiGraph, by: str = "in_corpus_citations"):
     )
 
 
+# How long the cursor must rest on a node before its tooltip appears, in
+# milliseconds. vis.js defaults to 300, which fires while the cursor is merely
+# passing over: on a dense graph the tooltips flicker up one after another and
+# reading any single node is hard. 700 waits for the cursor to actually stop.
+TOOLTIP_DELAY_MS = 700
+
+
 def _freeze_physics_after_stabilization(path: str) -> None:
-    """Give the page a physics switch, and stop the simulation once it settles.
+    """Give the page a physics switch, settle the layout, and calm the tooltips.
 
     **The layout is computed in the browser, which is what makes these graphs
     readable**: a server-side spring layout was tried and collapsed a 150-node
@@ -593,6 +600,9 @@ def _freeze_physics_after_stabilization(path: str) -> None:
     - **It stops by itself** when stabilization finishes.
     - **A button stops and restarts it**, so a long settle can be cut short and
       a tangled layout can be shaken out again.
+
+    It also raises the tooltip delay to :data:`TOOLTIP_DELAY_MS`, because the
+    vis.js default of 300 ms fires while the cursor is still moving.
 
     The script waits for pyvis's ``network`` object rather than assuming it
     exists: it is assigned inside ``drawGraph()``, and an injected script that
@@ -618,6 +628,8 @@ def _freeze_physics_after_stabilization(path: str) -> None:
 (function () {
   var on = true;
   function wire(net) {
+    // Tooltips should wait for the cursor to stop, not fire on the way past.
+    net.setOptions({interaction: {hover: true, tooltipDelay: __TOOLTIP_DELAY__}});
     var btn = document.getElementById("bl-physics-toggle");
     var lbl = document.getElementById("bl-physics-state");
     function set(state, note) {
@@ -649,6 +661,7 @@ def _freeze_physics_after_stabilization(path: str) -> None:
             html = f.read()
     except OSError:
         return
+    snippet = snippet.replace("__TOOLTIP_DELAY__", str(TOOLTIP_DELAY_MS))
     if "bl-physics" in html:          # already injected
         return
     if "</body>" in html:

@@ -1400,9 +1400,16 @@ def test_pyvis_heading_not_duplicated(tmp_path, monkeypatch):
     path = write_citation_html(g, str(tmp_path / "citation_network.html"),
                                title="bioleads citations")
 
-    # pyvis 0.3.2 doubles the <h1>; our post-process collapses it to one.
+    # pyvis 0.3.2 doubles the <h1>. The duplicate is collapsed first and the
+    # survivor is then replaced by the compact bar, so the page ends with no
+    # <h1> at all and the title exactly once. **Both steps still matter**: skip
+    # the collapse and the bar replaces only the first heading, leaving the
+    # second one sitting there full size.
     with open(path, encoding="utf-8") as fh:
-        assert fh.read().count("<h1>bioleads citations</h1>") == 1
+        html = fh.read()
+    assert "<h1>bioleads citations</h1>" not in html
+    assert html.count("bioleads citations") == 1
+    assert 'id="bl-bar"' in html
 
 
 # --------------------------------------------------------------------------- #

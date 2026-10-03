@@ -1166,9 +1166,16 @@ __CARD_JS__
         f.write(html)
 
 
-def _inject_match_legend(path: str, title: str, terms: list[str],
-                         unit: str = "paper") -> None:
-    """Explain the node colors, under the heading.
+def _inject_header_bar(path: str, title: str, terms: list[str],
+                       unit: str = "paper") -> None:
+    """Replace the heading with one compact bar, and give the network the window.
+
+    **This is not only the color key, which is why it runs on every page.** It
+    also replaces pyvis's large `<h1>` and sizes the canvas to the window. Back
+    when it was only a legend it was called just for colored graphs, and an
+    uncolored network was left with the big heading and a fixed 800px canvas.
+
+    The key explains the node colors.
 
     A colored graph with no key is a worse graph than an uncolored one, and
     the "none" case needs the caveat spelled out: PubMed can match a paper on a
@@ -1338,8 +1345,7 @@ def write_citation_html(
     net.force_atlas_2based(spring_length=120)
     net.write_html(path, notebook=False, open_browser=False)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
-    if colored:
-        _inject_match_legend(path, title, query_terms or [])
+    _inject_header_bar(path, title, query_terms or [] if colored else [])
     _freeze_physics_after_stabilization(path, tour_stops(g))
     return path
 
@@ -1501,15 +1507,23 @@ def write_author_html(
             if colored:
                 kw["color"] = MATCH_COLORS.get(d.get("query_match", "unknown"),
                                                MATCH_COLORS["unknown"])
-            net.add_node(n, label=d.get("author") or n, value=v + 1, size=size,
+            # No name under the marker, same as the citation networks. A
+            # senior author's name is long enough that printing it on a dense
+            # graph buries the nodes it belongs to; the tour card and the
+            # hover both carry it.
+            #
+            # The label is kept and the FONT is zeroed, because pyvis
+            # substitutes the node id for a falsy label.
+            net.add_node(n, label=d.get("author") or n, font={"size": 0},
+                         value=v + 1, size=size,
                          title="\n".join(_author_tip_lines(n, d)), **kw)
         for a, b, ed in g.edges(data=True):
             net.add_edge(a, b, title=f"cites ×{ed.get('weight', 1)}", arrows="")
     net.force_atlas_2based(spring_length=120)
     net.write_html(path, notebook=False, open_browser=False)
-    _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
-    if colored:
-        _inject_match_legend(path, title, query_terms or [], unit="author")
+    _collapse_duplicate_heading(path, title)
+    _inject_header_bar(path, title, query_terms or [] if colored else [],
+                       unit="author")
     _freeze_physics_after_stabilization(path, tour_stops(g))
     return path
 

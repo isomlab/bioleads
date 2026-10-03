@@ -31,6 +31,10 @@ while the major version is 0, a minor bump may change defaults.
   tooltip. They are read once, not on every glance.
 - **The canvas fills what is left** rather than a fixed 800px, with the card
   padding and borders removed. The graph is the page now.
+- **On every page, not only colored ones.** The function that does this began
+  life as the color key and was called only for graphs that had one, so an
+  uncolored network kept the big heading and a fixed 800px canvas. It is
+  `_inject_header_bar` now, and the key is the part that is conditional.
 
 ### The scene opens larger, and the focus comes up on a dimmer
 
@@ -171,10 +175,13 @@ fit fall outside the view exactly as they do when the 2D view zooms.
 - **Arrowheads are gone from the 2D citation graphs.** On a network this dense
   they stacked into a texture that read as noise rather than as direction. The
   graph is still directed, and the direction is in the hover and the heading.
-- **PMIDs no longer print under the markers**, where they collided with their
-  neighbours and hid the colors the graph encodes. They stay in the hover and in
-  the tour card. *pyvis substitutes the node id for a falsy label, so the font is
-  zeroed rather than the label blanked.*
+- **No text prints under any marker.** PMIDs on the citation networks and
+  **senior-author names on both author networks**, the citation one and the
+  paper-count one, collided with their neighbours and hid the colors the graph
+  encodes. A senior author's name is long enough to bury the node it belongs
+  to. All of it stays in the hover and in the tour card. *pyvis substitutes the
+  node id for a falsy label, so the font is zeroed rather than the label
+  blanked.*
 - Translucent blurred control panels with no borders, white node rims, thinner
   edges, a slim colorbar. **The controls moved to the bottom-left in both views**,
   out of the picture.

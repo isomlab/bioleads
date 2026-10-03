@@ -63,7 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="write straight into --out and overwrite what is there, "
                         "as versions before 0.3 did")
     p.add_argument("--anchors", help="comma-separated seed concepts for ABC discovery")
-    p.add_argument("--expand", type=int, default=0, metavar="ROUNDS",
+    p.add_argument("--expand", type=int, default=Config.expand_rounds,
+                   metavar="ROUNDS",
                    help="grow the corpus by following citations from the seed "
                         "PMIDs for N rounds (0 = off)")
     p.add_argument("--expand-link", choices=["references", "cited_by", "both"],

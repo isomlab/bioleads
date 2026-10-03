@@ -74,7 +74,12 @@ class Config:
     # expand_source picks the citation backend(s): "all" (default) unions NCBI
     # ELink + NIH iCite for the broadest recall (and degrades gracefully if one
     # is down); "ncbi" or "icite" force a single backend.
-    expand_rounds: int = 0
+    # 3 rounds, not 0. Expansion is the thing that turns a handful of search
+    # hits into a corpus worth drawing a network from, and leaving it off by
+    # default meant the common case — a specific query returning a few papers —
+    # produced an empty picture and no explanation. The gates below decide what
+    # survives the walk, which is what makes a default this high safe.
+    expand_rounds: int = 3
     expand_link: str = "both"
     expand_source: str = "all"
     expand_max: int = 1000  # cap on total PMIDs (seeds + discovered)

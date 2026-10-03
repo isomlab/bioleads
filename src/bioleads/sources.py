@@ -681,6 +681,9 @@ def seed_profile(seed_docs, *, top_n: int = 0, n_terms: int = 60) -> list[str]:
     *a* to *c*, which is not a profile. Since one seed is exactly the setting
     worth using when a query returns a mixed bag, that case has to work.
     """
+    # Asking for more seeds than exist is not an error and not clamped to
+    # anything surprising: the slice simply yields every seed there is. A query
+    # returning three papers with the control left at ten profiles all three.
     docs = list(seed_docs)[:top_n] if top_n and top_n > 0 else list(seed_docs)
     from collections import Counter
     df: Counter = Counter()          # seeds mentioning the term

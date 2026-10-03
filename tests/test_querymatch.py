@@ -763,3 +763,11 @@ def test_a_duplicated_seed_no_longer_double_weights_the_profile():
     # frequency; after, the two terms tie and sort alphabetically.
     assert seed_profile(dup, n_terms=1) == ["lysosome"]
     assert seed_profile(dedupe_documents(dup), n_terms=1) == ["autophagy"]
+
+
+def test_asking_for_more_seeds_than_exist_uses_all_of_them():
+    """A query that returns 3 papers with the control at 10 is not an error."""
+    from bioleads.sources import seed_profile
+    docs = [_pubmed_doc(str(i), f"Paper {i} about autophagy", "lysosome") for i in (1, 2, 3)]
+    assert seed_profile(docs, top_n=10, n_terms=3) == seed_profile(docs, top_n=0, n_terms=3)
+    assert seed_profile(docs, top_n=999, n_terms=3) == seed_profile(docs, n_terms=3)

@@ -5,6 +5,39 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Networks open already settled
+
+- **The 2D networks no longer drift, rotate or rearrange while you are trying to
+  click on a node.** The layout is computed here, once, with networkx, and the
+  page ships with vis.js physics **off** and every node carrying its
+  coordinates.
+- Freezing physics after stabilization was not enough, because **the settling
+  itself is what makes a graph hard to interrogate**, and it happened on every
+  open.
+- **A side benefit worth having: the picture is now reproducible.** The same
+  corpus and `--seed` give the same arrangement, so two runs can be compared and
+  a figure can be regenerated.
+- Nodes are still draggable. Physics is off; interaction is not.
+
+### `expand_rounds` now defaults to 3
+
+- Expansion is what turns a handful of search hits into a corpus worth drawing a
+  network from, and **off by default meant the common case — a specific query
+  returning a few papers — produced an empty picture with no explanation.**
+- The gates added in this release are what make a default this high safe:
+  discovered papers now have to earn their place.
+- `--expand` previously hard-coded its own default of 0 instead of reading
+  `Config`, so the CLI and the GUI could disagree. It reads `Config` now, as the
+  other flags already did.
+- **Watch for this if you have a config or script that relied on the old
+  default.** A run that used to fetch nothing will now walk three rounds.
+
+### Asking for more seeds than exist is harmless
+
+- `expand_seed_profile_n = 10` on a query that returned 3 papers profiles all 3,
+  exactly as `0` would. Nothing is clamped and nothing warns; the log reports
+  the number actually used.
+
 ### Fixed: `--citations` crashed on a core-only install
 
 - **The pyvis fallback did not fall back.** Without pyvis the writers drop to

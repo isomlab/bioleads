@@ -69,8 +69,17 @@ def _force_regex_ner(monkeypatch):
 
 
 def _cfg():
+    """Config for the offline tests.
+
+    **`expand_rounds=0` is pinned here deliberately, not inherited.** When the
+    default became 3, every pipeline test passing `_cfg()` started walking
+    citations over the live NCBI API: `test_run_pipeline_with_refs` went from 2
+    documents to 108. A test helper that leans on a default is coupled to it,
+    and the coupling shows up only as a slow, networked, flaky suite.
+    """
     return Config(min_doc_freq=1, min_cooccurrence=1, min_pmi=None,
-                  min_b_links=1, max_direct_cooccurrence=0, top_terms=50)
+                  min_b_links=1, max_direct_cooccurrence=0, top_terms=50,
+                  expand_rounds=0)
 
 
 def test_pipeline_runs_and_ranks():
@@ -543,7 +552,7 @@ def test_expansion_is_off_at_zero_rounds_for_either_strategy(monkeypatch):
 
     cfg = _cfg()
     assert cfg.expand_strategy == "bfs"            # the default strategy
-    assert cfg.expand_rounds == 0                  # ...but off until asked
+    assert cfg.expand_rounds == 0                  # pinned by _cfg, not the default
     run_pipeline(pmids="1", cfg=cfg, out_dir=None)
     assert called == ["load:0"], f"a plain run must not expand: {called}"
 

@@ -579,6 +579,41 @@ def authors_to_dataframe(graph: nx.DiGraph, by: str = "in_corpus_citations"):
     )
 
 
+def static_positions(g: nx.Graph, seed: int = 0, span: float = 1100.0) -> dict:
+    """Lay the graph out here, once, and return pixel positions.
+
+    **The page then ships already settled.** pyvis otherwise hands vis.js a pile
+    of nodes with no coordinates and lets a force simulation find them in the
+    browser, which is why a network drifts, rotates and rearranges while you are
+    trying to click on something. Freezing physics after stabilization was not
+    enough: the settling itself is the part that makes a graph hard to
+    interrogate, and it happens every single time the file is opened.
+
+    Laying out server-side also makes the picture **reproducible**: the same
+    corpus and seed give the same arrangement, so two runs can be compared, and
+    a figure can be regenerated.
+
+    Nodes stay draggable — physics is off, not interaction.
+    """
+    if not g.number_of_nodes():
+        return {}
+    if g.number_of_nodes() == 1:
+        return {next(iter(g.nodes)): (0.0, 0.0)}
+    pos = nx.spring_layout(g, seed=seed, iterations=200)
+    xs = [p[0] for p in pos.values()]
+    ys = [p[1] for p in pos.values()]
+    # Scale into a canvas-sized box, preserving aspect so the layout is not
+    # stretched when a graph happens to be wide or tall.
+    half = max(max(map(abs, xs)), max(map(abs, ys))) or 1.0
+    k = span / (2 * half)
+    return {n: (float(p[0]) * k, float(p[1]) * k) for n, p in pos.items()}
+
+
+def _settled(net) -> None:
+    """Ship the page with the simulation off."""
+    net.toggle_physics(False)
+
+
 def _freeze_physics_after_stabilization(path: str) -> None:
     """Stop the vis.js physics engine once the initial layout has stabilized.
 
@@ -692,7 +727,7 @@ def _collapse_duplicate_heading(path: str, title: str) -> None:
 
 def write_citation_html(
     g: nx.DiGraph, path: str, title: str = "bioleads citation network",
-    query_terms: list[str] | None = None,
+    query_terms: list[str] | None = None, seed: int = 0,
 ) -> str:
     """Render the directed citation network to a standalone HTML file (pyvis).
 
@@ -718,6 +753,7 @@ def write_citation_html(
     # Colour by query-term containment only when the graph was annotated with a
     # text query; otherwise leave pyvis's own colour alone, as before.
     coloured = any("query_match" in d for _, d in g.nodes(data=True))
+    pos = static_positions(g, seed=seed)
     if g.number_of_nodes():
         max_cit = max((d["in_corpus_citations"] for _, d in g.nodes(data=True)),
                       default=0)
@@ -746,11 +782,13 @@ def write_citation_html(
                     else "query terms found: none in title/abstract")
                 if d.get("expanded"):
                     tip_lines.append("added by citation expansion, not a search hit")
+            if n in pos:
+                kw["x"], kw["y"] = pos[n]
             net.add_node(n, label=label, value=cit + 1, size=size,
                          title="\n".join(tip_lines), **kw)
         for a, b in g.edges():
             net.add_edge(a, b, title="cites", arrows="to")
-    net.force_atlas_2based(spring_length=120)
+    _settled(net)
     net.write_html(path, notebook=False, open_browser=False)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
     if coloured:
@@ -870,7 +908,7 @@ def _author_hover(n, d) -> str:
 def write_author_html(
     g: nx.DiGraph, path: str, title: str = "bioleads senior-author citation network",
     size_attr: str = "in_corpus_citations",
-    query_terms: list[str] | None = None,
+    query_terms: list[str] | None = None, seed: int = 0,
 ) -> str:
     """Render the senior-author network to standalone HTML (pyvis).
 
@@ -894,6 +932,7 @@ def write_author_html(
     net = Network(height="800px", width="100%", notebook=False, directed=True,
                   heading=title, bgcolor="#ffffff")
     coloured = any("query_match" in d for _, d in g.nodes(data=True))
+    pos = static_positions(g, seed=seed)
     if g.number_of_nodes():
         top = max((d.get(size_attr) or 0 for _, d in g.nodes(data=True)), default=0)
         for n, d in g.nodes(data=True):
@@ -903,11 +942,13 @@ def write_author_html(
             if coloured:
                 kw["color"] = MATCH_COLORS.get(d.get("query_match", "unknown"),
                                                MATCH_COLORS["unknown"])
+            if n in pos:
+                kw["x"], kw["y"] = pos[n]
             net.add_node(n, label=d.get("author") or n, value=v + 1, size=size,
                          title="\n".join(_author_tip_lines(n, d)), **kw)
         for a, b, ed in g.edges(data=True):
             net.add_edge(a, b, title=f"cites ×{ed.get('weight', 1)}", arrows="to")
-    net.force_atlas_2based(spring_length=120)
+    _settled(net)
     net.write_html(path, notebook=False, open_browser=False)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
     if coloured:

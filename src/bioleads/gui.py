@@ -519,9 +519,13 @@ class BioleadsGUI:
                     "means the first n in the order you supplied them: PubMed "
                     "IDs in the order you pasted, then the references file. "
                     "Put the papers you mean first.\n\n"
-                    "The run log prints the seeds it chose, so you can check "
-                    "this rather than trust it. Used only when the setting "
-                    "above is 'seeds'.")
+                    "If a search returns fewer seeds than this, every seed is "
+                    "used and nothing complains. Setting 10 on a query that "
+                    "found 3 papers profiles all 3, which is the same as "
+                    "setting 0.\n\n"
+                    "The run log prints the seeds it chose and how many, so you "
+                    "can check this rather than trust it. Used only when the "
+                    "setting above is 'seeds'.")
         self.expand_gate_var.trace_add(
             "write", lambda *_: self._sync_strategy_fields())
         self.expand_strategy_var.trace_add(

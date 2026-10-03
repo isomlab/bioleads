@@ -136,6 +136,11 @@ contains **6** of them. The score is the **share of the profile a
 candidate contains**, which reads plainly — 0.10 means the paper names a tenth of what the
 seeds are about — and does not reward length, because the denominator is the profile.
 
+**Asking for more seeds than exist is harmless.** The slice yields every seed there is, so
+`expand_seed_profile_n = 10` on a query that found three papers profiles all three, exactly
+as `0` would. Nothing is clamped, nothing warns, and the log reports the number actually
+used.
+
 **`expand_seed_profile_n` is the control that matters most.** Measured on
 `TMEM184C OR TM184C`, whose three seeds are one mechanism paper and two genomics case
 reports that merely name the gene inside a copy-number region:

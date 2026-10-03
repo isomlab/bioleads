@@ -338,7 +338,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     Plotly.relayout(gd(), {"scene.annotations": [{
       x: s.xyzData[0], y: s.xyzData[1], z: s.xyzData[2],
       text: lines.join("<br>"), showarrow: true, arrowhead: 2, arrowsize: 1,
-      arrowwidth: 1.2, arrowcolor: "#5b6b7c", ax: 70, ay: -70,
+      arrowwidth: 1.2, arrowcolor: "#5b6b7c", ax: 90, ay: 0,
       align: "left", xanchor: "left", bgcolor: "rgba(255,255,255,0.94)",
       bordercolor: "#d7dee6", borderwidth: 1, borderpad: 6,
       font: {size: 11, color: "#1f2a36"}

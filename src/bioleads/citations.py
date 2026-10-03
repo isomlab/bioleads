@@ -837,9 +837,15 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
       var box = net.body.container.getBoundingClientRect();
       card.style.display = "block";
       var w = card.offsetWidth, h = card.offsetHeight;
-      var x = box.left + dom.x + 26, y = box.top + dom.y - h / 2;
-      // Flip to the other side rather than running off the window edge.
-      if (x + w > window.innerWidth - 8) { x = box.left + dom.x - w - 26; }
+      // Clear the marker itself. `size` is in canvas units, so it has to be
+      // scaled: at tour zoom a big node is tens of pixels across, and a fixed
+      // offset put the card on top of the node it was describing.
+      var nd = nodes.get(at.id) || {};
+      var r = (nd.size || 10) * net.getScale();
+      var x = box.left + dom.x + r + 16, y = box.top + dom.y - h / 2;
+      // Always to the right of the node. Clamped, not flipped: flipping put
+      // the card on the side the reader was not looking at.
+      x = Math.min(x, window.innerWidth - w - 8);
       card.style.left = Math.max(8, x) + "px";
       card.style.top = Math.min(Math.max(8, y), window.innerHeight - h - 8) + "px";
     }
@@ -1094,7 +1100,15 @@ def write_citation_html(
                     else "query terms found: none in title/abstract")
                 if d.get("expanded"):
                     tip_lines.append("added by citation expansion, not a search hit")
-            net.add_node(n, label=label, value=cit + 1, size=size,
+            # No text under the marker: printed under every node the PMID
+            # only collided with its neighbours and hid the colors the graph
+            # encodes. It stays in the hover and in the tour card.
+            #
+            # The label is kept and the FONT is zeroed, because pyvis
+            # substitutes the node id for a falsy label -- passing label=""
+            # put "PMID:12345" under every node instead of nothing.
+            net.add_node(n, label=label, font={"size": 0},
+                         value=cit + 1, size=size,
                          title="\n".join(tip_lines), **kw)
         for a, b in g.edges():
             net.add_edge(a, b, title="cites", arrows="to")

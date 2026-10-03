@@ -249,7 +249,7 @@ SCENE_PAD = 0.06          # fraction of each axis span, so markers aren't clippe
 # distance, so the graph gets bigger and the parts that no longer fit simply
 # fall outside the view, exactly as they do when 2D zooms. Every node is still
 # there to pan back to.
-TOUR_ZOOM_3D = 7.0
+TOUR_ZOOM_3D = 14.0
 # **Scaling the scene is still only half of a zoom.** vis.js scales the whole
 # canvas, so in 2D the nodes and edges grow as the view closes in, and that
 # growth is most of what reads as "zoomed in". Plotly's markers are sized in
@@ -258,7 +258,7 @@ TOUR_ZOOM_3D = 7.0
 # Measured against the 2D tour on a 1096px canvas, where the nodes run 32px
 # to 90px across and the focused one is 82px. 3.5x puts the 3D markers at
 # 24-91px, which is the same graph at the same size.
-TOUR_MAGNIFY = 3.5        # node markers at the end of a flight
+TOUR_MAGNIFY = 2.5        # node markers at the end of a flight
 TOUR_EDGE_WIDTH = 2.6     # edge width at the end of a flight
 # **The focus node is a real sphere in the scene, not a marker and not an
 # overlay.** Markers are sized in screen pixels, so they never grow as the

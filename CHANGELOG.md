@@ -40,6 +40,12 @@ while the major version is 0, a minor bump may change defaults.
   the one thing a node's size means here: how often the paper was cited.
 - Sized to end exactly as wide as the node's magnified marker, so it sits among
   its neighbours instead of swallowing them.
+- **The flight goes to aspectratio 14, and the markers grow 2.5x rather than
+  3.5x.** Both changes are about the same thing: at a stop you should be able to
+  see that the most connected nodes are separate nodes. Zooming spreads them
+  apart and magnifying pushes them back together, so the previous pair worked
+  against itself in the densest part of the graph, which is exactly where the
+  tour spends its time.
 - **The cube does not fill the viewport.** The obvious constant for converting a
   scene unit to pixels is 2, the width of the cube, and it is wrong by about
   2.5x because Plotly's default eye sits well back. Measured instead, as

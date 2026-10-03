@@ -3123,7 +3123,8 @@ def test_senior_authors_merge_by_family_name():
 
     senior = {"1": "Kornberg TB", "2": "Kornberg T", "3": "Thomas B Kornberg",
               "4": "Wu M", "5": "Zurzolo C"}
-    remapped, merged = merge_by_surname(senior)
+    remapped, merged, ambiguous = merge_by_surname(senior)
+    assert not ambiguous
 
     # All three spellings land on one node, under the fullest label.
     assert len({remapped["1"], remapped["2"], remapped["3"]}) == 1
@@ -3135,20 +3136,42 @@ def test_senior_authors_merge_by_family_name():
     assert len(merged["Thomas B Kornberg"]) == 3
 
 
-def test_merging_flags_variants_whose_initials_disagree():
-    """Merging by family name alone puts two different Wangs on one node.
+def test_merging_needs_compatible_initials_too():
+    """A shared surname is not enough: two Wangs must stay two nodes.
 
-    That is the cost of the thing being asked for, so the groups where it is
-    most likely to have happened are reported rather than merged silently.
+    Initials are compatible when one is a prefix of the other, which is what a
+    fuller spelling of one person looks like. Where a vague spelling fits more
+    than one person of that surname there is no way to choose, so it is left on
+    its own node and reported rather than assigned by a coin toss.
     """
-    from bioleads.citations import _initials_differ
+    from bioleads.citations import merge_by_surname
 
-    assert not _initials_differ(["Kornberg T", "Kornberg TB"])  # one person
-    assert not _initials_differ(["Smith", "Smith JA"])          # no conflict
-    assert _initials_differ(["Wang Y", "Wang X"])               # two people
-    assert _initials_differ(["Lee H", "Lee HJ", "Lee K"])
+    def nodes(names):
+        senior = {str(i): n for i, n in enumerate(names)}
+        remapped, merged, ambiguous = merge_by_surname(senior)
+        return sorted(set(remapped.values())), merged, ambiguous
 
+    # One person, three spellings, one node.
+    got, _, amb = nodes(["Kornberg TB", "Kornberg T", "Thomas B Kornberg"])
+    assert got == ["Thomas B Kornberg"] and not amb
 
+    # Two people, one surname, two nodes.
+    got, merged, amb = nodes(["Wang Y", "Wang X"])
+    assert got == ["Wang X", "Wang Y"]
+    assert not merged and not amb
+
+    # H joins HJ, K stands alone.
+    got, _, amb = nodes(["Lee H", "Lee HJ", "Lee K"])
+    assert got == ["Lee HJ", "Lee K"] and not amb
+
+    # No initials at all is compatible with one person...
+    got, _, amb = nodes(["Smith", "Smith JA"])
+    assert got == ["Smith JA"] and not amb
+
+    # ...but not when it could be either of two.
+    got, _, amb = nodes(["Smith", "Smith JA", "Smith RB"])
+    assert got == ["Smith", "Smith JA", "Smith RB"]
+    assert amb == {"smith": ["Smith"]}
 def test_initials_are_read_the_same_way_whatever_the_name_form():
     """Reading initials off the tokens does not survive the three spellings.
 

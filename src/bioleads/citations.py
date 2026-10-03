@@ -146,21 +146,6 @@ _PARTICLES = {"van", "von", "der", "den", "de", "del", "della", "di", "da",
               "al", "mac", "mc", "st"}
 
 
-def _initials_differ(names) -> bool:
-    """True when two spellings of a surname carry incompatible initials.
-
-    "Kornberg T" and "Kornberg TB" are compatible: one is a prefix of the
-    other, which is what a fuller spelling of the same person looks like.
-    "Wang Y" and "Wang X" are not, and are probably two people.
-    """
-    seen = [i for i in (_given_initials(n) for n in names) if i]
-    for i, a in enumerate(seen):
-        for b in seen[i + 1:]:
-            if not (a.startswith(b) or b.startswith(a)):
-                return True
-    return False
-
-
 def _given_initials(name: str) -> str:
     """The given-name initials of a byline, in one form whatever it came in as.
 
@@ -196,37 +181,67 @@ def _looks_like_initials(tok: str) -> bool:
     return bool(t) and t.isupper() and len(t) <= 3
 
 
-def merge_by_surname(paper_senior: dict) -> tuple[dict, dict]:
-    """Collapse senior authors that share a family name onto one node.
+def _compatible(a: str, b: str) -> bool:
+    """Could these two sets of initials be the same person?
 
-    Returns ``(remapped, merged)``: the paper→author map with every name
-    replaced by the chosen label for its surname, and ``{label: [variants]}``
-    for the surnames that actually had more than one spelling.
+    Yes when one is a prefix of the other, which is what a fuller spelling
+    looks like: "T" and "TB", or "" and anything. No for "Y" and "X".
+    """
+    return a.startswith(b) or b.startswith(a)
 
-    **The label kept is the longest variant**, so "Kornberg TB" wins over
-    "Kornberg T" and the node carries the most identifying form that was seen.
 
-    **This merges by family name alone, which is what it is asked to do and
-    which is wrong for common names.** Two different Wangs become one lab. The
-    caller is given `merged` so it can say which nodes were combined; a group
-    whose variants carry conflicting initials is the one to look at.
+def merge_by_surname(paper_senior: dict) -> tuple[dict, dict, dict]:
+    """Collapse senior authors that are the same person onto one node.
+
+    Returns ``(remapped, merged, ambiguous)``.
+
+    **Family name is necessary but not sufficient.** Merging on it alone put
+    two different Wangs on one node, so the given-name initials have to agree
+    as well: one a prefix of the other, which is what a fuller spelling of the
+    same person looks like. "Kornberg T" joins "Kornberg TB"; "Wang Y" and
+    "Wang X" stay apart.
+
+    Within a surname the variants are clustered longest-initials first, and a
+    shorter spelling joins a cluster only when **exactly one** fits. "Smith"
+    with no initials at all sits happily next to "Smith JA", but alongside both
+    "Smith JA" and "Smith RB" there is no way to choose, so it is left on its
+    own node and reported in ``ambiguous`` rather than assigned by a coin toss.
+
+    **The label kept is the longest variant**, so the node carries the most
+    identifying spelling that was seen.
     """
     by_surname: dict[str, set] = {}
     for name in set(paper_senior.values()):
         key = surname(name)
         if key:
             by_surname.setdefault(key, set()).add(name)
-    label = {}
-    merged = {}
-    for key, names in by_surname.items():
-        best = sorted(names, key=lambda x: (-len(x), x))[0]
-        for n in names:
-            label[n] = best
-        if len(names) > 1:
-            merged[best] = sorted(names)
-    return ({pmid: label.get(a, a) for pmid, a in paper_senior.items()},
-            merged)
 
+    label: dict[str, str] = {}
+    merged: dict[str, list] = {}
+    ambiguous: dict[str, list] = {}
+    for key, names in by_surname.items():
+        # Longest initials first, so the fullest spellings seed the clusters
+        # and the vaguer ones are the ones that have to find a home.
+        ordered = sorted(names, key=lambda x: (-len(_given_initials(x)), x))
+        clusters: list[tuple[str, list]] = []          # (initials, names)
+        for name in ordered:
+            ini = _given_initials(name)
+            fits = [c for c in clusters if _compatible(c[0], ini)]
+            if len(fits) == 1:
+                fits[0][1].append(name)
+            else:
+                # None fits, or several do and choosing would be a guess.
+                if len(fits) > 1:
+                    ambiguous.setdefault(key, []).append(name)
+                clusters.append((ini, [name]))
+        for _, group in clusters:
+            best = sorted(group, key=lambda x: (-len(x), x))[0]
+            for n in group:
+                label[n] = best
+            if len(group) > 1:
+                merged[best] = sorted(group)
+    return ({pmid: label.get(a, a) for pmid, a in paper_senior.items()},
+            merged, ambiguous)
 
 def citation_cache(cfg: Config | None):
     """The on-disk cache `cfg` asks for, or None to always fetch.
@@ -572,11 +587,11 @@ def build_author_citation_graph(
     graph is too large to draw, never the graph that is built.
 
     A record with no author list cannot be placed and is skipped. **Authors are
-    matched by family name**, so "Smith J" and "Smith JA" are one node, labelled
-    with the fuller spelling. That is what keeps a lab from being split in two
-    by a difference in how two records happened to write it, and it is also why
-    two different Smiths become one node; variants whose initials disagree are
-    reported as they are merged.
+    matched by family name AND compatible initials**, so "Smith J" and
+    "Smith JA" are one node labelled with the fuller spelling, while "Smith J"
+    and "Smith RB" stay two. That keeps a lab from being split by a difference
+    in how two records happened to write it, without merging two people who
+    only share a surname.
 
     ``prefetched`` shares one iCite fetch with :func:`build_citation_graph`.
     """
@@ -607,16 +622,20 @@ def build_author_citation_graph(
     # into two nodes, each with half its papers and half its edges. Merging is
     # done here, before any node exists, so papers, citations and edges are all
     # counted against the merged author rather than fixed up afterwards.
-    paper_senior, merged = merge_by_surname(paper_senior)
+    paper_senior, merged, ambiguous = merge_by_surname(paper_senior)
     if merged:
-        say(f"  merged {len(merged)} senior author(s) by family name")
-        # Variants whose initials disagree are the ones that may be two people
-        # sharing a surname, so they are named rather than merged silently.
-        suspect = {k: v for k, v in merged.items() if _initials_differ(v)}
-        for lab, names in sorted(suspect.items())[:10]:
-            say(f"    ! {lab}: {', '.join(names)} — differing initials")
-        if len(suspect) > 10:
-            say(f"    ! and {len(suspect) - 10} more with differing initials")
+        say(f"  merged {len(merged)} senior author(s) by name")
+        for lab, names in sorted(merged.items())[:10]:
+            say(f"    {lab} ← {', '.join(n for n in names if n != lab)}")
+        if len(merged) > 10:
+            say(f"    and {len(merged) - 10} more")
+    if ambiguous:
+        # A spelling that fits more than one person of that surname is left on
+        # its own node. Said out loud, because the alternative to a coin toss
+        # is a lab quietly split in two.
+        say(f"  {len(ambiguous)} surname(s) left split, too vague to place:")
+        for key, names in sorted(ambiguous.items())[:10]:
+            say(f"    ? {', '.join(names)}")
 
     g = nx.DiGraph()
     for pmid, senior in paper_senior.items():

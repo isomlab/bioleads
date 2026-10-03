@@ -99,7 +99,7 @@ while the major version is 0, a minor bump may change defaults.
 - The baseline sizes are also captured before the first flight rather than
   lazily inside `magnify`, where they were already a frame late.
 
-### Senior authors are one node per family name
+### Senior authors are one node per person, not per spelling
 
 - **The same lab is spelled differently by different records.** "Kornberg TB",
   "Kornberg T" and "Kornberg, Thomas B" were three nodes, each holding part of
@@ -110,12 +110,16 @@ while the major version is 0, a minor bump may change defaults.
 - The surname is read from any of the three byline forms PubMed and iCite
   produce, and **particles stay with the name**, so "van der Berg" does not
   collapse onto "Berg".
-- **This merges on family name alone, so two different Wangs become one lab.**
-  That is the cost of what it does. Groups whose given-name initials disagree
-  are named in the run log as they are merged, since those are the ones worth
-  looking at. The initials are taken as the name minus the surname, because
-  reading them off the tokens makes "Kornberg TB" and "Thomas B Kornberg" look
-  like different people and flags every merge.
+- **The family name is necessary but not sufficient**, so the given-name
+  initials have to agree as well: one a prefix of the other, which is what a
+  fuller spelling of one person looks like. "Kornberg T" joins "Kornberg TB";
+  "Wang Y" and "Wang X" stay two nodes.
+- A vague spelling that fits more than one person of that surname — a bare
+  "Wang" where both "Wang X" and "Wang Y" exist — is **left on its own node and
+  reported**, rather than assigned by a coin toss.
+- The initials are taken as the name minus the surname. Read off the tokens
+  instead, "Kornberg TB" gives "TB" and "Thomas B Kornberg" gives only "B", and
+  one person looks like two.
 
 ### Fixed: the tours were ranked on a degree nobody can see
 

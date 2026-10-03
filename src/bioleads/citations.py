@@ -589,6 +589,57 @@ TOOLTIP_DELAY_MS = 700
 # How many nodes a guided tour visits, most connected first.
 TOUR_STOPS = 10
 
+# Tour pacing. The first version flew in 1.4 s and moved on after 4.2 s, which
+# is long enough to see that something happened and not long enough to read it.
+TOUR_FLIGHT_MS = 2600      # camera travel
+TOUR_DWELL_MS = 11000      # time on a node before moving on
+TOUR_ZOOM = 1.6            # gentler than the 1.9 it started at
+
+# The node record, in the order it reads best. A label of None means the raw
+# attribute name is unsuitable for display and the entry is skipped.
+_RECORD_FIELDS = [
+    ("title", "Title"),
+    ("author", "Author"),
+    ("pmid", "PMID"),
+    ("year", "Year"),
+    ("journal", "Journal"),
+    ("papers", "Papers in corpus"),
+    ("in_corpus_citations", "Cited within corpus"),
+    ("global_citations", "Global citations"),
+    ("query_match", "Query match"),
+    ("query_terms_matched", "Query terms found"),
+    ("query_match_count", "Terms matched"),
+    ("query_papers_matched", "Papers naming a term"),
+    ("query_papers_total", "Papers by this author"),
+    ("seed", "From the search"),
+    ("expanded", "Added by expansion"),
+    ("source", "Source"),
+    ("url", "Link"),
+]
+
+
+def node_record(node, d: dict) -> list[list[str]]:
+    """Every field a node carries, as label/value pairs for display.
+
+    **The hover is a summary; this is the record.** The tour shows all of it,
+    because the point of stopping on a node is to read it rather than to be told
+    its title again. Empty and absent fields are skipped — a blank row says
+    nothing — and booleans are rendered as yes/no rather than Python's `True`.
+    """
+    out: list[list[str]] = []
+    for key, label in _RECORD_FIELDS:
+        if key not in d:
+            continue
+        v = d[key]
+        if v is None or v == "":
+            continue
+        if isinstance(v, bool):
+            v = "yes" if v else "no"
+        out.append([label, str(v)])
+    if not out:
+        out = [["Node", str(node)]]
+    return out
+
 
 def tour_stops(g, n: int = TOUR_STOPS) -> list[dict]:
     """The most connected nodes, in order, with what to say about each.
@@ -620,6 +671,7 @@ def tour_stops(g, n: int = TOUR_STOPS) -> list[dict]:
             "label": str(d.get("author") or d.get("pmid") or node),
             "degree": deg.get(node, 0),
             "info": lines,
+            "record": node_record(node, d),
         })
     return stops
 
@@ -658,9 +710,14 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     padding:3px 9px}
   #bl-physics span {color:#5b6b7c; margin-left:7px}
   #bl-tour-controls button {margin-left:5px}
-  #bl-tour-info {display:none; margin-top:7px; max-width:330px;
-    border-top:1px solid #d7dee6; padding-top:6px; color:#1f2a36;
-    line-height:1.45}
+  #bl-tour-info {display:none; margin-top:7px; width:380px; max-height:62vh;
+    overflow-y:auto; border-top:1px solid #d7dee6; padding-top:6px;
+    color:#1f2a36}
+  #bl-tour-info .bl-tour-head {margin-bottom:5px; color:#5b6b7c}
+  #bl-tour-info table {border-collapse:collapse; width:100%}
+  #bl-tour-info th {text-align:left; vertical-align:top; font-weight:600;
+    color:#5b6b7c; padding:2px 8px 2px 0; white-space:nowrap}
+  #bl-tour-info td {vertical-align:top; padding:2px 0; word-break:break-word}
 </style>
 <div id="bl-physics">
   <button id="bl-physics-toggle">Pause layout</button>
@@ -687,16 +744,26 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
       if (!s) { return; }
       net.setOptions({physics: {enabled: false}});
       net.selectNodes([s.id]);
-      net.focus(s.id, {scale: 1.9, animation:
-        {duration: 1400, easingFunction: "easeInOutCubic"}});
-      panel.innerHTML = "<b>" + (k + 1) + " of " + STOPS.length +
-        "</b> &middot; " + s.degree + " connection(s)<br>" + s.info.join("<br>");
+      net.focus(s.id, {scale: __ZOOM__, animation:
+        {duration: __FLIGHT__, easingFunction: "easeInOutCubic"}});
+      var rows = "";
+      for (var r = 0; r < s.record.length; r++) {
+        var val = s.record[r][1];
+        if (/^https?:\/\//.test(val)) {
+          val = '<a href="' + val + '" target="_blank" rel="noopener">' +
+                val + "</a>";
+        }
+        rows += "<tr><th>" + s.record[r][0] + "</th><td>" + val + "</td></tr>";
+      }
+      panel.innerHTML = "<div class=\"bl-tour-head\"><b>" + (k + 1) + " of " +
+        STOPS.length + "</b> &middot; " + s.degree + " connection(s)</div>" +
+        "<table>" + rows + "</table>";
       panel.style.display = "block";
     }
     function step() {
       i = (i + 1) % STOPS.length;
       show(i);
-      if (playing) { timer = setTimeout(step, 4200); }
+      if (playing) { timer = setTimeout(step, __DWELL__); }
     }
     document.getElementById("bl-tour-next").addEventListener("click", function () {
       playing = false; clearTimeout(timer); play.textContent = "Play tour"; step();
@@ -711,7 +778,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
       playing = false; clearTimeout(timer); play.textContent = "Play tour";
       panel.style.display = "none";
       net.unselectAll();
-      net.fit({animation: {duration: 900, easingFunction: "easeInOutCubic"}});
+      net.fit({animation: {duration: 1400, easingFunction: "easeInOutCubic"}});
     });
   }
   function wire(net) {
@@ -751,6 +818,9 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
         return
     snippet = snippet.replace("__TOOLTIP_DELAY__", str(TOOLTIP_DELAY_MS))
     snippet = snippet.replace("__TOUR_STOPS__", json.dumps(stops or []))
+    snippet = snippet.replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
+    snippet = snippet.replace("__DWELL__", str(TOUR_DWELL_MS))
+    snippet = snippet.replace("__ZOOM__", str(TOUR_ZOOM))
     if "bl-physics" in html:          # already injected
         return
     if "</body>" in html:

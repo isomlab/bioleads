@@ -2544,3 +2544,46 @@ def test_the_tour_turns_physics_off_before_flying(tmp_path):
     html = _written_network(tmp_path)
     assert "physics: {enabled: false}" in html
     assert "net.focus(s.id" in html
+
+
+def test_a_tour_stop_carries_the_whole_record_not_a_summary():
+    """The point of stopping on a node is to read it, not to be told its title
+    again, so the tour shows every field the node carries."""
+    import networkx as nx
+    from bioleads.citations import tour_stops
+    g = nx.DiGraph()
+    g.add_node("PMID:1", pmid="1", title="A paper", year="2026", journal="Nature",
+               in_corpus_citations=4, global_citations=1, source="pubmed",
+               url="https://pubmed.ncbi.nlm.nih.gov/1/", seed=True,
+               query_match="all", query_terms_matched="TM184C")
+    g.add_node("PMID:2", pmid="2", title="B", in_corpus_citations=0)
+    g.add_edge("PMID:1", "PMID:2")
+    labels = [r[0] for r in tour_stops(g, 1)[0]["record"]]
+    for expected in ("Title", "PMID", "Year", "Journal", "Cited within corpus",
+                     "Global citations", "Query match", "Source", "Link"):
+        assert expected in labels
+
+
+def test_the_record_skips_empty_fields_and_spells_out_booleans():
+    from bioleads.citations import node_record
+    rows = dict(node_record("n", {"pmid": "1", "journal": "", "year": None,
+                                  "seed": False, "title": "T"}))
+    assert "Journal" not in rows and "Year" not in rows   # a blank row says nothing
+    assert rows["From the search"] == "no"                # not "False"
+
+
+def test_a_node_with_nothing_to_show_still_gets_a_row():
+    from bioleads.citations import node_record
+    assert node_record("lonely", {}) == [["Node", "lonely"]]
+
+
+def test_the_tour_is_paced_to_be_read(tmp_path):
+    """It flew in 1.4 s and moved on after 4.2 s, which is long enough to see
+    that something happened and not long enough to read it."""
+    from bioleads.citations import TOUR_FLIGHT_MS, TOUR_DWELL_MS
+    assert TOUR_FLIGHT_MS >= 2000
+    assert TOUR_DWELL_MS >= 8000
+    html = _written_network(tmp_path)
+    assert f"duration: {TOUR_FLIGHT_MS}" in html
+    assert f"setTimeout(step, {TOUR_DWELL_MS})" in html
+    assert not any(x in html for x in ("__FLIGHT__", "__DWELL__", "__ZOOM__"))

@@ -8,7 +8,7 @@ while the major version is 0, a minor bump may change defaults.
 ### A guided tour of the most connected nodes
 
 - **Play tour** flies the camera to the most connected node, zooms in and shows
-  what it is, then steps to the next, ten stops by default. **Next** advances by
+  **its whole record**, then steps to the next, ten stops by default. **Next** advances by
   hand and **Reset view** returns to the whole graph.
 - **Degree, not size.** A node is large here because it was cited often; it is
   *connected* because it touches much of the corpus, and a tour of a network
@@ -16,6 +16,14 @@ while the major version is 0, a minor bump may change defaults.
 - The stops carry **the same text the hover shows**, built from one function, so
   the tour and the tooltip cannot drift into telling different stories about a
   node.
+- **Paced to be read.** A 2.6 s flight and 11 s on each node, at a gentler 1.6x
+  zoom. The first version flew in 1.4 s and moved on after 4.2 s, which was long
+  enough to see that something had happened and not long enough to read it.
+- **The whole record, not the hover summary.** Every field the node carries —
+  title, PMID, year, journal, both citation counts, query match and terms,
+  whether it came from the search or from expansion, source, and a clickable
+  link — as a label/value table. Empty fields are skipped and booleans read
+  yes/no.
 - Physics is switched off before each flight, since the camera cannot chase a
   node that is still being simulated.
 - **This is a tour, not a video file.** Screen-record it to get a movie. Writing

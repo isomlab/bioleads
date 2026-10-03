@@ -236,7 +236,8 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     if not stops:
         return
     try:
-        from .citations import (RECORD_HELP, TOUR_DWELL_MS, TOUR_FLIGHT_MS)
+        from .citations import (RECORD_HELP, TOUR_DWELL_MS, TOUR_FLIGHT_MS,
+                                TOUR_HIGHLIGHT)
     except Exception:          # pragma: no cover - citations is always present
         return
     coords = {n: list(map(float, p)) for n, p in (pos or {}).items()}
@@ -286,10 +287,12 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
   function flyTo(p, done) {
     var el = gd(), from = (el.layout.scene && el.layout.scene.camera) || HOME;
     var n = Math.sqrt(p[0]*p[0] + p[1]*p[1] + p[2]*p[2]) || 1;
-    var k = 0.55;                       // how close the camera comes
+    // Closer than the first attempt: k was 0.55 with a 0.35 standoff, which
+    // framed the neighbourhood rather than the node.
+    var k = 0.22, pad = 0.14;
     var to = {center: {x: p[0], y: p[1], z: p[2]},
-              eye: {x: p[0] + k*p[0]/n + 0.35, y: p[1] + k*p[1]/n + 0.35,
-                    z: p[2] + k*p[2]/n + 0.35}};
+              eye: {x: p[0] + k*p[0]/n + pad, y: p[1] + k*p[1]/n + pad,
+                    z: p[2] + k*p[2]/n + pad}};
     var t0 = performance.now();
     cancelAnimationFrame(anim);
     (function frame(now) {
@@ -304,8 +307,24 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
       if (t < 1) { anim = requestAnimationFrame(frame); } else if (done) { done(); }
     })(t0);
   }
+  function light(p) {
+    // A ring drawn on top of the node. Recolouring the node itself would mean
+    // rewriting the whole marker array on every stop.
+    var el = gd();
+    var trace = {x: [p[0]], y: [p[1]], z: [p[2]], mode: "markers",
+                 type: "scatter3d", hoverinfo: "skip", showlegend: false,
+                 marker: {size: 22, color: "__HILITE__", opacity: 0.55,
+                          line: {width: 2, color: "#7a0f37"}}};
+    if (el.data.length > 2) { Plotly.deleteTraces(el, el.data.length - 1); }
+    Plotly.addTraces(el, trace);
+  }
+  function unlight() {
+    var el = gd();
+    if (el.data.length > 2) { Plotly.deleteTraces(el, el.data.length - 1); }
+  }
   function show(k) {
     var s = STOPS[k]; if (!s) { return; }
+    light(s.xyz);
     var rows = "";
     for (var r = 0; r < s.record.length; r++) {
       var v = s.record[r][1];
@@ -339,6 +358,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
   document.getElementById("bl3-reset").addEventListener("click", function () {
     playing = false; clearTimeout(timer); cancelAnimationFrame(anim);
     play.textContent = "Play tour";
+    unlight();
     document.getElementById("bl3-info").style.display = "none";
     Plotly.relayout(gd(), {"scene.camera": HOME});
   });
@@ -349,7 +369,8 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     block = (block.replace("__STOPS__", _json.dumps(stops))
                   .replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
                   .replace("__DWELL__", str(TOUR_DWELL_MS))
-                  .replace("__HELP__", RECORD_HELP.replace('"', "&quot;")))
+                  .replace("__HELP__", RECORD_HELP.replace('"', "&quot;"))
+                  .replace("__HILITE__", TOUR_HIGHLIGHT))
     try:
         with open(path, encoding="utf-8") as fh:
             html = fh.read()

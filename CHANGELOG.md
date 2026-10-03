@@ -5,6 +5,26 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Fixed: the 2D controls never ran at all
+
+- **A syntax error in the injected script.** `"<div class=\"x\">"` written in a
+  plain triple-quoted Python string collapsed to `"<div class="x">"`, the whole
+  IIFE failed to parse, **and no handler was ever attached** — so the buttons did
+  nothing and physics never stopped. Single quotes now, which need no escaping.
+- **Every assertion about that page still passed**, because a substring test
+  cannot see a syntax error. The suite now runs `node --check` over both
+  injected scripts, skipping where node is absent.
+
+### The node being visited is marked
+
+- **2D:** recoloured, enlarged 1.6x and given a heavier border, restored when the
+  tour moves on. Selection alone was too quiet to find on a crowded graph.
+- **3D:** a translucent ring drawn over the node, removed on the next stop.
+  Recolouring the node itself would mean rewriting the whole marker array each
+  time.
+- **The 3D camera comes closer** — the offset was 0.55 with a 0.35 standoff,
+  which framed the neighbourhood rather than the node; now 0.22 and 0.14.
+
 ### Fixed: the network buttons could feel broken, and 3D had none of them
 
 - **The layout now always stops.** It relied on a single vis.js event,

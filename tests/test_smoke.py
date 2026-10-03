@@ -2657,3 +2657,62 @@ def test_the_3d_camera_is_tweened_not_snapped(tmp_path):
     html = _written_3d(tmp_path)
     assert "requestAnimationFrame(frame)" in html
     assert "Plotly.relayout" in html
+
+
+# ── the injected scripts must actually parse ───────────────────────────────────
+# A substring test cannot see a syntax error. The 2D controls shipped broken for
+# two rounds because `"<div class=\"x\">"` collapsed to `"<div class="x">"` in a
+# plain triple-quoted Python string, the whole IIFE failed to parse, and no
+# handler was ever attached — so the buttons did nothing and physics never
+# stopped. Every assertion about the page still passed.
+
+def _node_check(js: str, tmp_path, name):
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available to parse the injected script")
+    f = tmp_path / name
+    f.write_text(js, encoding="utf-8")
+    r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
+    assert r.returncode == 0, f"injected script does not parse:\n{r.stderr}"
+
+
+def _injected(html, marker):
+    """The body of the <script> block containing `marker`.
+
+    Cutting at the first ">" after the marker lands inside the code — the 3D
+    script contains `el.data.length > 2` — so the whole script tag has to be
+    found first.
+    """
+    import re
+    for m in re.finditer(r"<script[^>]*>(.*?)</script>", html, re.S):
+        if marker in m.group(1):
+            return m.group(1)
+    raise AssertionError(f"no injected script containing {marker!r}")
+
+
+def test_the_2d_injected_script_parses(tmp_path):
+    _node_check(_injected(_written_network(tmp_path), "bl-tour-play"),
+                tmp_path, "a.js")
+
+
+def test_the_3d_injected_script_parses(tmp_path):
+    _node_check(_injected(_written_3d(tmp_path), "bl3-play"), tmp_path, "b.js")
+
+
+def test_the_visited_node_is_marked_in_2d(tmp_path):
+    """Selection alone is too quiet to find on a crowded graph."""
+    from bioleads.citations import TOUR_HIGHLIGHT
+    html = _written_network(tmp_path)
+    assert TOUR_HIGHLIGHT in html
+    assert "function light(" in html and "function unlight(" in html
+    assert "__HILITE__" not in html
+
+
+def test_the_visited_node_is_marked_in_3d(tmp_path):
+    from bioleads.citations import TOUR_HIGHLIGHT
+    html = _written_3d(tmp_path)
+    assert TOUR_HIGHLIGHT in html
+    assert "Plotly.addTraces" in html and "Plotly.deleteTraces" in html
+    assert "__HILITE__" not in html

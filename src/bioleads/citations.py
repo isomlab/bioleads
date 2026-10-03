@@ -602,6 +602,11 @@ TOUR_ZOOM = 1.6            # gentler than the 1.9 it started at
 # cannot be clicked.
 SETTLE_LIMIT_MS = 12000
 
+# The node the tour is looking at. Selection alone is too quiet to find on a
+# crowded graph, so the current node is recoloured and enlarged and put back
+# when the tour moves on.
+TOUR_HIGHLIGHT = "#d81b60"
+
 
 def _tour_runtime_seconds(stops: int = TOUR_STOPS) -> int:
     """Roughly how long a full tour takes, for telling someone what to record."""
@@ -769,13 +774,28 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
   function tour(net) {
     // The tour drives the camera, so physics is switched off first: otherwise
     // the nodes keep moving out from under it mid-flight.
-    var i = -1, playing = false, timer = null;
+    var i = -1, playing = false, timer = null, lit = null;
     var panel = document.getElementById("bl-tour-info");
     var play = document.getElementById("bl-tour-play");
+    var nodes = net.body.data.nodes;
+    function unlight() {
+      if (lit) { nodes.update({id: lit.id, color: lit.color, size: lit.size,
+                               borderWidth: lit.borderWidth}); lit = null; }
+    }
+    function light(id) {
+      unlight();
+      var n = nodes.get(id);
+      lit = {id: id, color: n.color, size: n.size, borderWidth: n.borderWidth};
+      nodes.update({id: id, color: {background: "__HILITE__",
+                                    border: "#7a0f37", highlight:
+                                    {background: "__HILITE__", border: "#7a0f37"}},
+                    size: (n.size || 10) * 1.6, borderWidth: 3});
+    }
     function show(k) {
       var s = STOPS[k];
       if (!s) { return; }
       net.setOptions({physics: {enabled: false}});
+      light(s.id);
       net.selectNodes([s.id]);
       net.focus(s.id, {scale: __ZOOM__, animation:
         {duration: __FLIGHT__, easingFunction: "easeInOutCubic"}});
@@ -788,7 +808,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
         }
         rows += "<tr><th>" + s.record[r][0] + "</th><td>" + val + "</td></tr>";
       }
-      panel.innerHTML = "<div class=\"bl-tour-head\"><b>" + (k + 1) + " of " +
+      panel.innerHTML = '<div class="bl-tour-head"><b>' + (k + 1) + " of " +
         STOPS.length + "</b> &middot; " + s.degree + " connection(s)</div>" +
         "<table>" + rows + "</table>";
       panel.style.display = "block";
@@ -810,6 +830,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     document.getElementById("bl-tour-reset").addEventListener("click", function () {
       playing = false; clearTimeout(timer); play.textContent = "Play tour";
       panel.style.display = "none";
+      unlight();
       net.unselectAll();
       net.fit({animation: {duration: 1400, easingFunction: "easeInOutCubic"}});
     });
@@ -864,6 +885,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     snippet = snippet.replace("__ZOOM__", str(TOUR_ZOOM))
     snippet = snippet.replace("__RECORD_HELP__", RECORD_HELP)
     snippet = snippet.replace("__SETTLE_LIMIT__", str(SETTLE_LIMIT_MS))
+    snippet = snippet.replace("__HILITE__", TOUR_HIGHLIGHT)
     if "bl-physics" in html:          # already injected
         return
     if "</body>" in html:

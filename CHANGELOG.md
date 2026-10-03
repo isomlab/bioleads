@@ -74,7 +74,9 @@ while the major version is 0, a minor bump may change defaults.
 - After four stops exactly one node and its eight edges are tinted, which is
   the stop currently being shown, and after *Reset view* nothing is.
 - **The record card is on that same ramp**, in both views, so it fades in and
-  out exactly with the focus node and its edges. Driven separately the two
+  out exactly with the focus node and its edges. In 2D it keeps following the
+  node it describes while it fades out, and only moves to the new one at the
+  handover, where it is invisible. Driven separately the two
   drifted: the highlight came up over the flight and the card appeared at the
   end of it, which read as two events rather than one arrival.
 - *Reset view* dims the highlight down over the flight home and removes the

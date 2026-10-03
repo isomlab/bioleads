@@ -890,7 +890,13 @@ __CARD_JS__
     }
     function cardFade(u) {
       // Visibility follows u rather than gating it; see the note in graph3d.
-      card.style.display = u > 0 ? "block" : "none";
+      if (u <= 0) { card.style.display = "none"; return; }
+      card.style.display = "block";
+      // **Positioned in the same breath as it is shown.** A hidden element
+      // measures 0 by 0, so a `place()` that ran while the card was hidden
+      // computed a position from no width and no height, and the next fade-in
+      // popped the card up there before the following redraw moved it.
+      place();
       card.style.opacity = u;
       card.style.transform = "translateX(" + (10 * (1 - u)).toFixed(2) + "px)";
     }
@@ -987,7 +993,9 @@ __CARD_JS__
     // redraw rather than once, which is what keeps it beside its node when
     // the view moves afterwards.
     function place() {
-      if (!at) { return; }
+      // Nothing to measure, and nothing to see: a hidden card's offsetWidth
+      // and offsetHeight are 0 and the position computed from them is wrong.
+      if (!at || card.style.display !== "block") { return; }
       var pos = net.getPositions([at.id])[at.id];
       if (!pos) { return; }
       var dom = net.canvasToDOM(pos);
@@ -1025,19 +1033,22 @@ __CARD_JS__
           tint(d);
           cardFade(d);
         } else {
-          if (!swapped) { swapped = true; light(s.id); cardText(s); }
+          if (!swapped) { swapped = true; at = s; light(s.id); cardText(s); }
           // Eased, like the camera. A linear ramp starts and stops abruptly
           // against a flight that does not.
           var u = ease((t - sw) / (1 - sw));
           tint(u);
           cardFade(u);
-          place();
         }
         if (t >= 1) { clearInterval(ramp); ramp = null; }
       }, 25);
       // The card goes away for the duration of the flight. Showing it first
       // means reading a card that is still travelling.
-      at = s;
+      // `at` is NOT moved to the new stop here. It is what `place()` positions
+      // against, and during the fade-out the card still holds the PREVIOUS
+      // stop's record, so moving it early dragged the outgoing card across the
+      // screen to the incoming node and clamped it into a corner on the way.
+      // It moves at the swap, with the content.
       net.focus(s.id, {scale: __ZOOM__, animation:
         {duration: __FLIGHT__, easingFunction: "easeInOutCubic"}});
       panel.innerHTML = '<div class="bl-tour-head"><b>' + (k + 1) + " of " +
@@ -1063,8 +1074,9 @@ __CARD_JS__
     document.getElementById("bl-tour-reset").addEventListener("click", function () {
       playing = false; clearTimeout(timer); play.textContent = "Play tour";
       panel.style.display = "none";
-      at = null;
-      // Dim down over the flight home rather than switching off.
+      // `at` is cleared only once the card has finished fading, for the same
+      // reason it is not set early: until then the card is still showing this
+      // stop and has to stay beside it.
       clearInterval(ramp);
       var r0 = Date.now();
       ramp = setInterval(function () {
@@ -1072,7 +1084,9 @@ __CARD_JS__
         var d = 1 - ease(t);
         tint(d);
         cardFade(d);
-        if (t >= 1) { clearInterval(ramp); ramp = null; unlight(); }
+        if (t >= 1) {
+          clearInterval(ramp); ramp = null; unlight(); at = null;
+        }
       }, 40);
       net.unselectAll();
       net.fit({animation: {duration: 1400, easingFunction: "easeInOutCubic"}});

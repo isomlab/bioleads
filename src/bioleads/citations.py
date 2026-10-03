@@ -869,6 +869,11 @@ __CARD_CSS__
 __CARD_JS__
 (function () {
   var on = true;
+  // The resting styles, named once so the options and the restore cannot drift
+  // apart.
+  var EDGE_BASE = "rgba(126,148,184,0.50)";
+  var NODE_REST = {background: "__NODE_REST__",
+                   border: "rgba(255,255,255,0.95)"};
   var STOPS = __TOUR_STOPS__;
   function tour(net) {
     // The tour drives the camera, so physics is switched off first: otherwise
@@ -907,6 +912,14 @@ __CARD_JS__
     // coloured by hand instead, blended from a pale version of the highlight
     // up to the full one over the flight.
     var edges = net.body.data.edges;
+    // **Restoring a saved `undefined` does not undo a tint.** vis.js has
+    // already parsed the colour we set, and writing the key back as undefined
+    // leaves that parsed value in place, so every visited node's edges stayed
+    // pink for the rest of the session. An edge or node that never carried its
+    // own colour is put back to the resting style explicitly.
+    var EDGE_REST = {color: EDGE_BASE, highlight: "__HILITE__",
+                     hover: "__HILITE__", inherit: false, opacity: 1};
+    var EDGE_REST_W = 1;
     function hex(c) {
       return [parseInt(c.substr(1, 2), 16), parseInt(c.substr(3, 2), 16),
               parseInt(c.substr(5, 2), 16)];
@@ -921,11 +934,18 @@ __CARD_JS__
     }
     function unlight() {
       if (!lit) { return; }
-      nodes.update({id: lit.id, color: lit.color, size: lit.size,
-                    value: lit.value, borderWidth: lit.borderWidth});
-      // Written back from what each edge actually had, not reset to a global
-      // default: an edge may carry its own colour.
-      if (lit.edges.length) { edges.update(lit.edges); }
+      nodes.update({id: lit.id,
+                    color: lit.color === undefined ? NODE_REST : lit.color,
+                    size: lit.size, value: lit.value,
+                    borderWidth: lit.borderWidth});
+      var back = [];
+      for (var i = 0; i < lit.edges.length; i++) {
+        var e = lit.edges[i];
+        back.push({id: e.id,
+                   color: e.color === undefined ? EDGE_REST : e.color,
+                   width: e.width === undefined ? EDGE_REST_W : e.width});
+      }
+      if (back.length) { edges.update(back); }
       lit = null;
     }
     function light(id) {
@@ -1059,9 +1079,9 @@ __CARD_JS__
     net.setOptions({
       interaction: {hover: true, tooltipDelay: __TOOLTIP_DELAY__},
       edges: {width: 1, selectionWidth: 1, smooth: {roundness: 0.2},
-              color: {color: "rgba(126,148,184,0.50)", highlight: "__HILITE__",
+              color: {color: EDGE_BASE, highlight: "__HILITE__",
                       hover: "__HILITE__", inherit: false, opacity: 1}},
-      nodes: {borderWidth: 1.5, color: {border: "rgba(255,255,255,0.95)"}}});
+      nodes: {borderWidth: 1.5, color: {border: NODE_REST.border}}});
     if (STOPS.length) { tour(net); }
     var btn = document.getElementById("bl-physics-toggle");
     var lbl = document.getElementById("bl-physics-state");
@@ -1112,6 +1132,8 @@ __CARD_JS__
     snippet = snippet.replace("__RECORD_HELP__", RECORD_HELP)
     snippet = snippet.replace("__SETTLE_LIMIT__", str(SETTLE_LIMIT_MS))
     snippet = snippet.replace("__DIM__", dim_color(TOUR_HIGHLIGHT))
+    # pyvis's own default node fill, for nodes the graph never colored itself.
+    snippet = snippet.replace("__NODE_REST__", "#97C2FC")
     snippet = snippet.replace("__HILITE__", TOUR_HIGHLIGHT)
     if "bl-physics" in html:          # already injected
         return

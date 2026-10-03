@@ -53,9 +53,19 @@ while the major version is 0, a minor bump may change defaults.
   over the rest, so the eye sees one highlight give way to another rather than a
   node changing color.
 - 2D colors the node and its edges by hand for this. vis.js will recolor a
-  selected node and its connections for free, but only instantly. The original
-  per-edge colors are saved and written back, rather than reset to a default, so
-  an edge that carries its own color keeps it.
+  selected node and its connections for free, but only instantly.
+
+### Fixed: visited nodes stayed pink
+
+- **Restoring a saved `undefined` does not undo a tint.** vis.js has already
+  parsed the color that was set, and writing the key back as undefined leaves
+  that parsed value in place. Every node the tour visited therefore kept its
+  edges pink, and a long tour slowly turned the whole graph.
+- An edge or node that never carried its own color is now put back to an
+  explicit resting style. That style is defined once and used both by the
+  options and by the restore, so the two cannot drift apart.
+- After four stops exactly one node and its eight edges are tinted, which is
+  the stop currently being shown, and after *Reset view* nothing is.
 - **The record card fades in and out in both views.** Fading out needs the
   `display:none` held back until the transition finishes, or the element is gone
   before it has faded and the card snaps off the screen however long the CSS

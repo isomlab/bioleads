@@ -3036,3 +3036,44 @@ def test_3d_tour_lights_the_focus_node_s_own_edges():
     assert "function clearLit()" in tour
     assert "while (el.data.length > 2)" in tour
     assert "Plotly.addTraces(el, [lit, trace])" in tour
+
+
+def test_2d_tour_restores_edges_to_an_explicit_resting_style():
+    """A visited node's edges must go back to grey, not stay pink.
+
+    **Restoring a saved `undefined` does not undo a tint.** vis.js has already
+    parsed the colour that was set, and writing the key back as undefined
+    leaves that parsed value in place, so every node the tour visited kept its
+    edges pink for the rest of the session and the graph slowly turned.
+    """
+    pytest.importorskip("pyvis")
+    import re
+    import tempfile
+
+    import networkx as nx
+
+    from bioleads import citations
+
+    g = nx.DiGraph()
+    for i in range(5):
+        g.add_node(f"PMID:{i}", pmid=str(i), title=f"P{i}", in_corpus_citations=i)
+    g.add_edges_from([("PMID:4", f"PMID:{j}") for j in range(3)])
+
+    with tempfile.TemporaryDirectory() as d:
+        html = open(citations.write_citation_html(
+            g, os.path.join(d, "t.html"), title="t"), encoding="utf-8").read()
+
+    tour = [m.group(1) for m in
+            re.finditer(r"<script[^>]*>(.*?)</script>", html, re.S)
+            if "bl-tour-play" in m.group(1)][0]
+
+    # An explicit resting style exists and is what unlight falls back to.
+    assert "var EDGE_REST = {" in tour and "var NODE_REST = {" in tour
+    assert "e.color === undefined ? EDGE_REST : e.color" in tour
+    assert "lit.color === undefined ? NODE_REST : lit.color" in tour
+    assert "e.width === undefined ? EDGE_REST_W : e.width" in tour
+
+    # The resting edge colour is defined once and used by both the options and
+    # the restore, so the two cannot drift apart.
+    assert tour.count("var EDGE_BASE =") == 1
+    assert tour.count("EDGE_BASE") >= 3

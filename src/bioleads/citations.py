@@ -1044,46 +1044,65 @@ def _inject_match_legend(path: str, title: str, terms: list[str],
     best-matching paper, which is a different claim from a paper node and has
     to be said in the key rather than left to be assumed.
     """
-    if not terms:
-        return
     try:
         with open(path, encoding="utf-8") as f:
             html = f.read()
     except OSError:
         return
-    shown = ", ".join(f"<code>{t}</code>" for t in terms[:8])
-    if len(terms) > 8:
-        shown += f" and {len(terms) - 8} more"
+    terms = terms or []
+    shown = ", ".join(f"<code>{t}</code>" for t in terms[:6])
+    if len(terms) > 6:
+        shown += f" +{len(terms) - 6}"
     swatch = (
-        '<span style="display:inline-block;width:11px;height:11px;'
-        'border-radius:50%%;background:%s;margin-right:5px;'
-        'vertical-align:middle"></span>')
-    legend = (
-        '<div style="font:13px/1.5 system-ui,sans-serif;color:#1f2a36;'
-        'max-width:860px;margin:4px auto 10px;padding:8px 12px;'
-        'border:1px solid #d7dee6;border-radius:6px;background:#f8fafc">'
-        f'<b>Query terms:</b> {shown}<br>'
-        f'{swatch % MATCH_COLORS["all"]}contains every term &nbsp; '
-        f'{swatch % MATCH_COLORS["partial"]}contains some &nbsp; '
-        f'{swatch % MATCH_COLORS["none"]}contains none'
-        + (('<br><span style="color:#5b6b7c"><b>An author is colored by their '
-            'single best-matching paper</b>, not by pooling terms across their '
-            'papers. Green means one paper of theirs names every term. The '
-            'hover gives how many of their papers name any.</span>')
-           if unit == "author" else '')
-        + '<br><span style="color:#5b6b7c">Matching is literal, on title and '
-        'abstract only. PubMed can also match on MeSH terms or on full text '
-        'not fetched here, so grey does not mean the hit was wrong. Papers '
-        'added by citation expansion never went through the query at '
-        'all.</span></div>'
+        '<span style="display:inline-block;width:9px;height:9px;'
+        'border-radius:50%%;background:%s;margin:0 4px 0 10px;'
+        'vertical-align:-1px"></span>')
+    # The caveats are the part a reader needs once, not on every glance, so
+    # they move into the tooltip. The bar itself has to stay one line: it is
+    # the only thing between the network and the top of the window.
+    caveat = (
+        "Matching is literal, on title and abstract only. PubMed can also "
+        "match on MeSH terms or on full text not fetched here, so grey does "
+        "not mean the hit was wrong. Papers added by citation expansion never "
+        "went through the query at all.")
+    if unit == "author":
+        caveat = (
+            "An author is colored by their single best-matching paper, not by "
+            "pooling terms across their papers, so the darkest color means "
+            "one paper of theirs names every term. " + caveat)
+    bar = (
+        '<div id="bl-bar" style="font:12px/1.4 -apple-system,'
+        'BlinkMacSystemFont,\'Segoe UI\',system-ui,sans-serif;color:#1f2a36;'
+        'padding:6px 12px;border-bottom:1px solid #e6ebf0;background:#fbfcfd;'
+        'text-align:left;'
+        'white-space:nowrap;overflow-x:auto">'
+        f'<b>{title}</b>' + (
+            f'<span style="color:#93a1b0;margin:0 8px">&middot;</span>'
+            f'{shown}'
+            f'{swatch % MATCH_COLORS["all"]}every'
+            f'{swatch % MATCH_COLORS["partial"]}some'
+            f'{swatch % MATCH_COLORS["none"]}none'
+            f'<span title="{caveat}" style="margin-left:10px;color:#93a1b0;'
+            'cursor:help">&#9432;</span>' if terms else '') +
+        '</div>'
+    )
+    # The network should have the window, so the heading is replaced rather
+    # than added to, the card padding goes, and the canvas is sized to what is
+    # left instead of a fixed 800px.
+    fill = (
+        "<style>"
+        "body{margin:0}"
+        "#bl-bar+.card,.card{border:0!important;margin:0!important}"
+        ".card-body{padding:0!important}"
+        "#mynetwork{height:calc(100vh - 32px)!important;border:0!important}"
+        "</style>"
     )
     needle = f"<h1>{title}</h1>"
-    at = html.find(needle)
-    if at == -1 or legend in html:
+    if needle not in html or "bl-bar" in html:
         return
-    cut = at + len(needle)
+    html = html.replace(needle, bar + fill, 1)
     with open(path, "w", encoding="utf-8") as f:
-        f.write(html[:cut] + legend + html[cut:])
+        f.write(html)
 
 
 def _collapse_duplicate_heading(path: str, title: str) -> None:

@@ -2811,8 +2811,8 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
 
     zoom = float(re.search(r"ZOOM = ([0-9.]+)", tour).group(1))
     mag = float(re.search(r"MAG = ([0-9.]+)", tour).group(1))
-    sphere_r = float(re.search(r"SR = ([0-9.]+)", tour).group(1))
     orbit = float(re.search(r"ORBIT = ([0-9.]+)", tour).group(1))
+    across = float(re.search(r"ACROSS = ([0-9.]+)", tour).group(1))
     assert zoom > 1, "the scene never grows, so nothing looks closer"
     # Plotly markers are sized in screen pixels, so spreading the scene apart
     # leaves every node the size it was. They have to be scaled to match.
@@ -2821,7 +2821,15 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
     # the camera comes in, and an HTML overlay is a flat sticker that does not
     # rotate or shade. Only something in the data gets bigger because the view
     # got closer, which is what was asked for.
-    assert 0.02 <= sphere_r <= 0.2, "the focus sphere is not sized sanely"
+    # The sphere is sized from the node's OWN marker, so that it reads as that
+    # node and the only reason it grows is that the camera came closer. A fixed
+    # fraction of the graph made every focus node the same enormous ball and hid
+    # what a node's size means here.
+    assert "sphereRadius(px)" in tour and "light(s.xyz, s.px)" in tour
+    assert "var SR" not in tour, "the fixed sphere fraction is back"
+    assert across > 2, (
+        "the cube does not fill the viewport: the default camera sits back, so "
+        "assuming 2 units across makes the sphere smaller than its own marker")
     assert '"surface"' in tour, "the focus node is not in the scene"
     # Mesh3d renders its own triangle edges here, giving a wireframe globe that
     # no contour/flatshading/normals-epsilon setting removed.
@@ -2837,7 +2845,7 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
     stops = json.loads(re.search(r"var STOPS = (\[.*\]), FLIGHT = ", tour,
                                  re.S).group(1))
     assert stops and all(s.get("xyz") and s.get("cam") for s in stops)
-    assert "flyTo(s.cam," in tour and "light(s.xyz)" in tour
+    assert "flyTo(s.cam," in tour, "the camera is not given the camera form"
 
     ranges = [[float(v) for v in m]
               for m in re.findall(r'"range":\s*\[([-\d.e]+),\s*([-\d.e]+)\]',

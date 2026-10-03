@@ -233,7 +233,7 @@ def write_graph_3d(
         paper_bgcolor="white",
     )
     fig.write_html(path, include_plotlyjs=True, full_html=True)
-    _inject_tour_3d(path, stops, pos)
+    _inject_tour_3d(path, stops, pos, dict(zip(nodes, marker_sizes)))
     return path
 
 
@@ -267,15 +267,26 @@ TOUR_EDGE_WIDTH = 2.6     # edge width at the end of a flight
 # behind it. A Mesh3d sphere lives in the data: the zoom makes it bigger the
 # way moving towards something makes it bigger, and the orbit turns it.
 #
-# Its radius is a fraction of the graph's span, PER AXIS, so it is round on
-# screen. The axes have different data ranges but are drawn into the same
-# cube, so a sphere of equal radius in data units renders as an ellipsoid.
-TOUR_SPHERE_FRACTION = 0.072
+# **Its size is the node's own size, not a share of the screen.** A fixed
+# fraction of the graph's span made every focus node the same enormous ball
+# whatever it represented, which is a worse lie than a marker that does not
+# grow: it hid the one thing the size of a node means here, how often the paper
+# was cited. The radius is derived from the node's marker instead, so the only
+# reason it gets bigger is that the camera came closer.
+#
+# Scaled PER AXIS by that axis's span, so it is round on screen: the axes carry
+# different data ranges but are drawn into the same cube.
 TOUR_SPHERE_SEGMENTS = (48, 24)
 # How far the camera swings around the node while it flies in. A tour that
 # only dollies looks like a slideshow; a little rotation reads as moving
 # through the network.
 TOUR_ORBIT_DEG = 55.0
+# How many normalised cube units the default camera spans across the shorter
+# side of the plot. **Measured, not derived.** The obvious guess is 2, the width
+# of the cube, and it is wrong by a factor of about 2.5: Plotly's default eye
+# sits well back, so the cube fills roughly 40% of the viewport. Getting this
+# wrong made the focus sphere smaller than the marker it was covering.
+TOUR_SCENE_UNITS_ACROSS = 5.1
 
 
 def scene_ranges(pos):
@@ -339,7 +350,7 @@ def _sphere_payload():
     return {"x": xs, "y": ys, "z": zs}
 
 
-def _inject_tour_3d(path: str, stops, pos) -> None:
+def _inject_tour_3d(path: str, stops, pos, sizes=None) -> None:
     """Give a 3D view the same tour and record panel as the 2D one.
 
     There is no physics here — Plotly draws a fixed scene — so there is nothing
@@ -378,7 +389,12 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
         cam = {n: [2 * (q[i] - bounds[i][0]) /
                    ((bounds[i][1] - bounds[i][0]) or 1.0) - 1 for i in range(3)]
                for n, q in raw.items()}
-    stops = [dict(st, xyz=raw.get(st["id"]), cam=cam.get(st["id"]))
+    # `px` is the node's own marker diameter, which is what the focus sphere is
+    # sized from. Without it the sphere would be a fixed ball that says nothing
+    # about the paper it stands for.
+    sizes = sizes or {}
+    stops = [dict(st, xyz=raw.get(st["id"]), cam=cam.get(st["id"]),
+                  px=round(float(sizes.get(st["id"], 12.0)), 2))
              for st in stops if raw.get(st["id"]) and cam.get(st["id"])]
     if not stops:
         return
@@ -428,8 +444,8 @@ __CARD_JS__
 (function () {
   var STOPS = __STOPS__, FLIGHT = __FLIGHT__, DWELL = __DWELL__;
   var ZOOM = __ZOOM3D__, MAG = __MAGNIFY__, EDGE_W = __EDGE_W__;
-  var SPH = __SPHERE__, SPAN = __SPAN__, SR = __SPHERE_R__;
-  var ORBIT = __ORBIT__ * Math.PI / 180;
+  var SPH = __SPHERE__, SPAN = __SPAN__;
+  var ORBIT = __ORBIT__ * Math.PI / 180, ACROSS = __ACROSS__;
   var BASE = null, shown = 1;
   var atK = 1, atC = {x: 0, y: 0, z: 0};
   var HOME = {eye: {x: 1.25, y: 1.25, z: 1.25}, center: {x: 0, y: 0, z: 0}};
@@ -524,7 +540,21 @@ __CARD_JS__
     card.classList.remove("on");
     card.style.display = "none";
   }
-  function light(p) {
+  function sphereRadius(px) {
+    // Sized so that at the end of the flight the sphere is exactly as wide as
+    // this node's own marker would be, magnified like all the others. It then
+    // reads as the node rather than as a ball parked on top of one.
+    //
+    // One normalised cube unit is plotMin / ACROSS pixels, and the aspect
+    // ratio multiplies that by the zoom. Solving
+    //     2 * n * ZOOM * (plotMin / ACROSS) = px * MAG
+    // for the normalised radius n gives the line below.
+    var el = gd();
+    var plotMin = Math.min(el.clientWidth || 900, el.clientHeight || 600);
+    if (!(ZOOM > 0) || !(plotMin > 0)) { return px / 900; }
+    return px * MAG * ACROSS / (2 * ZOOM * plotMin);
+  }
+  function light(p, px) {
     // A real sphere, in the data. It grows because the camera comes closer,
     // which is the whole point: a marker would stay the same size however far
     // in the flight went, and an overlay would be a sticker on the glass.
@@ -533,7 +563,8 @@ __CARD_JS__
     // ranges but are drawn into one cube -- equal radii in data units would
     // render as an ellipsoid.
     var el = gd();
-    var rx = SPAN[0] * SR, ry = SPAN[1] * SR, rz = SPAN[2] * SR;
+    var rn = sphereRadius(px);
+    var rx = SPAN[0] / 2 * rn, ry = SPAN[1] / 2 * rn, rz = SPAN[2] / 2 * rn;
     var X = [], Y = [], Z = [];
     for (var a = 0; a < SPH.x.length; a++) {
       var ax = [], ay = [], az = [];
@@ -561,7 +592,7 @@ __CARD_JS__
   }
   function show(k) {
     var s = STOPS[k]; if (!s) { return; }
-    light(s.xyz);
+    light(s.xyz, s.px);
     // The ring is a brand-new trace, drawn at its unzoomed size. If the view
     // is already magnified from the previous stop it has to be brought up to
     // match, or the marker it is meant to circle sits outside it.
@@ -620,8 +651,8 @@ __CARD_JS__
                   .replace("__MAGNIFY__", str(TOUR_MAGNIFY))
                   .replace("__EDGE_W__", str(TOUR_EDGE_WIDTH))
                   .replace("__SPHERE__", _json.dumps(_sphere_payload()))
-                  .replace("__SPHERE_R__", str(TOUR_SPHERE_FRACTION))
                   .replace("__ORBIT__", str(TOUR_ORBIT_DEG))
+                  .replace("__ACROSS__", str(TOUR_SCENE_UNITS_ACROSS))
                   .replace("__SPAN__", _json.dumps(
                       [b[1] - b[0] for b in bounds]))
                   .replace("__FLIGHT__", str(TOUR_FLIGHT_MS))

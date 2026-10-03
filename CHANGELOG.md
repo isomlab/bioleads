@@ -22,6 +22,30 @@ while the major version is 0, a minor bump may change defaults.
   viewing direction the reader has dragged the scene to. A tour that only dollies
   reads as a slideshow.
 
+### The header is one line, and the network has the window
+
+- **The big `<h1>` and the boxed legend are gone**, replaced by a single 12px
+  bar: title, the query terms, three swatches reading *every / some / none*, and
+  an ⓘ. The caveats that used to take three lines on every page, about literal
+  matching and about expansion papers never going through the query, are in that
+  tooltip. They are read once, not on every glance.
+- **The canvas fills what is left** rather than a fixed 800px, with the card
+  padding and borders removed. The graph is the page now.
+
+### The 3D focus node is the size of the node, not of the screen
+
+- **Its radius comes from that node's own marker**, so the only reason it gets
+  bigger is that the camera came closer. A fixed fraction of the graph's span
+  made every focus node the same enormous ball whatever it stood for, which hid
+  the one thing a node's size means here: how often the paper was cited.
+- Sized to end exactly as wide as the node's magnified marker, so it sits among
+  its neighbours instead of swallowing them.
+- **The cube does not fill the viewport.** The obvious constant for converting a
+  scene unit to pixels is 2, the width of the cube, and it is wrong by about
+  2.5x because Plotly's default eye sits well back. Measured instead, as
+  `TOUR_SCENE_UNITS_ACROSS`; the first attempt made the sphere smaller than the
+  marker it was covering.
+
 ### Fixed: three ways of zooming a Plotly 3D scene that do not work
 
 Worth recording, because each one looks right in the code and silently is not.

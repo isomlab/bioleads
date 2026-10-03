@@ -2349,3 +2349,59 @@ def test_min_author_papers_spares_seed_authors(monkeypatch):
         pytest.skip("no author graph in this environment")
     # Every author here is a seed author, so the filter must keep them all.
     assert all(d.get("seed") for _, d in g.nodes(data=True))
+
+
+# ── the pyvis fallback has to actually fall back ───────────────────────────────
+# On a core-only install — the one the conda recipe builds — pyvis is absent and
+# the writers drop to GraphML. That path used to raise twice: nx.write_graphml is
+# bound to the lxml implementation and imports lxml when called, and the node
+# attributes carry None for an unknown citation count.
+
+def _graph_with_nulls():
+    import networkx as nx
+    g = nx.DiGraph()
+    g.add_node("PMID:1", pmid="1", in_corpus_citations=1,
+               global_citations=None, title="A", seed=True)
+    g.add_node("PMID:2", pmid="2", in_corpus_citations=0,
+               global_citations=7, title="B", seed=False)
+    g.add_edge("PMID:1", "PMID:2")
+    g.graph["paper_senior"] = {"1": "Ann A"}      # a dict GraphML cannot store
+    return g
+
+
+def test_graphml_write_needs_no_lxml(tmp_path, monkeypatch):
+    import networkx as nx
+    from bioleads.citations import write_graphml
+    # Make the lxml-backed writer unusable, the way a core-only install does.
+    monkeypatch.setattr(nx, "write_graphml",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            ModuleNotFoundError("No module named 'lxml'")))
+    out = write_graphml(_graph_with_nulls(), str(tmp_path / "g.graphml"))
+    assert os.path.exists(out)
+    assert "graphml" in open(out, encoding="utf-8").read()
+
+
+def test_graphml_drops_none_attributes_rather_than_zeroing_them():
+    """An absent attribute means "not known"; 0 would assert a measurement."""
+    from bioleads.citations import _graphml_safe
+    h = _graphml_safe(_graph_with_nulls())
+    assert "global_citations" not in h.nodes["PMID:1"]
+    assert h.nodes["PMID:2"]["global_citations"] == 7
+    assert h.graph == {}
+
+
+def test_the_citation_writer_degrades_to_graphml_without_pyvis(tmp_path, monkeypatch):
+    """The whole point of the fallback: no pyvis must not mean no output."""
+    import builtins
+    from bioleads.citations import write_citation_html
+    real_import = builtins.__import__
+
+    def no_pyvis(name, *a, **k):
+        if name.startswith("pyvis"):
+            raise ImportError("No module named 'pyvis'")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_pyvis)
+    out = write_citation_html(_graph_with_nulls(), str(tmp_path / "net.html"))
+    assert out.endswith(".graphml")
+    assert os.path.exists(out)

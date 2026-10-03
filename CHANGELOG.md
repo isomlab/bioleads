@@ -5,6 +5,26 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Fixed: `--citations` crashed on a core-only install
+
+- **The pyvis fallback did not fall back.** Without pyvis the writers drop to
+  GraphML, and that path raised twice over: `nx.write_graphml` is bound to the
+  lxml implementation and **imports lxml when called**, not when networkx is
+  imported, and the node attributes carry `None` for an unknown citation count,
+  which GraphML refuses.
+- **That is the install the conda recipe builds**, so asking for `--citations`
+  after `conda install bioleads` crashed instead of degrading — inside the very
+  fallback that exists to prevent it.
+- Now uses networkx's **pure-stdlib** GraphML writer. These graphs are capped at
+  `max_graph_nodes`, so lxml's speed buys nothing and its absence cost
+  everything. **No new dependency was added.**
+- `None`-valued attributes are **dropped rather than zeroed**: an absent
+  attribute means "not known", while 0 would assert a count nobody measured.
+- Three tests pin it, including one that makes the lxml writer unusable and one
+  that removes pyvis from the import system, so the fallback is exercised rather
+  than assumed. **The suite now passes on a core-only install** as well as a full
+  one.
+
 ### Fixed: a paper supplied twice counted twice
 
 - **Documents are de-duplicated by `doc_id` across sources at load time**, first

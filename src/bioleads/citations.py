@@ -708,8 +708,7 @@ def write_citation_html(
     try:
         from pyvis.network import Network
     except ImportError:
-        alt = path.rsplit(".", 1)[0] + ".graphml"
-        nx.write_graphml(_graphml_safe(g), alt)
+        alt = write_graphml(g, path.rsplit(".", 1)[0] + ".graphml")
         print(f'[bioleads] pyvis not installed; wrote {alt}. '
               f'Install with: pip install "bioleads[viz]"')
         return alt
@@ -790,17 +789,46 @@ def write_citation_html_3d(
     )
 
 
-def _graphml_safe(g):
-    """A copy with graph-level attributes dropped, for GraphML.
+def write_graphml(g, path: str) -> str:
+    """Write GraphML without needing lxml.
 
-    GraphML stores only scalars, and the author graph carries
-    ``graph["paper_senior"]`` (a ``{pmid: author}`` dict) so the query-match
-    annotation can reach back to the papers behind each author. Writing that
-    graph directly raises. Graph-level attributes are not used by anything that
-    reads these files, so dropping them loses nothing.
+    ``nx.write_graphml`` is bound to the lxml implementation, which imports lxml
+    **when called**, not when networkx is imported. So on an install without it
+    the failure arrives at the moment of writing, inside the very fallback that
+    exists because pyvis is missing — asking for ``--citations`` on a core-only
+    install crashed instead of degrading, which is exactly what the fallback was
+    there to prevent. That is the install the conda recipe builds.
+
+    networkx ships a pure-stdlib writer too. These graphs are capped at
+    ``max_graph_nodes``, so lxml's speed buys nothing here and its absence costs
+    everything.
+    """
+    nx.write_graphml_xml(_graphml_safe(g), path)
+    return path
+
+
+def _graphml_safe(g):
+    """A copy GraphML can actually store.
+
+    GraphML takes scalars only, and these graphs carry two things it refuses:
+
+    - **``graph["paper_senior"]``**, a ``{pmid: author}`` dict the author graph
+      keeps so the query-match annotation can reach back to the papers behind
+      each author. Graph-level attributes are not read by anything consuming
+      these files, so the whole dict is dropped.
+    - **``None`` values**, chiefly ``global_citations`` when iCite reports no
+      count for a paper. An absent attribute carries the same meaning as a null
+      one — not known — so those keys are removed rather than coerced to 0,
+      which would assert a count of zero that nobody measured.
     """
     h = g.copy()
     h.graph.clear()
+    for _, data in h.nodes(data=True):
+        for k in [k for k, v in data.items() if v is None]:
+            del data[k]
+    for _, _, data in h.edges(data=True):
+        for k in [k for k, v in data.items() if v is None]:
+            del data[k]
     return h
 
 
@@ -858,8 +886,7 @@ def write_author_html(
     try:
         from pyvis.network import Network
     except ImportError:
-        alt = path.rsplit(".", 1)[0] + ".graphml"
-        nx.write_graphml(_graphml_safe(g), alt)
+        alt = write_graphml(g, path.rsplit(".", 1)[0] + ".graphml")
         print(f'[bioleads] pyvis not installed; wrote {alt}. '
               f'Install with: pip install "bioleads[viz]"')
         return alt

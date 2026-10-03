@@ -724,3 +724,42 @@ def test_document_frequency_still_outranks_raw_frequency():
             _pubmed_doc("2", "b", "lysosome elsewhere"),
             _pubmed_doc("3", "c", "lysosome again")]
     assert seed_profile(docs, n_terms=1) == ["lysosome"]
+
+
+def test_the_same_paper_from_two_sources_is_loaded_once():
+    """A PMID named in --pmids that the query already returned used to arrive
+    twice, double-weighting its vocabulary in the seed profile and occupying
+    two of the expand_seed_profile_n slots."""
+    from bioleads.sources import dedupe_documents
+    a = _pubmed_doc("1", "TM184C paper", "autophagy")
+    b = _pubmed_doc("1", "TM184C paper", "autophagy")
+    c = _pubmed_doc("2", "Another", "lysosome")
+    out = dedupe_documents([a, b, c])
+    assert [d.meta["pmid"] for d in out] == ["1", "2"]
+    assert out[0] is a                      # first seen wins
+
+
+def test_dedupe_keeps_documents_without_a_doc_id():
+    from bioleads.sources import dedupe_documents
+    from bioleads.sources import Document
+    docs = [Document(doc_id="", text="one"), Document(doc_id="", text="two")]
+    assert len(dedupe_documents(docs)) == 2
+
+
+def test_dedupe_reports_what_it_dropped():
+    from bioleads.sources import dedupe_documents
+    lines = []
+    dedupe_documents([_pubmed_doc("1", "a", "b"), _pubmed_doc("1", "a", "b")],
+                     lines.append)
+    assert any("duplicate document" in l for l in lines)
+
+
+def test_a_duplicated_seed_no_longer_double_weights_the_profile():
+    from bioleads.sources import dedupe_documents, seed_profile
+    dup = [_pubmed_doc("1", "lysosome study", "lysosome"),
+           _pubmed_doc("1", "lysosome study", "lysosome"),
+           _pubmed_doc("2", "autophagy study", "autophagy")]
+    # Before dedupe "lysosome" is in 2 of 3 documents and leads on document
+    # frequency; after, the two terms tie and sort alphabetically.
+    assert seed_profile(dup, n_terms=1) == ["lysosome"]
+    assert seed_profile(dedupe_documents(dup), n_terms=1) == ["autophagy"]

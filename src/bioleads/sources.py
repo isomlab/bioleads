@@ -756,6 +756,40 @@ def rank_seeds(seed_docs, query: str | None):
     return out
 
 
+def dedupe_documents(docs, say=None):
+    """One document per `doc_id`, first occurrence wins.
+
+    Sources are de-duplicated internally but were not against each other, so a
+    paper supplied in `--pmids` that the query had already returned arrived
+    twice. Both copies counted as seeds, and because the seed profile ranks a
+    term by **how many seeds mention it**, a duplicated paper double-weighted
+    its own vocabulary and could occupy two of the `expand_seed_profile_n`
+    slots.
+
+    First-seen wins, so the order of sources decides which copy survives:
+    query, then `--pmids`, then `--refs`, then `--texts`. They are the same
+    record either way, but the earlier one keeps its place in the corpus.
+
+    Documents with no `doc_id` are passed through untouched rather than
+    collapsed into one.
+    """
+    out, seen, dropped = [], set(), 0
+    for d in docs:
+        key = getattr(d, "doc_id", None)
+        if not key:
+            out.append(d)
+            continue
+        if key in seen:
+            dropped += 1
+            continue
+        seen.add(key)
+        out.append(d)
+    if dropped and say:
+        say(f"  {dropped} duplicate document(s) removed: the same record "
+            f"arrived from more than one source.")
+    return out
+
+
 def _keep_if_like_seeds(docs, seed_docs, *, top_n, n_terms, min_share, say):
     """Keep discovered papers whose text looks like the seed papers.
 
@@ -881,6 +915,11 @@ def load_documents(
         docs += loaded
     if texts:
         docs += documents_from_texts(texts)
+
+    # Across sources, not just within them. A paper named in --pmids that the
+    # query already returned used to arrive twice and be weighted twice in the
+    # seed profile.
+    docs = dedupe_documents(docs, say)
 
     if expand_rounds and expand_rounds > 0:
         _check_cancel(cancel)

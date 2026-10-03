@@ -5,6 +5,25 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Fixed: a paper supplied twice counted twice
+
+- **Documents are de-duplicated by `doc_id` across sources at load time**, first
+  occurrence wins. Sources were de-duplicated only within themselves, so a PMID
+  named in `--pmids` that the query had already returned arrived twice.
+- It mattered because **the seed profile ranks a term by how many seeds mention
+  it**: a duplicated paper double-weighted its own vocabulary, and could take
+  two of the `expand_seed_profile_n` slots with one paper.
+- This bites exactly where sources are combined, which is when someone
+  re-supplies a paper the query already found.
+- The log says how many duplicates were removed.
+
+### Better help for the two expansion controls
+
+- "Keep a found paper if" and "Seeds for relevance" now say what to set and
+  when, with the measured numbers, rather than describing the mechanism: which
+  gate needs a query, what happens on a rare symbol, and what the control means
+  with PubMed IDs and no query at all.
+
 ### Fixed: a single-seed profile was alphabetical
 
 - **`expand_seed_profile_n = 1` built its profile from the first sixty content

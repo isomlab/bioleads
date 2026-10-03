@@ -29,7 +29,23 @@ not just their order.
 profiled, or coloured, so it never becomes a document at all. If a PubMed hit count exceeds
 the corpus size and nothing else explains the gap, this is usually why.
 
-### 3. What counts as a seed
+### 3. Sources combine, and duplicates are removed
+
+All of `--pubmed`, `--pmids`, `--refs` and `--texts` can be used together, and **the seed
+profile is built from all of them at once**. Documents are appended in that order.
+
+**One record per `doc_id`, first occurrence wins.** Sources used to be de-duplicated only
+within themselves, so a PMID named in `--pmids` that the query had already returned arrived
+twice, counted as two seeds, and double-weighted its own vocabulary in the profile — which
+ranks a term by how many seeds mention it. It could also occupy two of the
+`expand_seed_profile_n` slots. The log says how many duplicates were removed.
+
+A reference-manager entry is a full seed, but **only as good as the export**: a file with no
+abstracts gives title-only documents that contribute almost nothing to a profile. A
+reference or text with **no PMID** still shapes the profile but cannot seed the citation
+walk, which needs PMIDs.
+
+### 4. What counts as a seed
 
 | Source | Seed? |
 |---|---|
@@ -64,7 +80,7 @@ obvious.
 - The same abstract rule applies: `fetch_pubmed_by_ids` reports **"retrieved N document(s)
   with usable text"**, and N can be smaller than the number of IDs pasted.
 
-### 4. Seed ranking
+### 5. Seed ranking
 
 Seeds are ranked by `sources.seed_rank_key`, used to choose which build the relevance
 profile. Three signals, in order:

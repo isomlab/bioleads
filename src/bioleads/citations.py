@@ -595,6 +595,29 @@ TOUR_FLIGHT_MS = 2600      # camera travel
 TOUR_DWELL_MS = 11000      # time on a node before moving on
 TOUR_ZOOM = 1.6            # gentler than the 1.9 it started at
 
+
+def _tour_runtime_seconds(stops: int = TOUR_STOPS) -> int:
+    """Roughly how long a full tour takes, for telling someone what to record."""
+    return int(round(stops * TOUR_DWELL_MS / 1000))
+
+
+# Shown on the little information mark beside the tour buttons, as a plain
+# `title` tooltip — no library, no click, and it is there at the moment someone
+# wants it rather than in a document they would have to go and find.
+RECORD_HELP = (
+    "To make a movie of the tour, screen-record it.\n\n"
+    "macOS: Shift-Command-5, choose Record Selected Portion, then Record. "
+    "The file lands on the Desktop.\n"
+    "Windows 11: Windows-Alt-R for Game Bar, or the Snipping Tool's record "
+    "button.\n"
+    "Linux, GNOME: Ctrl-Alt-Shift-R. KDE: Spectacle. Otherwise OBS Studio, "
+    "which works on all three.\n\n"
+    "Start recording first, then press Play tour. A full tour of "
+    f"{TOUR_STOPS} nodes runs about {_tour_runtime_seconds() // 60} min "
+    f"{_tour_runtime_seconds() % 60} s.\n\n"
+    "Pause layout first if the graph is still drifting."
+)
+
 # The node record, in the order it reads best. A label of None means the raw
 # attribute name is unsuitable for display and the entry is skipped.
 _RECORD_FIELDS = [
@@ -710,6 +733,8 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     padding:3px 9px}
   #bl-physics span {color:#5b6b7c; margin-left:7px}
   #bl-tour-controls button {margin-left:5px}
+  #bl-tour-help {cursor:help; margin-left:6px; color:#5b6b7c;
+    font-size:13px; border-bottom:1px dotted #9aa8b6}
   #bl-tour-info {display:none; margin-top:7px; width:380px; max-height:62vh;
     overflow-y:auto; border-top:1px solid #d7dee6; padding-top:6px;
     color:#1f2a36}
@@ -726,6 +751,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     <button id="bl-tour-play">Play tour</button>
     <button id="bl-tour-next">Next</button>
     <button id="bl-tour-reset">Reset view</button>
+    <span id="bl-tour-help" title="__RECORD_HELP__">&#9432;</span>
   </span>
   <div id="bl-tour-info"></div>
 </div>
@@ -821,6 +847,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     snippet = snippet.replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
     snippet = snippet.replace("__DWELL__", str(TOUR_DWELL_MS))
     snippet = snippet.replace("__ZOOM__", str(TOUR_ZOOM))
+    snippet = snippet.replace("__RECORD_HELP__", RECORD_HELP)
     if "bl-physics" in html:          # already injected
         return
     if "</body>" in html:

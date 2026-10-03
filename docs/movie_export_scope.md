@@ -11,6 +11,29 @@ node, zooms, shows its details, and steps on every four seconds. **Screen-record
 produces the movie now, with no dependencies at all.** Everything below is about removing the
 screen-recording step.
 
+## Recording the tour, which is what to do today
+
+The same text is on the **ⓘ** beside the tour buttons in every network page, so it is there
+at the moment you want it rather than in a document you have to go and find.
+
+| System | How |
+|---|---|
+| **macOS** | **Shift-Command-5**, choose *Record Selected Portion*, then *Record*. The file lands on the Desktop. QuickTime's *File → New Screen Recording* does the same thing |
+| **Windows 11** | **Windows-Alt-R** opens Game Bar's recorder, or use the **Snipping Tool**'s record button |
+| **Linux, GNOME** | **Ctrl-Alt-Shift-R**, built in. KDE has **Spectacle** |
+| **Any of them** | **OBS Studio**, if you want a region, a cursor highlight, or a webcam inset |
+
+**Three things that make the recording better:**
+
+1. **Press *Pause layout* first** if the graph is still drifting, or the movie opens on a
+   settling graph rather than on the network.
+2. **Start recording before pressing *Play tour***, so the first flight is in the file.
+3. **A full tour of 10 nodes takes about 1 minute 50 seconds** at the current pacing — 11
+   seconds on each node, which is set by `citations.TOUR_DWELL_MS`. *Next* and *Reset view*
+   let you drive it by hand instead if you would rather narrate.
+
+Trimming afterwards needs no editor: `ffmpeg -i in.mov -ss 3 -t 95 -c copy out.mov`.
+
 ## What a recorder actually has to do
 
 1. Open the generated HTML in a real browser — the layout is computed by vis.js and there is

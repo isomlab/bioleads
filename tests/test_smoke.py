@@ -2587,3 +2587,21 @@ def test_the_tour_is_paced_to_be_read(tmp_path):
     assert f"duration: {TOUR_FLIGHT_MS}" in html
     assert f"setTimeout(step, {TOUR_DWELL_MS})" in html
     assert not any(x in html for x in ("__FLIGHT__", "__DWELL__", "__ZOOM__"))
+
+
+def test_the_page_says_how_to_record_it(tmp_path):
+    """The help belongs where someone is when they want it, not in a document
+    they would have to go and find."""
+    html = _written_network(tmp_path)
+    assert 'id="bl-tour-help"' in html
+    assert "__RECORD_HELP__" not in html
+    for system in ("Shift-Command-5", "Windows-Alt-R", "Ctrl-Alt-Shift-R", "OBS"):
+        assert system in html
+
+
+def test_the_quoted_tour_runtime_follows_the_pacing():
+    """A number in help text that does not track the constant is a lie waiting
+    to happen."""
+    from bioleads.citations import RECORD_HELP, TOUR_DWELL_MS, TOUR_STOPS
+    total = TOUR_STOPS * TOUR_DWELL_MS // 1000
+    assert f"{total // 60} min {total % 60} s" in RECORD_HELP

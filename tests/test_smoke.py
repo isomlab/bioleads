@@ -2011,10 +2011,10 @@ def test_a_real_directory_named_latest_is_left_alone(tmp_path):
     assert (tmp_path / "latest" / "keep.txt").read_text() == "mine"
 
 
-# ── query-term colouring ────────────────────────────────────────────────────────
+# ── query-term coloring ────────────────────────────────────────────────────────
 # A PubMed hit need not contain the query's words: it can match on a MeSH term or
 # on full text never fetched. And --expand adds papers that never went through
-# the query at all. Colouring the papers that literally contain the terms cuts
+# the query at all. Coloring the papers that literally contain the terms cuts
 # across both, which is the point.
 
 @pytest.mark.parametrize("query, expected", [
@@ -2150,7 +2150,7 @@ def test_a_non_text_run_writes_no_matching_subnetwork(tmp_path):
     assert "citation_network_matches" not in res.outputs
 
 
-def test_a_non_text_run_leaves_the_graph_uncoloured(tmp_path):
+def test_a_non_text_run_leaves_the_graph_uncolored(tmp_path):
     """--pmids has no query, so nothing should be marked `none` as if it failed."""
     res = run_pipeline(documents=_citation_docs(), cfg=_cfg(), out_dir=str(tmp_path))
     if res.citation_graph is None or not res.citation_graph.number_of_nodes():
@@ -2734,8 +2734,8 @@ def test_the_visited_node_is_marked_in_3d(tmp_path):
     assert "__HILITE__" not in html
 
 
-def test_the_match_colours_are_not_red_green():
-    """Green against amber is the one pair a red-green colour blind reader
+def test_the_match_colors_are_not_red_green():
+    """Green against amber is the one pair a red-green color blind reader
     cannot separate, and roughly one man in twelve is."""
     from bioleads.querymatch import MATCH_COLORS
     from bioleads.citations import TOUR_HIGHLIGHT

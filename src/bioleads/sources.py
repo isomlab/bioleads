@@ -836,7 +836,7 @@ def _keep_if_query_terms(docs: list[Document], query: str, say,
     """Drop expansion-discovered papers whose text contains no query term.
 
     Literal, case-insensitive, on title plus abstract — the same test that
-    colours the citation network, so the two always agree.
+    colors the citation network, so the two always agree.
 
     **With no parsable terms nothing is dropped.** A query that is entirely
     author or journal tags yields no searchable term, and silently discarding a

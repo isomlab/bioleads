@@ -626,11 +626,11 @@ TOUR_DWELL_MS = TOUR_FLIGHT_MS + TOUR_HOLD_MS
 SETTLE_LIMIT_MS = 12000
 
 # The node the tour is looking at. Selection alone is too quiet to find on a
-# crowded graph, so the current node is recoloured and enlarged and put back
+# crowded graph, so the current node is recolored and enlarged and put back
 # when the tour moves on.
 #
-# Okabe-Ito reddish purple, chosen to sit apart from both match colours under
-# red-green colour blindness. **The size and border changes carry the signal on
+# Okabe-Ito reddish purple, chosen to sit apart from both match colors under
+# red-green color blindness. **The size and border changes carry the signal on
 # their own**, which is the part that works whatever a reader can see.
 TOUR_HIGHLIGHT = "#CC79A7"
 
@@ -918,14 +918,14 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
 
 def _inject_match_legend(path: str, title: str, terms: list[str],
                          unit: str = "paper") -> None:
-    """Explain the node colours, under the heading.
+    """Explain the node colors, under the heading.
 
-    A coloured graph with no key is a worse graph than an uncoloured one, and
+    A colored graph with no key is a worse graph than an uncolored one, and
     the "none" case needs the caveat spelled out: PubMed can match a paper on a
     MeSH term or on full text we never fetched, so grey does not mean the hit
     was wrong.
 
-    ``unit`` is "paper" or "author". An author node is coloured by their single
+    ``unit`` is "paper" or "author". An author node is colored by their single
     best-matching paper, which is a different claim from a paper node and has
     to be said in the key rather than left to be assumed.
     """
@@ -951,7 +951,7 @@ def _inject_match_legend(path: str, title: str, terms: list[str],
         f'{swatch % MATCH_COLORS["all"]}contains every term &nbsp; '
         f'{swatch % MATCH_COLORS["partial"]}contains some &nbsp; '
         f'{swatch % MATCH_COLORS["none"]}contains none'
-        + (('<br><span style="color:#5b6b7c"><b>An author is coloured by their '
+        + (('<br><span style="color:#5b6b7c"><b>An author is colored by their '
             'single best-matching paper</b>, not by pooling terms across their '
             'papers. Green means one paper of theirs names every term. The '
             'hover gives how many of their papers name any.</span>')
@@ -1005,7 +1005,7 @@ def write_citation_html(
     pyvis isn't installed.
 
     When the graph carries ``query_match`` attributes (see
-    :func:`bioleads.querymatch.annotate_citation_graph`), nodes are coloured by
+    :func:`bioleads.querymatch.annotate_citation_graph`), nodes are colored by
     whether the paper's title and abstract contain the PubMed query's terms, and
     `query_terms` is used to caption the legend.
     """
@@ -1019,9 +1019,9 @@ def write_citation_html(
 
     net = Network(height="800px", width="100%", notebook=False, directed=True,
                   heading=title, bgcolor="#ffffff")
-    # Colour by query-term containment only when the graph was annotated with a
-    # text query; otherwise leave pyvis's own colour alone, as before.
-    coloured = any("query_match" in d for _, d in g.nodes(data=True))
+    # Color by query-term containment only when the graph was annotated with a
+    # text query; otherwise leave pyvis's own color alone, as before.
+    colored = any("query_match" in d for _, d in g.nodes(data=True))
     if g.number_of_nodes():
         max_cit = max((d["in_corpus_citations"] for _, d in g.nodes(data=True)),
                       default=0)
@@ -1041,7 +1041,7 @@ def write_citation_html(
             if d.get("global_citations") is not None:
                 tip_lines.append(f"global citations: {d['global_citations']}")
             kw = {}
-            if coloured:
+            if colored:
                 state = d.get("query_match", "unknown")
                 kw["color"] = MATCH_COLORS.get(state, MATCH_COLORS["unknown"])
                 hits = d.get("query_terms_matched") or ""
@@ -1057,7 +1057,7 @@ def write_citation_html(
     net.force_atlas_2based(spring_length=120)
     net.write_html(path, notebook=False, open_browser=False)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
-    if coloured:
+    if colored:
         _inject_match_legend(path, title, query_terms or [])
     _freeze_physics_after_stabilization(path, tour_stops(g))
     return path
@@ -1150,11 +1150,11 @@ def _graphml_safe(g):
 
 
 def _match_colors(g) -> dict | None:
-    """Per-node query-match colours, or None when the graph was never annotated.
+    """Per-node query-match colors, or None when the graph was never annotated.
 
     Returning None rather than a dict of greys matters: it lets the 3D writer
     keep its citation-count colorscale on a run with no text query, instead of
-    painting every node the "nothing matched" colour.
+    painting every node the "nothing matched" color.
     """
     if not any("query_match" in d for _, d in g.nodes(data=True)):
         return None
@@ -1210,14 +1210,14 @@ def write_author_html(
 
     net = Network(height="800px", width="100%", notebook=False, directed=True,
                   heading=title, bgcolor="#ffffff")
-    coloured = any("query_match" in d for _, d in g.nodes(data=True))
+    colored = any("query_match" in d for _, d in g.nodes(data=True))
     if g.number_of_nodes():
         top = max((d.get(size_attr) or 0 for _, d in g.nodes(data=True)), default=0)
         for n, d in g.nodes(data=True):
             v = d.get(size_attr) or 0
             size = 10 + 30 * (v / top if top else 0)
             kw = {}
-            if coloured:
+            if colored:
                 kw["color"] = MATCH_COLORS.get(d.get("query_match", "unknown"),
                                                MATCH_COLORS["unknown"])
             net.add_node(n, label=d.get("author") or n, value=v + 1, size=size,
@@ -1227,7 +1227,7 @@ def write_author_html(
     net.force_atlas_2based(spring_length=120)
     net.write_html(path, notebook=False, open_browser=False)
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
-    if coloured:
+    if colored:
         _inject_match_legend(path, title, query_terms or [], unit="author")
     _freeze_physics_after_stabilization(path, tour_stops(g))
     return path

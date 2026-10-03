@@ -308,7 +308,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     })(t0);
   }
   function light(p) {
-    // A ring drawn on top of the node. Recolouring the node itself would mean
+    // A ring drawn on top of the node. Recoloring the node itself would mean
     // rewriting the whole marker array on every stop.
     var el = gd();
     var trace = {x: [p[0]], y: [p[1]], z: [p[2]], mode: "markers",

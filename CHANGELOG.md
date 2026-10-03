@@ -5,9 +5,9 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
-### Colours that work for red-green colour blindness
+### Colors that work for red-green color blindness
 
-- **Green and amber are gone.** That is the one pair a red-green colour blind
+- **Green and amber are gone.** That is the one pair a red-green color blind
   reader cannot separate, and roughly **one man in twelve** is. Matches are now
   **Okabe-Ito blue `#0072B2`** and **orange `#E69F00`**, which stay apart under
   deuteranopia, protanopia and tritanopia.
@@ -45,10 +45,10 @@ while the major version is 0, a minor bump may change defaults.
 
 ### The node being visited is marked
 
-- **2D:** recoloured, enlarged 1.6x and given a heavier border, restored when the
+- **2D:** recolored, enlarged 1.6x and given a heavier border, restored when the
   tour moves on. Selection alone was too quiet to find on a crowded graph.
 - **3D:** a translucent ring drawn over the node, removed on the next stop.
-  Recolouring the node itself would mean rewriting the whole marker array each
+  Recoloring the node itself would mean rewriting the whole marker array each
   time.
 - **The 3D camera comes closer** — the offset was 0.55 with a 0.35 standoff,
   which framed the neighbourhood rather than the node; now 0.22 and 0.14.
@@ -99,7 +99,7 @@ while the major version is 0, a minor bump may change defaults.
 
 ### Matching uses PubMed's own expansion of the query
 
-- **Searching `cytoneme` now colours a paper that says `cytonemes`.** The terms
+- **Searching `cytoneme` now colors a paper that says `cytonemes`.** The terms
   come from `esearch`'s `QueryTranslation` — the search PubMed actually ran —
   rather than from the words typed into the box, so plurals and PubMed's synonym
   mapping arrive without anyone adding a `*`.
@@ -118,7 +118,7 @@ while the major version is 0, a minor bump may change defaults.
   expansions past six forms: PubMed turns `tunneling` into nine words including
   `tunnelization`, so the group collapses to `tunnel*`, which covers the same
   ground in one.
-- Feeds the colouring, the `terms` gate and the seed ranking alike, so **all
+- Feeds the coloring, the `terms` gate and the seed ranking alike, so **all
   three now agree with retrieval** instead of second-guessing it.
 - Falls back to reading the raw query whenever there is no translation: a
   `--pmids` run, or a search that failed before `esearch` answered.
@@ -334,8 +334,8 @@ while the major version is 0, a minor bump may change defaults.
   only if its own title or abstract contains at least one of the query's terms.
   **Seeds are never filtered**: PubMed may have matched them on a MeSH term or
   on full text not fetched here.
-- The test is the same literal one that colours the networks, so the gate and
-  the colours can never disagree.
+- The test is the same literal one that colors the networks, so the gate and
+  the colors can never disagree.
 - A query with no searchable term — all author or journal tags — filters
   nothing, rather than silently discarding the whole expansion.
 - **Know what this does to a gene-symbol query.** Measured on a real run:
@@ -384,14 +384,14 @@ while the major version is 0, a minor bump may change defaults.
   path that is not where it lives, and it goes stale silently.
 - `runs.update_latest` is replaced by `runs.prune_latest_link`.
 
-### Every network is coloured by query-term containment, not just the 2D one
+### Every network is colored by query-term containment, not just the 2D one
 
-- **All five network views now colour by the query when a `--pubmed` search was
+- **All five network views now color by the query when a `--pubmed` search was
   run**: the paper citation network in 2D and 3D, the matches-only subnetwork,
   and both senior-author networks in 2D and 3D. Previously only the 2D paper
-  network was coloured, so the same corpus told different stories depending on
+  network was colored, so the same corpus told different stories depending on
   which file was opened.
-- **An author is coloured by their single best-matching paper**, not by pooling
+- **An author is colored by their single best-matching paper**, not by pooling
   terms across their papers. An author with one paper naming every term is
   green; an author with two papers naming one term each is amber, because
   pooling would claim a paper that does not exist. The hover gives `k of n`
@@ -399,7 +399,7 @@ while the major version is 0, a minor bump may change defaults.
   assumed.
 - **A run with no text query is unchanged.** The 3D views keep their
   citation-count colorscale instead of being painted the "nothing matched"
-  colour, which is what returning no colours rather than a dict of greys buys.
+  color, which is what returning no colors rather than a dict of greys buys.
 - `querymatch.annotate_author_graph` is the API. It needs
   `graph["paper_senior"]`, which `build_author_citation_graph` now carries.
 - **Fixed in passing: GraphML writes of the author graph.** That `paper_senior`
@@ -407,7 +407,7 @@ while the major version is 0, a minor bump may change defaults.
   raised on a core-only install — the one the conda recipe builds. Both
   fallbacks now write a copy with graph-level attributes dropped.
 
-### Fixed: nothing was ever coloured on a real PubMed search
+### Fixed: nothing was ever colored on a real PubMed search
 
 - **Every node came out grey on a `--pubmed` run, whatever the query.** A paper
   with the search term in both its title and its abstract was classified as
@@ -461,25 +461,25 @@ while the major version is 0, a minor bump may change defaults.
   shipped bug fails six of them. A test that has never been seen to fail is not
   evidence.
 
-### Citation-network nodes are coloured by whether the paper contains the query
+### Citation-network nodes are colored by whether the paper contains the query
 
 - **After a `--pubmed` text search, each paper in `citation_network.html` is
-  coloured by how many of the query's terms its title and abstract actually
+  colored by how many of the query's terms its title and abstract actually
   contain**: green for all, amber for some, grey for none. The hover says which
   terms were found, and flags a paper added by citation expansion.
 - **This is not the same as "was it a hit".** PubMed can match on a MeSH term,
   on automatic term mapping, or on full text never fetched here, so a grey node
   can be a perfectly good hit. `--expand` also adds papers that never went
   through the query. The legend in the file says so rather than leaving the
-  colours to be misread, and that crossing is the interesting part: a grey seed
-  matched on something else, and a coloured expansion-added paper is one the
+  colors to be misread, and that crossing is the interesting part: a grey seed
+  matched on something else, and a colored expansion-added paper is one the
   search arguably should have returned.
 - Matching is **literal**, case-insensitive, on word boundaries, so `autophagy`
   does not match `autophagic`. PubMed's truncation operator works: `autophag*`
   matches both. Quoted phrases stay phrases.
 - Field-tagged terms that cannot appear in an abstract, such as `Isom DG[au]` or
   `"Nature"[ta]`, are dropped rather than searched for and reported as misses.
-- `--pmids` and `--refs` runs have no query, so their graphs stay uncoloured
+- `--pmids` and `--refs` runs have no query, so their graphs stay uncolored
   rather than showing every paper as "contains none".
 - Nodes carry `query_match`, `query_match_count` and `query_terms_matched`, all
   GraphML-safe, so the pyvis-less fallback keeps the information too.

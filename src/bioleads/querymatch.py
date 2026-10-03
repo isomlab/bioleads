@@ -122,7 +122,7 @@ MAX_FORMS_PER_TERM = 6
 # Field tags whose terms are concepts assigned by an indexer rather than words
 # the author wrote. A MeSH heading frequently appears nowhere in the abstract,
 # so matching on it literally would mark a paper for something its text does not
-# say — the exact confusion the colouring exists to expose.
+# say — the exact confusion the coloring exists to expose.
 _INDEXED_FIELDS = {"mesh terms", "mh", "majr", "mesh major topic",
                    "mesh subheading", "sh", "pharmacological action", "pa"}
 
@@ -136,7 +136,7 @@ def terms_from_translation(translation: str | None) -> list[list[str]]:
 
         cytoneme  ->  "cytoneme"[All Fields] OR "cytonemes"[All Fields]
 
-    **That is the search that ran**, so gating and colouring on it cannot
+    **That is the search that ran**, so gating and coloring on it cannot
     disagree with retrieval, and plurals and PubMed's synonym mapping come for
     free rather than needing a `*` typed by hand.
 
@@ -215,7 +215,7 @@ def classify(n_matched: int, n_terms: int) -> str:
 
 
 # Blue and orange, not green and amber. **Green against amber is the one pair a
-# red-green colour blind reader cannot separate**, and roughly one man in twelve
+# red-green color blind reader cannot separate**, and roughly one man in twelve
 # is. These are Okabe-Ito, which stays distinguishable under deuteranopia,
 # protanopia and tritanopia, and the two differ in lightness as well as hue so
 # they survive a greyscale print too.
@@ -287,7 +287,7 @@ def query_terms(query: str | None, translation: str | None = None):
     """The terms to match on: PubMed's expansion when there is one.
 
     **Prefer the translation.** It is what PubMed actually searched, so the
-    colouring and the gate agree with retrieval instead of second-guessing it,
+    coloring and the gate agree with retrieval instead of second-guessing it,
     and plurals come for free: `cytoneme` is expanded to
     ``{cytoneme, cytonemes}`` without anyone typing a `*`.
 

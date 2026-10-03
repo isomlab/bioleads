@@ -1048,7 +1048,7 @@ The senior-author graph is also written a second time as
 `author_paper_ranking.csv` + `author_paper_network.html` (and `_3d`), same
 authors and same citation edges but **sized by papers published into the
 corpus** rather than by citations received. It is built separately rather than
-recoloured, because the `max_graph_nodes` trim has to keep the most published
+recolored, because the `max_graph_nodes` trim has to keep the most published
 authors here: a lab publishing steadily that nothing in the corpus cites has
 citation degree 0, and that lab is exactly what this view exists to show.
 

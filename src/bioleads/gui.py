@@ -161,7 +161,7 @@ class BioleadsGUI:
         st = ttk.Style()
         try:
             st.theme_use("clam")          # the only stock theme that honours
-        except tk.TclError:               # background colour on every widget
+        except tk.TclError:               # background color on every widget
             pass
         st.configure("TFrame", background=BG)
         st.configure("Card.TFrame", background=CARD)

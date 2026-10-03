@@ -203,7 +203,7 @@ def run_pipeline(
                                              pubmed_report.get("translation"))
         # Mark which papers literally contain the query's terms. Only meaningful
         # for a text search, so a --pmids or --refs run leaves the graph
-        # uncoloured rather than colouring everything "none", which would read
+        # uncolored rather than coloring everything "none", which would read
         # as a finding instead of as "nothing was asked".
         if pubmed_query and citation_graph is not None:
             query_terms = querymatch.annotate_citation_graph(

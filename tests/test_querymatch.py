@@ -162,7 +162,7 @@ def test_classify(n_matched, n_terms, expected):
     assert classify(n_matched, n_terms) == expected
 
 
-def test_every_class_has_a_colour():
+def test_every_class_has_a_color():
     for name in ("all", "partial", "none", "unknown"):
         assert MATCH_COLORS[name].startswith("#")
 
@@ -519,13 +519,13 @@ def test_expansion_gate_is_a_no_op_when_the_query_has_no_searchable_term():
     assert _keep_if_query_terms(docs, 'Isom DG[au] AND "Nature"[ta]', lambda m: None) == docs
 
 
-def test_expansion_gate_matches_the_colouring():
-    """The gate and the node colours must use the same test, or a kept paper
+def test_expansion_gate_matches_the_coloring():
+    """The gate and the node colors must use the same test, or a kept paper
     could render grey and a dropped one would have been green."""
     from bioleads.sources import _keep_if_query_terms
     docs = [_pubmed_doc("1", "Tmem184c in endothelium", "we study it")]
     kept = _keep_if_query_terms(docs, "TMEM184C", lambda m: None)
-    assert len(kept) == 1                       # case-insensitive, as the colours are
+    assert len(kept) == 1                       # case-insensitive, as the colors are
     assert matched_terms(kept[0].content, parse_query_terms("TMEM184C"))
 
 
@@ -788,7 +788,7 @@ TNT_TR = ('("tunnel"[All Fields] OR "tunneled"[All Fields] OR '
 
 
 def test_a_plural_and_a_singular_become_one_concept():
-    """The question this exists for: searching cytoneme must colour a paper
+    """The question this exists for: searching cytoneme must color a paper
     that says cytonemes."""
     from bioleads.querymatch import terms_from_translation
     assert terms_from_translation(CYTONEME_TR) == [["cytoneme", "cytonemes"]]

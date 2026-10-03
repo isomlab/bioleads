@@ -26,7 +26,7 @@ not just their order.
 ### 2. The first exclusion, and it is silent
 
 **Records with no abstract are dropped on arrival.** A title-only record cannot be matched,
-profiled, or coloured, so it never becomes a document at all. If a PubMed hit count exceeds
+profiled, or colored, so it never becomes a document at all. If a PubMed hit count exceeds
 the corpus size and nothing else explains the gap, this is usually why.
 
 ### 3. Sources combine, and duplicates are removed
@@ -74,7 +74,7 @@ obvious.
 - **The `seeds` gate still works, and this is the point:** its terms are compiled from the
   seed papers' own text, not from a query, so it needs no query at all. The `terms` gate, by
   contrast, is guarded on there being a query and **silently filters nothing**.
-- **No colouring and no matches network**, since annotation is guarded on the query too. With
+- **No coloring and no matches network**, since annotation is guarded on the query too. With
   nothing asked, every node would be "unknown", which would read as a finding rather than as
   "nothing was asked".
 - The same abstract rule applies: `fetch_pubmed_by_ids` reports **"retrieved N document(s)

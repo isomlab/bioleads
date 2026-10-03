@@ -193,19 +193,19 @@ drawn in grey). The 2D layout uses UMAP when
 `umap-learn` is installed (it preserves cluster structure best); otherwise it
 falls back to t-SNE, then PCA for very small term sets. The scatter is the only
 view of the clusters: since the co-occurrence network is no longer written out,
-there is no graph left to colour by cluster.
+there is no graph left to color by cluster.
 
 ### Citation network
 
-After a `--pubmed` search, papers in `citation_network.html` are **coloured by
+After a `--pubmed` search, papers in `citation_network.html` are **colored by
 whether their title and abstract contain the query's terms**: green for all,
 amber for some, grey for none, with the matched terms on hover.
 
 **Grey does not mean a bad hit.** PubMed matches on MeSH terms and on full text
 that is never fetched here, so a genuine hit can contain none of the words you
 typed. `--expand` also adds papers that never went through the query. That
-crossing is what makes the colouring worth looking at: a grey seed was matched
-on something other than its text, and a coloured expansion-added paper is one
+crossing is what makes the coloring worth looking at: a grey seed was matched
+on something other than its text, and a colored expansion-added paper is one
 the search arguably should have returned. Matching is literal and does not stem,
 so use PubMed's truncation, `autophag*`, to catch a word family.
 

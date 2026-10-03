@@ -230,9 +230,19 @@ def write_graph_3d(
 
 SCENE_PAD = 0.06          # fraction of each axis span, so markers aren't clipped
 # How much of the graph a tour stop shows, as a fraction of the full span.
-# This is the zoom control. 0.30 keeps the focus node's neighbours in frame;
-# smaller crops to the node alone.
-TOUR_WINDOW = 0.30
+TOUR_WINDOW = 0.25
+# **Narrowing the window is only half of a zoom.** In 2D, vis.js scales the
+# whole canvas, so the nodes and edges grow as the view closes in, and that
+# growth is most of what reads as "zoomed in". Plotly's markers are sized in
+# SCREEN pixels, so a narrower range moves nodes apart without making any of
+# them bigger -- the view crops but never magnifies, which is why three rounds
+# of shrinking the window still did not look like the 2D tour.
+#
+# So the markers and edges are scaled by hand over the flight, to match.
+TOUR_MAGNIFY = 3.5        # node markers at the end of a flight
+TOUR_EDGE_WIDTH = 3.2     # edge width at the end of a flight
+TOUR_RING = 30            # the highlight ring, unzoomed
+TOUR_RING_ZOOMED = 110
 
 
 def scene_ranges(pos):
@@ -330,6 +340,9 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
 (function () {
   var STOPS = __STOPS__, FLIGHT = __FLIGHT__, DWELL = __DWELL__;
   var BOUNDS = __BOUNDS__, WINDOW = __WINDOW__, AX = ["x", "y", "z"];
+  var MAG = __MAGNIFY__, EDGE_W = __EDGE_W__;
+  var RING = __RING__, RING_Z = __RING_Z__;
+  var BASE = null, shown = 1;
   var HOME = {eye: {x: 1.25, y: 1.25, z: 1.25}, center: {x: 0, y: 0, z: 0}};
   var i = -1, playing = false, timer = null, anim = null;
   function gd() { return document.querySelector(".plotly-graph-div"); }
@@ -352,7 +365,34 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
       return [p[i] - h, p[i] + h];
     });
   }
-  function glide(to, done) {
+  function base() {
+    // The sizes the figure was drawn with, captured once. Reading them back
+    // from the traces after a magnification would compound it.
+    var el = gd();
+    if (!BASE) {
+      var m = el.data[1].marker, ln = el.data[0].line;
+      BASE = {size: [].concat(m.size), width: ln.width, color: ln.color};
+    }
+    return BASE;
+  }
+  function magnify(f) {
+    // Markers are screen-sized, so they have to be grown by hand to match the
+    // narrowing window. Applied in steps rather than every frame: on a large
+    // graph a per-frame restyle rewrites the whole size buffer and the flight
+    // stutters, and at this speed the steps are not visible.
+    var el = gd(), b = base();
+    if (Math.abs(f - shown) < 0.08 && f !== 1 && f !== MAG) { return; }
+    shown = f;
+    var t = MAG > 1 ? (f - 1) / (MAG - 1) : 0;
+    Plotly.restyle(el, {"marker.size": [b.size.map(function (v) {
+      return v * f; })]}, [1]);
+    Plotly.restyle(el, {"line.width": b.width + (EDGE_W - b.width) * t}, [0]);
+    if (el.data.length > 2) {
+      Plotly.restyle(el, {"marker.size": [[RING + (RING_Z - RING) * t]]},
+                     [el.data.length - 1]);
+    }
+  }
+  function glide(to, done, mag) {
     var el = gd(), from = ranges(), t0 = performance.now();
     cancelAnimationFrame(anim);
     (function frame(now) {
@@ -363,10 +403,11 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
           from[i][1] + (to[i][1] - from[i][1]) * e];
       }
       Plotly.relayout(el, u);
+      if (mag) { magnify(mag[0] + (mag[1] - mag[0]) * e); }
       if (t < 1) { anim = requestAnimationFrame(frame); } else if (done) { done(); }
     })(t0);
   }
-  function flyTo(p, done) { glide(windowAt(p), done); }
+  function flyTo(p, done) { glide(windowAt(p), done, [shown, MAG]); }
   function annotate(s) {
     // A scene annotation is anchored in the data, so it travels with the node
     // as the camera moves instead of sitting in a corner of the window.
@@ -390,7 +431,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     var el = gd();
     var trace = {x: [p[0]], y: [p[1]], z: [p[2]], mode: "markers",
                  type: "scatter3d", hoverinfo: "skip", showlegend: false,
-                 marker: {size: 30, color: "__HILITE__", opacity: 0.55,
+                 marker: {size: RING, color: "__HILITE__", opacity: 0.55,
                           line: {width: 2, color: "#7a0f37"}}};
     if (el.data.length > 2) { Plotly.deleteTraces(el, el.data.length - 1); }
     Plotly.addTraces(el, trace);
@@ -402,6 +443,10 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
   function show(k) {
     var s = STOPS[k]; if (!s) { return; }
     light(s.xyz);
+    // The ring is a brand-new trace, drawn at its unzoomed size. If the view
+    // is already magnified from the previous stop it has to be brought up to
+    // match, or the marker it is meant to circle sits outside it.
+    magnify(shown);
     unannotate();          // the old card must not ride along during the flight
     var rows = "";
     for (var r = 0; r < s.record.length; r++) {
@@ -441,7 +486,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     unlight();
     unannotate();
     document.getElementById("bl3-info").style.display = "none";
-    glide(BOUNDS);
+    glide(BOUNDS, null, [shown, 1]);
     Plotly.relayout(gd(), {"scene.camera": HOME});
   });
 })();
@@ -451,6 +496,10 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     block = (block.replace("__STOPS__", _json.dumps(stops))
                   .replace("__BOUNDS__", _json.dumps(bounds))
                   .replace("__WINDOW__", str(TOUR_WINDOW))
+                  .replace("__MAGNIFY__", str(TOUR_MAGNIFY))
+                  .replace("__EDGE_W__", str(TOUR_EDGE_WIDTH))
+                  .replace("__RING_Z__", str(TOUR_RING_ZOOMED))
+                  .replace("__RING__", str(TOUR_RING))
                   .replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
                   .replace("__DWELL__", str(TOUR_DWELL_MS))
                   .replace("__HELP__", RECORD_HELP.replace('"', "&quot;"))

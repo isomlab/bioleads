@@ -2809,6 +2809,17 @@ def test_3d_tour_zooms_by_window_not_by_camera():
     # Every stop sits inside the scene, and the window is a real crop of it.
     window = float(re.search(r"WINDOW = ([0-9.]+)", html).group(1))
     assert 0 < window < 1
+
+    # The window alone is not a zoom. Plotly markers are sized in screen
+    # pixels, so narrowing the range spreads the nodes out without making any
+    # of them bigger, and the view crops but never magnifies. The markers and
+    # edges have to be scaled over the flight for 3D to read like the 2D tour.
+    mag = float(re.search(r"MAG = ([0-9.]+)", html).group(1))
+    ring, ring_z = (float(re.search(r"var RING = ([0-9.]+)", html).group(1)),
+                    float(re.search(r"RING_Z = ([0-9.]+)", html).group(1)))
+    assert mag > 1, "the markers never grow, so nothing looks closer"
+    assert ring_z > ring, "the highlight ring would end up inside the node"
+    assert "function magnify(" in html and "marker.size" in html
     for s in stops:
         for i in range(3):
             lo, hi = bounds[i]

@@ -3099,3 +3099,70 @@ def test_2d_tour_restores_edges_to_an_explicit_resting_style():
     # the restore, so the two cannot drift apart.
     assert tour.count("var EDGE_BASE =") == 1
     assert tour.count("EDGE_BASE") >= 3
+
+
+def test_senior_authors_merge_by_family_name():
+    """One lab, one node, however the records spell it.
+
+    The same senior author is written "Kornberg TB" by one record and
+    "Kornberg T" by another. Left alone that splits a lab into two nodes, each
+    with half its papers and half its edges, which is a worse error than the
+    one merging risks.
+    """
+    from bioleads.citations import merge_by_surname, surname
+
+    assert surname("Kornberg TB") == "kornberg"          # PubMed order
+    assert surname("Kornberg, Thomas B") == "kornberg"   # iCite fullName
+    assert surname("Thomas B Kornberg") == "kornberg"    # written out
+    # Particles belong to the surname, both ways round.
+    assert surname("van der Berg AJ") == "van der berg"
+    assert surname("Anna van der Berg") == "van der berg"
+    # A short surname is not initials: all-caps is what distinguishes them.
+    assert surname("Ng W") == "ng"
+    assert surname("") == ""
+
+    senior = {"1": "Kornberg TB", "2": "Kornberg T", "3": "Thomas B Kornberg",
+              "4": "Wu M", "5": "Zurzolo C"}
+    remapped, merged = merge_by_surname(senior)
+
+    # All three spellings land on one node, under the fullest label.
+    assert len({remapped["1"], remapped["2"], remapped["3"]}) == 1
+    assert remapped["1"] == "Thomas B Kornberg"
+    # Untouched names are left exactly as they were.
+    assert remapped["4"] == "Wu M" and remapped["5"] == "Zurzolo C"
+    # Only surnames that actually had variants are reported.
+    assert set(merged) == {"Thomas B Kornberg"}
+    assert len(merged["Thomas B Kornberg"]) == 3
+
+
+def test_merging_flags_variants_whose_initials_disagree():
+    """Merging by family name alone puts two different Wangs on one node.
+
+    That is the cost of the thing being asked for, so the groups where it is
+    most likely to have happened are reported rather than merged silently.
+    """
+    from bioleads.citations import _initials_differ
+
+    assert not _initials_differ(["Kornberg T", "Kornberg TB"])  # one person
+    assert not _initials_differ(["Smith", "Smith JA"])          # no conflict
+    assert _initials_differ(["Wang Y", "Wang X"])               # two people
+    assert _initials_differ(["Lee H", "Lee HJ", "Lee K"])
+
+
+def test_initials_are_read_the_same_way_whatever_the_name_form():
+    """Reading initials off the tokens does not survive the three spellings.
+
+    "Kornberg TB" offers the token "TB" while "Thomas B Kornberg" offers only
+    "B", so comparing them straight made one person look like two and every
+    merged lab got flagged as suspicious. They are taken as "the name minus
+    the surname" instead.
+    """
+    from bioleads.citations import _given_initials
+
+    assert _given_initials("Kornberg TB") == "TB"
+    assert _given_initials("Kornberg, Thomas B") == "TB"
+    assert _given_initials("Thomas B Kornberg") == "TB"
+    assert _given_initials("Kornberg T") == "T"
+    assert _given_initials("Kornberg") == ""
+    assert _given_initials("van der Berg AJ") == "AJ"
+    assert _given_initials("Anna van der Berg") == "A"

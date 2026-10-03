@@ -102,6 +102,132 @@ def _parse_authors(val) -> list[str]:
     return out
 
 
+def surname(name: str) -> str:
+    """The family name in a byline, lowercased, or "" if there is none.
+
+    Three spellings reach here and they disagree about word order:
+
+    - ``"Kornberg TB"``, PubMed's own form. Surname first, then initials.
+    - ``"Kornberg, Thomas B"``, iCite's ``fullName``. Surname before the comma.
+    - ``"Thomas B Kornberg"``, written out. Surname last.
+
+    A comma settles it outright. Without one, the deciding question is whether
+    the LAST token looks like initials ("TB", "T.B."): if it does the name is
+    in PubMed's order and the surname is what comes first, and if it does not
+    the name is written out and the surname is the last token.
+
+    Particles are kept with the name, so "van der Berg" and "de Sousa" stay
+    whole rather than collapsing onto "berg" and "sousa".
+    """
+    name = " ".join(str(name or "").split())
+    if not name:
+        return ""
+    if "," in name:
+        return name.split(",", 1)[0].strip().lower()
+    parts = name.split()
+    if len(parts) == 1:
+        return parts[0].lower()
+    if _looks_like_initials(parts[-1]):
+        # PubMed order: surname first, initials last. Everything before the
+        # initials is the name, which keeps "van der Berg AJ" whole.
+        return " ".join(parts[:-1]).lower()
+    # Written out: the surname is the last token, with any particles that
+    # belong to it, so "Thomas B Kornberg" is Kornberg and "Ana de Sousa"
+    # is de Sousa rather than Sousa.
+    i = len(parts) - 1
+    while i > 0 and parts[i - 1].lower() in _PARTICLES:
+        i -= 1
+    return " ".join(parts[i:]).lower()
+
+
+# Name particles that belong to the surname rather than to the given names.
+_PARTICLES = {"van", "von", "der", "den", "de", "del", "della", "di", "da",
+              "dos", "das", "du", "la", "le", "ten", "ter", "bin", "ibn",
+              "al", "mac", "mc", "st"}
+
+
+def _initials_differ(names) -> bool:
+    """True when two spellings of a surname carry incompatible initials.
+
+    "Kornberg T" and "Kornberg TB" are compatible: one is a prefix of the
+    other, which is what a fuller spelling of the same person looks like.
+    "Wang Y" and "Wang X" are not, and are probably two people.
+    """
+    seen = [i for i in (_given_initials(n) for n in names) if i]
+    for i, a in enumerate(seen):
+        for b in seen[i + 1:]:
+            if not (a.startswith(b) or b.startswith(a)):
+                return True
+    return False
+
+
+def _given_initials(name: str) -> str:
+    """The given-name initials of a byline, in one form whatever it came in as.
+
+    Taken as "the name minus the surname", because reading them straight off
+    the tokens does not survive the three spellings: "Kornberg TB" offers the
+    token "TB" while "Thomas B Kornberg" offers only "B", and comparing those
+    two makes one person look like two.
+    """
+    name = " ".join(str(name or "").split())
+    if not name:
+        return ""
+    if "," in name:
+        given = name.split(",", 1)[1]
+    else:
+        parts = name.split()
+        if len(parts) < 2:
+            return ""
+        if _looks_like_initials(parts[-1]):
+            given = parts[-1]
+        else:
+            given = " ".join(parts[:len(parts) - len(surname(name).split())])
+    out = ""
+    for tok in given.replace(".", " ").split():
+        # A run of initials contributes every letter; a written-out given name
+        # contributes its first.
+        out += tok.upper() if _looks_like_initials(tok) else tok[0].upper()
+    return out
+
+
+def _looks_like_initials(tok: str) -> bool:
+    """"TB", "T.B.", "J" -- short, all capitals, no lower case."""
+    t = tok.replace(".", "")
+    return bool(t) and t.isupper() and len(t) <= 3
+
+
+def merge_by_surname(paper_senior: dict) -> tuple[dict, dict]:
+    """Collapse senior authors that share a family name onto one node.
+
+    Returns ``(remapped, merged)``: the paper→author map with every name
+    replaced by the chosen label for its surname, and ``{label: [variants]}``
+    for the surnames that actually had more than one spelling.
+
+    **The label kept is the longest variant**, so "Kornberg TB" wins over
+    "Kornberg T" and the node carries the most identifying form that was seen.
+
+    **This merges by family name alone, which is what it is asked to do and
+    which is wrong for common names.** Two different Wangs become one lab. The
+    caller is given `merged` so it can say which nodes were combined; a group
+    whose variants carry conflicting initials is the one to look at.
+    """
+    by_surname: dict[str, set] = {}
+    for name in set(paper_senior.values()):
+        key = surname(name)
+        if key:
+            by_surname.setdefault(key, set()).add(name)
+    label = {}
+    merged = {}
+    for key, names in by_surname.items():
+        best = sorted(names, key=lambda x: (-len(x), x))[0]
+        for n in names:
+            label[n] = best
+        if len(names) > 1:
+            merged[best] = sorted(names)
+    return ({pmid: label.get(a, a) for pmid, a in paper_senior.items()},
+            merged)
+
+
 def citation_cache(cfg: Config | None):
     """The on-disk cache `cfg` asks for, or None to always fetch.
 
@@ -445,8 +571,12 @@ def build_author_citation_graph(
     productivity one. It changes only *which* authors are displayed when the
     graph is too large to draw, never the graph that is built.
 
-    A record with no author list cannot be placed and is skipped. Matching is by
-    name string, so "Smith J" and "Smith JA" are two people.
+    A record with no author list cannot be placed and is skipped. **Authors are
+    matched by family name**, so "Smith J" and "Smith JA" are one node, labelled
+    with the fuller spelling. That is what keeps a lab from being split in two
+    by a difference in how two records happened to write it, and it is also why
+    two different Smiths become one node; variants whose initials disagree are
+    reported as they are merged.
 
     ``prefetched`` shares one iCite fetch with :func:`build_citation_graph`.
     """
@@ -471,6 +601,22 @@ def build_author_citation_graph(
             paper_senior[pmid] = authors[-1]
         cc = rec.get("citation_count")
         paper_global[pmid] = int(cc) if cc is not None else 0
+
+    # **One node per family name.** The same lab is written "Kornberg TB" by
+    # one record and "Kornberg T" by another, and left alone that splits a lab
+    # into two nodes, each with half its papers and half its edges. Merging is
+    # done here, before any node exists, so papers, citations and edges are all
+    # counted against the merged author rather than fixed up afterwards.
+    paper_senior, merged = merge_by_surname(paper_senior)
+    if merged:
+        say(f"  merged {len(merged)} senior author(s) by family name")
+        # Variants whose initials disagree are the ones that may be two people
+        # sharing a surname, so they are named rather than merged silently.
+        suspect = {k: v for k, v in merged.items() if _initials_differ(v)}
+        for lab, names in sorted(suspect.items())[:10]:
+            say(f"    ! {lab}: {', '.join(names)} — differing initials")
+        if len(suspect) > 10:
+            say(f"    ! and {len(suspect) - 10} more with differing initials")
 
     g = nx.DiGraph()
     for pmid, senior in paper_senior.items():

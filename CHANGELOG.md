@@ -99,6 +99,24 @@ while the major version is 0, a minor bump may change defaults.
 - The baseline sizes are also captured before the first flight rather than
   lazily inside `magnify`, where they were already a frame late.
 
+### Senior authors are one node per family name
+
+- **The same lab is spelled differently by different records.** "Kornberg TB",
+  "Kornberg T" and "Kornberg, Thomas B" were three nodes, each holding part of
+  one lab's papers, citations and edges. They are one node now, labelled with
+  the fullest spelling seen.
+- Merging happens **before any node exists**, so papers, citations and edges
+  are counted against the merged author rather than patched up afterwards.
+- The surname is read from any of the three byline forms PubMed and iCite
+  produce, and **particles stay with the name**, so "van der Berg" does not
+  collapse onto "Berg".
+- **This merges on family name alone, so two different Wangs become one lab.**
+  That is the cost of what it does. Groups whose given-name initials disagree
+  are named in the run log as they are merged, since those are the ones worth
+  looking at. The initials are taken as the name minus the surname, because
+  reading them off the tokens makes "Kornberg TB" and "Thomas B Kornberg" look
+  like different people and flags every merge.
+
 ### Fixed: the tours were ranked on a degree nobody can see
 
 - **`g.degree()` counts in plus out**, so on these directed graphs two authors

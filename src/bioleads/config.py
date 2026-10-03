@@ -134,9 +134,13 @@ class Config:
     # already contributed its links.
     expand_gate: str = "seeds"
 
-    # "seeds" mode: how many seeds the profile is built from, in corpus order,
-    # which for a PubMed query is PubMed's own relevance order. 0 means all of
-    # them. A cap matters because a broad query can return hundreds of seeds and
+    # "seeds" mode: how many seeds the profile is built from, taken from the
+    # ranking in `sources.rank_seeds` — most query terms contained first, ties
+    # broken by PubMed's Best Match order. 0 means all of them.
+    #
+    # The ranking is the point. Arrival order is not a ranking: E-utilities
+    # sorts by recency unless asked otherwise, so "the first n" was "the n most
+    # recently indexed" until 2026-10-03. A cap matters because a broad query can return hundreds of seeds and
     # a profile built from all of them describes the field rather than the
     # question.
     expand_seed_profile_n: int = 10

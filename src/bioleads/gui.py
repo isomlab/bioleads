@@ -478,8 +478,13 @@ class BioleadsGUI:
         self._seed_n_field = self._field(
                     card, 7, "Seeds for relevance",
                     self._spin(card, self.expand_seed_n_var, 0, 10000),
-                    "How many seeds the relevance profile is built from, in "
-                    "PubMed's own relevance order. 0 means all of them.\n\n"
+                    "How many seeds the relevance profile is built from, "
+                    "taken in ranked order: a query term in the title first, "
+                    "then how often the terms occur, then how many distinct "
+                    "terms appear. 0 means all of them.\n\n"
+                    "The ranking is not PubMed's. PubMed sorts by Best Match, "
+                    "which on TMEM184C OR TM184C puts a goat copy-number paper "
+                    "above the paper the gene is named for.\n\n"
                     "This matters more than it sounds. A query returning three "
                     "seeds can return three unrelated papers — a gene symbol "
                     "matches a mechanism paper and two genomics case reports "

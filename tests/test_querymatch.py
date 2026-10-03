@@ -591,3 +591,112 @@ def test_seed_gate_records_the_hit_count_on_what_it_keeps():
     kept = _keep_if_like_seeds(cands, seeds, top_n=1, n_terms=10, min_share=0.1,
                                say=lambda m: None)
     assert kept[0].meta["seed_profile_hits"] >= 1
+
+
+# --------------------------------------------------------------------------
+# Seed ranking. "Top n" is meaningless unless the order means something.
+# --------------------------------------------------------------------------
+
+def _ranked(query, rows):
+    from bioleads.sources import rank_seeds
+    return rank_seeds([_pubmed_doc(p, t, a) for p, t, a in rows], query)
+
+
+def test_a_title_hit_outranks_everything():
+    r = _ranked("TMEM184C", [
+        ("1", "A copy-number study", "we list TMEM184C TMEM184C TMEM184C here"),
+        ("2", "TMEM184C regulates autophagy", "one mention"),
+    ])
+    assert [d.meta["pmid"] for d in r] == ["2", "1"]
+    assert r[0].meta["seed_title_hit"] is True
+
+
+def test_occurrences_break_the_tie_when_neither_is_in_the_title():
+    """The real case: three seeds each containing a term, ranked 6x against 1x."""
+    r = _ranked("TMEM184C", [
+        ("1", "A copy-number study", "we list TMEM184C among others"),
+        ("2", "A mechanism study", "TMEM184C does this, TMEM184C does that"),
+    ])
+    assert [d.meta["pmid"] for d in r] == ["2", "1"]
+    assert r[0].meta["seed_query_hits"] == 2
+
+
+def test_presence_alone_would_not_have_ranked_these():
+    """Each seed contains exactly one distinct term, so counting presence ties
+    them and the order falls back to whatever arrived first. That is the bug."""
+    r = _ranked("TMEM184C OR TM184C", [
+        ("1", "A copy-number study", "TMEM184C appears once"),
+        ("2", "TM184C is a regulator", "TM184C TM184C TM184C"),
+    ])
+    assert r[0].meta["pmid"] == "2"
+
+
+def test_distinct_terms_separate_full_from_partial_coverage():
+    r = _ranked("autophagy AND lysosome", [
+        ("1", "A study", "autophagy autophagy autophagy"),
+        ("2", "A study", "autophagy and the lysosome"),
+    ])
+    # Equal title hits; 3 occurrences beats 2, so #1 leads on count alone.
+    assert r[0].meta["pmid"] == "1"
+    # But coverage is recorded, and #2 is the one covering the whole query.
+    from bioleads.sources import seed_rank_key
+    from bioleads.querymatch import parse_query_terms
+    terms = parse_query_terms("autophagy AND lysosome")
+    assert seed_rank_key(r[1], terms)[2] == 2
+    assert seed_rank_key(r[0], terms)[2] == 1
+
+
+def test_no_query_leaves_pubmed_order_alone():
+    from bioleads.sources import rank_seeds
+    docs = [_pubmed_doc("1", "a", "b"), _pubmed_doc("2", "c", "d")]
+    assert [d.meta["pmid"] for d in rank_seeds(docs, None)] == ["1", "2"]
+
+
+def test_a_tagless_query_leaves_pubmed_order_alone():
+    from bioleads.sources import rank_seeds
+    docs = [_pubmed_doc("1", "a", "b"), _pubmed_doc("2", "c", "d")]
+    out = rank_seeds(docs, 'Isom DG[au] AND "Nature"[ta]')
+    assert [d.meta["pmid"] for d in out] == ["1", "2"]
+
+
+def test_the_profile_follows_the_ranking():
+    from bioleads.sources import rank_seeds, seed_profile
+    r = rank_seeds([
+        _pubmed_doc("1", "A chromosome study", "TMEM184C chromosome sequencing"),
+        _pubmed_doc("2", "TMEM184C regulates autophagy", "TMEM184C autophagosome arrestin"),
+    ], "TMEM184C")
+    top1 = seed_profile(r, top_n=1, n_terms=20)
+    assert "autophagosome" in top1
+    assert "chromosome" not in top1
+
+
+def test_fetch_pubmed_asks_for_relevance_not_the_default(monkeypatch):
+    """E-utilities sorts by recency unless asked, which is not a ranking of
+    anything we care about."""
+    import bioleads.sources as S
+    seen = {}
+
+    class _E:
+        @staticmethod
+        def esearch(**kw):
+            seen.update(kw)
+            return _FakeHandleQM({"Count": "0", "IdList": [], "QueryTranslation": "x"})
+
+        @staticmethod
+        def read(handle):
+            return handle.payload
+
+    monkeypatch.setattr(S, "_entrez", lambda email, api_key: (_E, None))
+    S.fetch_pubmed("autophagy")
+    assert seen.get("sort") == "relevance"
+
+
+class _FakeHandleQM:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False

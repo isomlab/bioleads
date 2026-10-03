@@ -5,6 +5,26 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Seeds are ranked, so "the top n" means something
+
+- **E-utilities does not sort by relevance.** Its default returns the most
+  recently indexed records. `fetch_pubmed` now asks for `sort=relevance` ("Best
+  Match"), which changes which records survive `--max-hits` as well as their
+  order. Everything before this took "the first n seeds" to mean the n most
+  recently indexed.
+- **Best Match alone is still not enough.** On `TMEM184C OR TM184C` it returns a
+  goat copy-number paper first and the paper the gene is named for third.
+- **So seeds are ranked on what they say**, by three signals in order:
+  **a query term in the title**, then **how often the terms occur**, then **how
+  many distinct terms** appear. PubMed's order only breaks ties.
+- **Counting presence would not have worked.** All three of those seeds contain
+  a term exactly once by that measure, which ties them and hands the decision
+  back to arrival order. The discriminator is 6 occurrences and a title hit
+  against 1 occurrence buried in an abstract.
+- The run log prints the chosen profile seeds with their counts, and each seed
+  carries `seed_rank`, `seed_query_hits` and `seed_title_hit` in its metadata,
+  so the ranking can be checked rather than trusted.
+
 ### The display trim no longer drops the papers the search was about
 
 - **Seeds survive the `max_graph_nodes` trim.** Ranking by in-corpus citations
@@ -30,8 +50,8 @@ while the major version is 0, a minor bump may change defaults.
   so a word repeated forty times in one paper does not define the topic — and
   keeps a discovered paper if it contains at least `expand_seed_min_share` of
   that profile.
-- **`expand_seed_profile_n` caps how many seeds build the profile**, in PubMed's
-  own relevance order, and it matters far more than it sounds. Measured on
+- **`expand_seed_profile_n` caps how many seeds build the profile**, taken in the
+  ranked order above, and it matters far more than it sounds. Measured on
   `TMEM184C OR TM184C`, whose three seeds are one mechanism paper and **two
   genomics case reports that merely name the gene inside a copy-number region**:
 

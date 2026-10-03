@@ -83,9 +83,16 @@ def describe_pubmed_search(report: dict | None) -> str:
     return line
 
 
+# PubMed's E-utilities default sort is NOT relevance: it returns the most
+# recently indexed records, which is why an unsorted search for a broad term
+# comes back as a list of last month's papers. "Best Match" has to be asked for.
+PUBMED_SORT = "relevance"
+
+
 def fetch_pubmed(
     query: str,
     retmax: int = 500,
+    sort: str = PUBMED_SORT,
     email: str = DEFAULT_ENTREZ_EMAIL,
     api_key: str | None = None,
     cancel=None,
@@ -97,6 +104,12 @@ def fetch_pubmed(
     Each Document holds title + abstract.
     open-access articles in PubMed Central are upgraded to their full body
     text (intro/methods/results); the rest fall back to the abstract.
+
+`sort` is passed to esearch. **It defaults to relevance ("Best Match")
+    because E-utilities does not**: its own default returns the most recently
+    indexed records, so an unsorted search for a broad term is a list of last
+    month's papers rather than the best ones. This matters doubly when `retmax`
+    truncates, since it decides which records are kept at all.
 
     `report` is an optional dict filled in with what the search did: ``count``,
     PubMed's own ``translation`` of the query, and any ``warnings`` it returned.
@@ -112,7 +125,8 @@ def fetch_pubmed(
 
     # esearch -> PMIDs
     say(f"PubMed search: {query!r}…")
-    with Entrez.esearch(db="pubmed", term=query, retmax=retmax) as h:
+    with Entrez.esearch(db="pubmed", term=query, retmax=retmax,
+                        sort=sort or "") as h:
         res = Entrez.read(h)
     pmids = list(res.get("IdList", []))
     if report is not None:
@@ -124,6 +138,7 @@ def fetch_pubmed(
                     notes.append(f"{kind}: {item}")
         report.update(
             query=query,
+            sort=sort,
             count=int(res.get("Count", len(pmids)) or 0),
             translation=str(res.get("QueryTranslation", "") or ""),
             warnings=notes,
@@ -668,6 +683,68 @@ def seed_profile(seed_docs, *, top_n: int = 0, n_terms: int = 60) -> list[str]:
     return [t for t, _ in ranked[:n_terms]]
 
 
+def seed_rank_key(doc, terms) -> tuple:
+    """How strongly a seed is *about* the query. Bigger sorts first.
+
+    Three signals, in order of how much they mean:
+
+    1. **A query term in the title.** A paper titled for the thing is about the
+       thing. Nothing else comes close as a signal.
+    2. **How often the terms occur** in title plus abstract. A paper about a
+       gene names it repeatedly; a paper that merely lists it among others names
+       it once. On `TMEM184C OR TM184C` this is 6 against 1 and 1.
+    3. **How many distinct terms** appear, which separates a paper covering the
+       whole query from one catching a single synonym.
+
+    Presence alone does not rank anything: all three of those seeds contain a
+    term, and counting only presence left them tied, with the order decided by
+    whatever came back first.
+    """
+    from .querymatch import _term_pattern
+
+    title = getattr(doc, "title", "") or ""
+    content = getattr(doc, "content", "") or ""
+    in_title = sum(len(_term_pattern(t).findall(title)) for t in terms)
+    total = sum(len(_term_pattern(t).findall(content)) for t in terms)
+    distinct = sum(1 for t in terms if _term_pattern(t).search(content))
+    return (1 if in_title else 0, total, distinct)
+
+
+def rank_seeds(seed_docs, query: str | None):
+    """Order seeds so that "the top n" means something.
+
+    **Arrival order is not a ranking.** E-utilities sorts by recency unless
+    asked otherwise, so taking the first n was taking the n most recently
+    indexed. Asking for Best Match fixes the retrieval but not this: on
+    `TMEM184C OR TM184C`, Best Match returns a goat copy-number paper first and
+    the paper the gene is named for third.
+
+    So seeds are ranked here on what they say, by :func:`seed_rank_key`, with
+    PubMed's order only as a tie-break. Each doc gets `seed_rank`,
+    `seed_query_hits` (occurrences) and `seed_title_hit` in its meta, so the
+    ranking can be inspected rather than trusted.
+
+    With no query or no parsable terms the PubMed order is returned unchanged:
+    it is still Best Match, and inventing a ranking would be worse than keeping
+    one somebody else computed.
+    """
+    from .querymatch import parse_query_terms
+
+    docs = list(seed_docs)
+    terms = parse_query_terms(query) if query else []
+    if not terms:
+        return docs
+    scored = [(seed_rank_key(d, terms), i, d) for i, d in enumerate(docs)]
+    scored.sort(key=lambda t: (-t[0][0], -t[0][1], -t[0][2], t[1]))
+    out = []
+    for rank, (key, _, d) in enumerate(scored, start=1):
+        d.meta["seed_rank"] = rank
+        d.meta["seed_title_hit"] = bool(key[0])
+        d.meta["seed_query_hits"] = key[1]
+        out.append(d)
+    return out
+
+
 def _keep_if_like_seeds(docs, seed_docs, *, top_n, n_terms, min_share, say):
     """Keep discovered papers whose text looks like the seed papers.
 
@@ -820,8 +897,17 @@ def load_documents(
                 if expand_gate == "terms" and pubmed_query:
                     added = _keep_if_query_terms(added, pubmed_query, say)
                 elif expand_gate == "seeds":
-                    seed_docs = [d for d in docs
-                                 if not d.meta.get("expanded")]
+                    seed_docs = rank_seeds(
+                        [d for d in docs if not d.meta.get("expanded")],
+                        pubmed_query)
+                    if expand_seed_profile_n and seed_docs:
+                        top = seed_docs[:expand_seed_profile_n]
+                        say("  profile seeds, most on-topic first:")
+                        for d in top:
+                            mark = "title" if d.meta.get("seed_title_hit") else "text"
+                            say(f"    {d.meta.get('seed_rank')}. "
+                                f"{d.meta.get('seed_query_hits', 0)}x in {mark}: "
+                                f"{(d.title or d.doc_id)[:66]}")
                     added = _keep_if_like_seeds(
                         added, seed_docs, top_n=expand_seed_profile_n,
                         n_terms=expand_seed_profile_terms,

@@ -222,8 +222,10 @@ def write_graph_3d(
     fig.update_layout(
         title=dict(text=heading, font=dict(size=15, color="#1f2a36"), x=0.012,
                    xanchor="left"),
-        # aspectmode="cube" fixes the scene to a unit cube, which is what makes
-        # a node's normalised position a camera centre that actually centres it.
+        # The scene starts as a unit cube. A tour stop switches aspectmode to
+        # "manual" and grows the ratio, which is the zoom; "Reset view" puts it
+        # back to 1. Note that `scene.camera.center` is then in units of HALF
+        # the aspect ratio, which `centre()` in the injected script applies.
         scene=dict(xaxis=axes[0], yaxis=axes[1], zaxis=axes[2],
                    dragmode="orbit", aspectmode="cube"),
         margin=dict(l=0, r=0, t=40, b=0),

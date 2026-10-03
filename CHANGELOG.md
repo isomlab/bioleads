@@ -5,21 +5,81 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
-### The 2D zoom is slower, and the 3D focus node is actually centred
+### The 3D tour flies into the node, and the node is a real sphere
 
-- **2D flies for 6.5 s, 3D for 4.2 s.** The same duration does not feel the same
-  in both: vis.js `focus` changes zoom level as well as position, and **the
-  scale change is what the eye reads as speed**, so what is gentle in a Plotly
-  scene is abrupt here. Two constants, `TOUR_FLIGHT_2D_MS` and
-  `TOUR_FLIGHT_MS`.
-- **The 3D focus node now lands in the middle of the view.** It sat off to one
-  side because `scene.camera.center` is in the scene's **normalised** space, not
-  in data coordinates, and raw node positions were being passed straight in.
-  Positions are converted per axis, and the scene is pinned to
-  `aspectmode="cube"` so that conversion is exactly linear.
-- The eye now sits a fixed distance along a constant direction from the centre,
-  so **every stop is framed the same way** rather than depending on where in the
-  scene the node happens to be.
+- **The focus node is a `Surface` sphere in the data**, so the camera coming
+  closer is what makes it bigger, and the orbit turns it. Three substitutes were
+  tried first and all of them were wrong: a marker is sized in **screen pixels**
+  and never grows however far in the flight goes; an HTML disc over the canvas
+  does grow, but it is a flat sticker that cannot rotate, shade, or let an edge
+  pass in front of it; and `Mesh3d` **renders its own triangle edges**, giving a
+  wireframe globe that `contour.show`, `flatshading` and both normals epsilons
+  all failed to remove.
+- The sphere is scaled **per axis by that axis's span**. The three axes carry
+  different data ranges but are drawn into one cube, so equal radii in data
+  units would be an ellipsoid.
+- **The flight swings 55° around the node** while it closes in, holding whatever
+  viewing direction the reader has dragged the scene to. A tour that only dollies
+  reads as a slideshow.
+
+### Fixed: three ways of zooming a Plotly 3D scene that do not work
+
+Worth recording, because each one looks right in the code and silently is not.
+
+- **Shortening `scene.camera.eye` does nothing.** gl3d clamps the camera's
+  distance: below about 0.5 per axis the reported `camera.distance` stops
+  changing and the frame is pixel-identical. Three successive reductions changed
+  the view not at all.
+- **Narrowing the axis ranges zooms, but it culls.** Plotly drops whatever falls
+  outside a range, so closing in deleted most of the network. The 2D view never
+  hides anything, and a tour that culls the thing it is touring is worse than no
+  tour.
+- **`scene.camera.center` is in units of half the aspect ratio.** A node at
+  normalised position *n* sits at *n · k / 2*. Passing *n* unscaled centres the
+  node only near *k* = 2 and drifts further off the further in the view goes, so
+  every attempt to zoom harder also pushed the node toward the edge.
+
+**The zoom that works is `scene.aspectratio`**, 1 to 7, which scales the scene
+while the camera holds its distance. Nothing is hidden: the parts that no longer
+fit fall outside the view exactly as they do when the 2D view zooms.
+
+### One card, beside the node, shown when the camera lands
+
+- **Both views share one design**, defined once and injected into both. They had
+  each built their own markup, so a change to one quietly left the other on the
+  previous version. Title as the headline, an accent rule, then quiet uppercase
+  labels against dark values.
+- **Every class is `bl-` prefixed.** pyvis ships Bootstrap, whose own `.row`
+  captured the card and stacked each label above its value — **in the 2D page
+  only**, which is how the two views drifted apart while each looked plausible
+  alone.
+- **The card waits for the camera.** In 2D the signal is `animationFinished`
+  with a timer fallback, because an interrupted focus never fires that event;
+  in 3D it hangs off the flight's completion.
+- **2D places it from canvas coordinates on every redraw**, so it stays beside
+  its node through later panning and zooming, offset by the node's scaled radius
+  so it never covers the node it describes.
+
+### The graphs are quieter: no arrowheads, no PMIDs under the nodes
+
+- **Arrowheads are gone from the 2D citation graphs.** On a network this dense
+  they stacked into a texture that read as noise rather than as direction. The
+  graph is still directed, and the direction is in the hover and the heading.
+- **PMIDs no longer print under the markers**, where they collided with their
+  neighbours and hid the colors the graph encodes. They stay in the hover and in
+  the tour card. *pyvis substitutes the node id for a falsy label, so the font is
+  zeroed rather than the label blanked.*
+- Translucent blurred control panels with no borders, white node rims, thinner
+  edges, a slim colorbar. **The controls moved to the bottom-left in both views**,
+  out of the picture.
+
+### Fixed: the 2D focus node was sized by the wrong attribute
+
+- **`value` is what sizes a vis.js node, not `size`.** A node carrying a value
+  has its `size` recomputed from it on every redraw, so the tour's size
+  multiplier did nothing: the focused node measured **82 px against a 96 px
+  neighbour** while claiming to be the subject of the stop. It is now the
+  largest node on screen.
 
 ### Colors that work for red-green color blindness
 
@@ -43,11 +103,15 @@ while the major version is 0, a minor bump may change defaults.
   byline is the lab the work came from, and it is what a plain truncation throws
   away first.
 
-### Tour pacing is two numbers now, not one
+### Tour pacing is per view, and 2D is the slower one
 
-- **The camera is slower (4.2 s) and the wait after it lands is shorter
+- **The camera is slower (3D 4.2 s) and the wait after it lands is shorter
   (3.2 s).** Both at once, which the old single `TOUR_DWELL_MS` could not do:
   slowing the zoom used to eat the reading time.
+- **2D flies for 6.5 s.** The same duration does not feel the same in both:
+  vis.js `focus` changes zoom level as well as position, and **the scale change
+  is what the eye reads as speed**, so what is gentle in a Plotly scene is abrupt
+  here.
 
 ### Fixed: the 2D controls never ran at all
 
@@ -61,13 +125,12 @@ while the major version is 0, a minor bump may change defaults.
 
 ### The node being visited is marked
 
-- **2D:** recolored, enlarged 1.6x and given a heavier border, restored when the
-  tour moves on. Selection alone was too quiet to find on a crowded graph.
-- **3D:** a translucent ring drawn over the node, removed on the next stop.
-  Recoloring the node itself would mean rewriting the whole marker array each
-  time.
-- **The 3D camera comes closer** — the offset was 0.55 with a 0.35 standoff,
-  which framed the neighbourhood rather than the node; now 0.22 and 0.14.
+- **2D:** recolored, enlarged 1.9x by `value` and given a white rim, restored
+  when the tour moves on. Selection alone was too quiet to find on a crowded
+  graph.
+- **3D:** a sphere in the scene, described above. It began as a translucent
+  ring over the node and that was not enough: the node kept its original size
+  underneath, so zooming never showed it.
 
 ### Fixed: the network buttons could feel broken, and 3D had none of them
 
@@ -98,14 +161,11 @@ while the major version is 0, a minor bump may change defaults.
 - The stops carry **the same text the hover shows**, built from one function, so
   the tour and the tooltip cannot drift into telling different stories about a
   node.
-- **Paced to be read.** A 2.6 s flight and 11 s on each node, at a gentler 1.6x
-  zoom. The first version flew in 1.4 s and moved on after 4.2 s, which was long
-  enough to see that something had happened and not long enough to read it.
-- **The whole record, not the hover summary.** Every field the node carries —
-  title, PMID, year, journal, both citation counts, query match and terms,
-  whether it came from the search or from expansion, source, and a clickable
-  link — as a label/value table. Empty fields are skipped and booleans read
-  yes/no.
+- **Paced to be read**, rather than long enough only to see that something had
+  happened. The timings moved several times during this cycle; see *Tour pacing*
+  above for where they ended up.
+- **A record, not the hover summary.** Trimmed later in this cycle to what
+  identifies a paper; see *The tour panel says what identifies a paper* above.
 - Physics is switched off before each flight, since the camera cannot chase a
   node that is still being simulated.
 - **This is a tour, not a video file.** Screen-record it to get a movie. Writing

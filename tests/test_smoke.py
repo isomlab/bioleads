@@ -2763,18 +2763,19 @@ def test_the_3d_scene_is_a_cube(tmp_path):
     assert re.search(r'"aspectmode":\s*"cube"', html)
 
 
-def test_3d_tour_zooms_by_window_not_by_camera():
-    """The tour must move the axis RANGES, and live in one coordinate space.
+def test_3d_tour_zooms_without_hiding_any_of_the_network():
+    """Zooming must not delete nodes, and the two coordinate spaces must agree.
 
-    Three rounds were spent shortening `scene.camera.eye`, and none of them
-    changed the view: gl3d clamps the camera distance, so every standoff below
-    roughly 0.5 renders identically. `scene.camera.center` is a second,
-    normalised space, and feeding the highlight trace (which is drawn in DATA
-    space) a camera coordinate put a loose marker in the scene attached to no
-    node at all.
+    Three mechanisms were tried here. Shortening `scene.camera.eye` does
+    nothing at all, because gl3d clamps the camera's distance. Narrowing the
+    axis ranges does zoom, but Plotly drops whatever falls outside a range, so
+    it deleted most of the network on the way in -- and 2D, which this is meant
+    to behave like, never hides anything. Scaling `scene.aspectratio` is the
+    one that zooms while leaving every node in the figure.
 
-    So two invariants: the flight narrows the ranges, and a stop carries data
-    coordinates only -- there is no second space left to confuse.
+    `cam` (normalised, for the camera) and `xyz` (data, for the ring and the
+    annotation) are separate because Plotly demands it; feeding a trace the
+    camera form once put a loose marker in the scene attached to no node.
     """
     pytest.importorskip("plotly")
     import json
@@ -2796,38 +2797,43 @@ def test_3d_tour_zooms_by_window_not_by_camera():
                                      stops=citations.tour_stops(g, 3))
         html = open(out, encoding="utf-8").read()
 
-    # The zoom is the window, not the camera.
-    assert "axis.range" in html
-    assert "var d = 0." not in html, "the camera standoff is back"
+    # The injected tour alone. Plotly's own bundle is in this file too, and it
+    # mentions everything, so asserting against the whole page proves nothing.
+    tour = [m.group(1) for m in
+            re.finditer(r"<script[^>]*>(.*?)</script>", html, re.S)
+            if "bl3-play" in m.group(1)][0]
 
-    # One coordinate space.
-    assert "xyzData" not in html
-    stops = json.loads(re.search(r"var STOPS = (\[.*\]), FLIGHT = ", html, re.S).group(1))
-    bounds = json.loads(re.search(r"var BOUNDS = (\[\[.*?\]\]), WINDOW", html, re.S).group(1))
-    assert stops and len(bounds) == 3
+    # Nothing may cull the network: no axis range is ever rewritten, and the
+    # dead camera-standoff approach must not come back.
+    assert "axis.range" not in tour, "a flight that moves a range hides nodes"
+    assert "var d = 0." not in tour, "the camera standoff is back"
+    assert '"scene.aspectratio"' in tour, "there is no zoom at all"
 
-    # Every stop sits inside the scene, and the window is a real crop of it.
-    window = float(re.search(r"WINDOW = ([0-9.]+)", html).group(1))
-    assert 0 < window < 1
-
-    # The window alone is not a zoom. Plotly markers are sized in screen
-    # pixels, so narrowing the range spreads the nodes out without making any
-    # of them bigger, and the view crops but never magnifies. The markers and
-    # edges have to be scaled over the flight for 3D to read like the 2D tour.
-    mag = float(re.search(r"MAG = ([0-9.]+)", html).group(1))
-    ring, ring_z = (float(re.search(r"var RING = ([0-9.]+)", html).group(1)),
-                    float(re.search(r"RING_Z = ([0-9.]+)", html).group(1)))
-    assert mag > 1, "the markers never grow, so nothing looks closer"
+    zoom = float(re.search(r"ZOOM = ([0-9.]+)", tour).group(1))
+    mag = float(re.search(r"MAG = ([0-9.]+)", tour).group(1))
+    ring = float(re.search(r"var RING = ([0-9.]+)", tour).group(1))
+    ring_z = float(re.search(r"RING_Z = ([0-9.]+)", tour).group(1))
+    assert zoom > 1, "the scene never grows, so nothing looks closer"
+    # Plotly markers are sized in screen pixels, so spreading the scene apart
+    # leaves every node the size it was. They have to be scaled to match.
+    assert mag > 1 and "function magnify(" in tour
     assert ring_z > ring, "the highlight ring would end up inside the node"
-    assert "function magnify(" in html and "marker.size" in html
+
+    # Both coordinate forms are present, and the camera form inverts through
+    # the figure's OWN pinned ranges back to the data form.
+    stops = json.loads(re.search(r"var STOPS = (\[.*\]), FLIGHT = ", tour,
+                                 re.S).group(1))
+    assert stops and all(s.get("xyz") and s.get("cam") for s in stops)
+    assert "flyTo(s.cam," in tour and "light(s.xyz)" in tour
+
+    ranges = [[float(v) for v in m]
+              for m in re.findall(r'"range":\s*\[([-\d.e]+),\s*([-\d.e]+)\]',
+                                  html)[:3]]
+    assert len(ranges) == 3, "axis ranges must be pinned, not autoranged"
     for s in stops:
         for i in range(3):
-            lo, hi = bounds[i]
-            assert lo <= s["xyz"][i] <= hi, "a stop lies outside the scene"
-
-    # The axis ranges the figure is drawn with are the ones the tour flies back
-    # to, or "Reset view" would snap to a different frame than it started in.
-    drawn = [[float(v) for v in m]
-             for m in re.findall(r'"range":\s*\[([-\d.e]+),\s*([-\d.e]+)\]',
-                                 html)[:3]]
-    assert drawn == [[b[0], b[1]] for b in bounds]
+            lo, hi = ranges[i]
+            back = lo + (s["cam"][i] + 1) / 2 * (hi - lo)
+            assert abs(back - s["xyz"][i]) < 1e-6, (
+                f"axis {i}: camera {s['cam'][i]} inverts to {back}, "
+                f"not {s['xyz'][i]}")

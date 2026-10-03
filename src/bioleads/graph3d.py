@@ -229,20 +229,27 @@ def write_graph_3d(
 
 
 SCENE_PAD = 0.06          # fraction of each axis span, so markers aren't clipped
-# How much of the graph a tour stop shows, as a fraction of the full span.
-TOUR_WINDOW = 0.25
-# **Narrowing the window is only half of a zoom.** In 2D, vis.js scales the
-# whole canvas, so the nodes and edges grow as the view closes in, and that
-# growth is most of what reads as "zoomed in". Plotly's markers are sized in
-# SCREEN pixels, so a narrower range moves nodes apart without making any of
-# them bigger -- the view crops but never magnifies, which is why three rounds
-# of shrinking the window still did not look like the 2D tour.
+# **The zoom is `scene.aspectratio`, and nothing is ever hidden.**
 #
-# So the markers and edges are scaled by hand over the flight, to match.
-TOUR_MAGNIFY = 3.5        # node markers at the end of a flight
-TOUR_EDGE_WIDTH = 3.2     # edge width at the end of a flight
+# Narrowing the axis ranges was tried first and was wrong: Plotly drops
+# whatever falls outside a range, so zooming in deleted most of the network.
+# 2D never does that -- vis.js moves a camera over a graph that stays whole --
+# and a tour that culls the thing it is touring is worse than no tour.
+#
+# Growing the aspect ratio scales the scene box instead. The camera holds its
+# distance, so the graph gets bigger and the parts that no longer fit simply
+# fall outside the view, exactly as they do when 2D zooms. Every node is still
+# there to pan back to.
+TOUR_ZOOM_3D = 3.5
+# **Scaling the scene is still only half of a zoom.** vis.js scales the whole
+# canvas, so in 2D the nodes and edges grow as the view closes in, and that
+# growth is most of what reads as "zoomed in". Plotly's markers are sized in
+# SCREEN pixels, so spreading the scene apart leaves every marker the size it
+# was. They are scaled by hand over the flight to match.
+TOUR_MAGNIFY = 2.5        # node markers at the end of a flight
+TOUR_EDGE_WIDTH = 2.6     # edge width at the end of a flight
 TOUR_RING = 30            # the highlight ring, unzoomed
-TOUR_RING_ZOOMED = 110
+TOUR_RING_ZOOMED = 80
 
 
 def scene_ranges(pos):
@@ -289,22 +296,28 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
                                 TOUR_HIGHLIGHT)
     except Exception:          # pragma: no cover - citations is always present
         return
-    # **The tour moves the axis ranges, not the camera.** Three rounds were
-    # spent shortening `scene.camera.eye` to zoom in, and none of them did
-    # anything: gl3d clamps the camera's distance, so every standoff below
-    # about 0.5 renders identically. `scene.camera.center` is no better -- it
-    # is in a normalised space of its own, which is a second coordinate system
-    # to get wrong, and it was getting it wrong.
+    # **Two coordinate systems, and mixing them up is the bug to watch for.**
     #
-    # Narrowing each axis range around the node does both jobs exactly and in
-    # ONE space, the data's own: the node is the centre of the cube, which is
-    # what the default camera looks at, and the window width is the zoom. Every
-    # other piece of the tour (the highlight trace, the annotation) is already
-    # in data coordinates, so there is now only one.
+    # `xyz` is the node's DATA position. The highlight ring is a Scatter3d
+    # trace and the record is a scene annotation, and both of those live in the
+    # data -- which is what makes the annotation travel with its node.
+    #
+    # `cam` is the same point in the scene's own normalised -1..1 space, which
+    # is the only thing `scene.camera.center` accepts. Handing a trace the
+    # camera form once put a loose marker in the scene attached to nothing, so
+    # the two are named apart and converted here rather than in JavaScript.
+    #
+    # The conversion is exact only because `scene_ranges` pins the axis ranges
+    # the figure is drawn with; against an autoranged axis it would be a guess.
     raw = {n: list(map(float, p)) for n, p in (pos or {}).items()}
     bounds = scene_ranges(pos)
-    stops = [dict(st, xyz=raw.get(st["id"])) for st in stops
-             if raw.get(st["id"])]
+    cam = {}
+    if bounds:
+        cam = {n: [2 * (q[i] - bounds[i][0]) /
+                   ((bounds[i][1] - bounds[i][0]) or 1.0) - 1 for i in range(3)]
+               for n, q in raw.items()}
+    stops = [dict(st, xyz=raw.get(st["id"]), cam=cam.get(st["id"]))
+             for st in stops if raw.get(st["id"]) and cam.get(st["id"])]
     if not stops:
         return
 
@@ -339,31 +352,25 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
 <script>
 (function () {
   var STOPS = __STOPS__, FLIGHT = __FLIGHT__, DWELL = __DWELL__;
-  var BOUNDS = __BOUNDS__, WINDOW = __WINDOW__, AX = ["x", "y", "z"];
-  var MAG = __MAGNIFY__, EDGE_W = __EDGE_W__;
+  var ZOOM = __ZOOM3D__, MAG = __MAGNIFY__, EDGE_W = __EDGE_W__;
   var RING = __RING__, RING_Z = __RING_Z__;
   var BASE = null, shown = 1;
+  var atK = 1, atC = {x: 0, y: 0, z: 0};
   var HOME = {eye: {x: 1.25, y: 1.25, z: 1.25}, center: {x: 0, y: 0, z: 0}};
   var i = -1, playing = false, timer = null, anim = null;
   function gd() { return document.querySelector(".plotly-graph-div"); }
   function ease(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3)/2; }
-  function ranges() {
-    // Whatever the scene is showing now, so a flight starts where the last one
-    // left off instead of jumping back to the full view first.
-    var sc = gd()._fullLayout.scene;
-    return AX.map(function (a, i) {
-      var r = sc[a + "axis"] && sc[a + "axis"].range;
-      return r ? [r[0], r[1]] : [BOUNDS[i][0], BOUNDS[i][1]];
-    });
-  }
-  function windowAt(p) {
-    // A box of the same size on every stop, centred on the node. Equal widths
-    // are what make the stops comparable: the node is always the middle of the
-    // view and always at the same magnification.
-    return AX.map(function (a, i) {
-      var h = (BOUNDS[i][1] - BOUNDS[i][0]) * WINDOW / 2;
-      return [p[i] - h, p[i] + h];
-    });
+  function heading() {
+    // The direction the viewer is currently looking from, at a fixed length.
+    // Held constant through a flight so a stop pans and zooms without also
+    // spinning, and so a scene the viewer has dragged around keeps the angle
+    // they chose instead of snapping back to the default corner.
+    var c = gd()._fullLayout.scene.camera, e = c.eye, m = c.center ||
+      {x: 0, y: 0, z: 0};
+    var v = [e.x - m.x, e.y - m.y, e.z - m.z];
+    var n = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]) || 1;
+    var L = 1.25 * Math.sqrt(3);          // the default view's distance
+    return [v[0]/n*L, v[1]/n*L, v[2]/n*L];
   }
   function base() {
     // The sizes the figure was drawn with, captured once. Reading them back
@@ -392,22 +399,30 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
                      [el.data.length - 1]);
     }
   }
-  function glide(to, done, mag) {
-    var el = gd(), from = ranges(), t0 = performance.now();
+  function glide(k1, c1, done) {
+    // Zoom is the aspect ratio, pan is the camera centre, and the axis ranges
+    // are never touched -- so the whole network stays in the figure however
+    // far in a stop goes.
+    var el = gd(), k0 = atK, c0 = atC, dir = heading(), t0 = performance.now();
     cancelAnimationFrame(anim);
     (function frame(now) {
-      var t = Math.min(1, (now - t0) / FLIGHT), e = ease(t), u = {};
-      for (var i = 0; i < 3; i++) {
-        u["scene." + AX[i] + "axis.range"] = [
-          from[i][0] + (to[i][0] - from[i][0]) * e,
-          from[i][1] + (to[i][1] - from[i][1]) * e];
-      }
-      Plotly.relayout(el, u);
-      if (mag) { magnify(mag[0] + (mag[1] - mag[0]) * e); }
+      var t = Math.min(1, (now - t0) / FLIGHT), e = ease(t);
+      var k = k0 + (k1 - k0) * e;
+      var c = {x: c0.x + (c1.x - c0.x) * e, y: c0.y + (c1.y - c0.y) * e,
+               z: c0.z + (c1.z - c0.z) * e};
+      // Updated every frame, so an interrupted flight resumes from where it
+      // actually got to rather than from where it was aiming.
+      atK = k; atC = c;
+      Plotly.relayout(el, {
+        "scene.aspectmode": "manual",
+        "scene.aspectratio": {x: k, y: k, z: k},
+        "scene.camera": {center: c, eye: {x: c.x + dir[0], y: c.y + dir[1],
+                                          z: c.z + dir[2]}}});
+      magnify(ZOOM > 1 ? 1 + (MAG - 1) * (k - 1) / (ZOOM - 1) : 1);
       if (t < 1) { anim = requestAnimationFrame(frame); } else if (done) { done(); }
     })(t0);
   }
-  function flyTo(p, done) { glide(windowAt(p), done, [shown, MAG]); }
+  function flyTo(p, done) { glide(ZOOM, {x: p[0], y: p[1], z: p[2]}, done); }
   function annotate(s) {
     // A scene annotation is anchored in the data, so it travels with the node
     // as the camera moves instead of sitting in a corner of the window.
@@ -462,8 +477,9 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
       (s.label || "") + "</div>";
     info.style.display = "block";
     // The label waits for the camera. Annotating first means reading a card
-    // that is sliding across the screen.
-    flyTo(s.xyz, function () { annotate(s); });
+    // that is sliding across the screen. `cam`, not `xyz`: this one is the
+    // camera centre.
+    flyTo(s.cam, function () { annotate(s); });
   }
   function step() {
     i = (i + 1) % STOPS.length;
@@ -486,7 +502,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     unlight();
     unannotate();
     document.getElementById("bl3-info").style.display = "none";
-    glide(BOUNDS, null, [shown, 1]);
+    glide(1, {x: 0, y: 0, z: 0});
     Plotly.relayout(gd(), {"scene.camera": HOME});
   });
 })();
@@ -494,8 +510,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
 """
     import json as _json
     block = (block.replace("__STOPS__", _json.dumps(stops))
-                  .replace("__BOUNDS__", _json.dumps(bounds))
-                  .replace("__WINDOW__", str(TOUR_WINDOW))
+                  .replace("__ZOOM3D__", str(TOUR_ZOOM_3D))
                   .replace("__MAGNIFY__", str(TOUR_MAGNIFY))
                   .replace("__EDGE_W__", str(TOUR_EDGE_WIDTH))
                   .replace("__RING_Z__", str(TOUR_RING_ZOOMED))

@@ -616,14 +616,14 @@ TOUR_FLIGHT_MS = 4200      # camera travel in 3D, where the camera only moves
 # eye reads as speed, so a duration that is gentle in a Plotly scene is abrupt
 # here.
 TOUR_FLIGHT_2D_MS = 6500
-TOUR_HOLD_MS = 2500        # time to read the record, AFTER the camera arrives
+TOUR_HOLD_MS = 2000        # time to read the record, AFTER the camera arrives
 TOUR_ZOOM = 1.6            # gentler than the 1.9 it started at
 
 # Total time on a stop. Keeping the hold separate from the flight is what lets
 # the zoom be slowed and the advance be quickened at the same time: when the
 # two were one number, a slower camera meant less reading time. The hold has
-# since come down 3.2 s -> 2.5 s, which quickens the step from node to node
-# without touching how fast the camera moves.
+# since come down 3.2 s -> 2.5 s -> 2.0 s, which quickens the step from node to
+# node without touching how fast the camera moves.
 TOUR_DWELL_MS = TOUR_FLIGHT_MS + TOUR_HOLD_MS
 TOUR_DWELL_2D_MS = TOUR_FLIGHT_2D_MS + TOUR_HOLD_MS
 
@@ -832,8 +832,9 @@ __CARD_CSS__
     border:1px solid rgba(255,255,255,.65); border-radius:16px;
     padding:18px 20px 16px; pointer-events:auto;
     box-shadow:0 18px 50px rgba(16,26,40,.18), 0 2px 6px rgba(16,26,40,.06);
-    opacity:0; transition:opacity .45s ease-out}
-  #bl-node-card.on {opacity:1}
+    opacity:0; transform:translateX(10px);
+    transition:opacity .45s ease-out, transform .45s cubic-bezier(.2,.7,.3,1)}
+  #bl-node-card.on {opacity:1; transform:translateX(0)}
 </style>
 <div id="bl-physics">
   <button id="bl-physics-toggle">Pause layout</button>
@@ -859,7 +860,23 @@ __CARD_JS__
     var panel = document.getElementById("bl-tour-info");
     var card = document.getElementById("bl-node-card");
     var play = document.getElementById("bl-tour-play");
-    var at = null, landed = false;
+    var at = null, landed = false, cardTimer = null;
+    var CARD_FADE = 460;
+    function showCard() {
+      clearTimeout(cardTimer);
+      card.style.display = "block";
+      void card.offsetWidth;               // commit before the transition
+      card.classList.add("on");
+    }
+    function hideCard() {
+      // Fades out rather than vanishing. `display:none` has to wait for the
+      // transition, or the card is gone before it has faded.
+      clearTimeout(cardTimer);
+      if (card.style.display !== "block") { return; }
+      card.classList.remove("on");
+      cardTimer = setTimeout(function () { card.style.display = "none"; },
+                             CARD_FADE);
+    }
     var nodes = net.body.data.nodes;
     // **`value` is what sizes a vis.js node, not `size`.** When a node carries
     // a value, vis recomputes `size` from it on every redraw, so enlarging the
@@ -890,16 +907,12 @@ __CARD_JS__
     // redraw rather than once, which is what keeps it beside its node when
     // the view moves afterwards.
     function place() {
-      if (!landed || !at) {
-        card.classList.remove("on"); card.style.display = "none"; return;
-      }
+      if (!landed || !at) { hideCard(); return; }
       var pos = net.getPositions([at.id])[at.id];
       if (!pos) { card.style.display = "none"; return; }
       var dom = net.canvasToDOM(pos);
       var box = net.body.container.getBoundingClientRect();
-      card.style.display = "block";
-      void card.offsetWidth;
-      card.classList.add("on");
+      showCard();
       var w = card.offsetWidth, h = card.offsetHeight;
       // Clear the marker itself. `size` is in canvas units, so it has to be
       // scaled: at tour zoom a big node is tens of pixels across, and a fixed
@@ -921,8 +934,7 @@ __CARD_JS__
       net.selectNodes([s.id]);
       // The card goes away for the duration of the flight. Showing it first
       // means reading a card that is still travelling.
-      at = s; landed = false;
-      card.classList.remove("on"); card.style.display = "none";
+      at = s; landed = false; hideCard();
       net.focus(s.id, {scale: __ZOOM__, animation:
         {duration: __FLIGHT__, easingFunction: "easeInOutCubic"}});
       card.innerHTML = BL_CARD(s.record);
@@ -955,8 +967,7 @@ __CARD_JS__
     document.getElementById("bl-tour-reset").addEventListener("click", function () {
       playing = false; clearTimeout(timer); play.textContent = "Play tour";
       panel.style.display = "none";
-      at = null; landed = false;
-      card.classList.remove("on"); card.style.display = "none";
+      at = null; landed = false; hideCard();
       unlight();
       net.unselectAll();
       net.fit({animation: {duration: 1400, easingFunction: "easeInOutCubic"}});

@@ -32,6 +32,39 @@ while the major version is 0, a minor bump may change defaults.
 - **The canvas fills what is left** rather than a fixed 800px, with the card
   padding and borders removed. The graph is the page now.
 
+### The scene opens larger, and the focus comes up on a dimmer
+
+- **The 3D page opens at aspectratio 2.4, not 1.** gl3d clamps the camera's
+  distance and Plotly's default eye of 1.25 per axis is already past that
+  clamp, so the scene cannot be opened closer by moving the camera: the graph
+  just sits small in the middle of a lot of white. The aspect ratio is the only
+  lever, and it is the one the tour already uses. *Reset view* returns here.
+- **The focus color ramps up and down with the flight** instead of switching
+  on. The sphere and the lit edges start at the highlight mixed most of the way
+  to white and are blended to full strength by the same eased progress that
+  drives the camera, so a stop reads as arriving somewhere. Taking the quiet end
+  from the same hue keeps it a change in intensity rather than two different
+  marks.
+- **The record card fades in and out in both views.** Fading out needs the
+  `display:none` held back until the transition finishes, or the element is gone
+  before it has faded and the card snaps off the screen however long the CSS
+  says it should take.
+- *Reset view* now dims the highlight down over the flight home and removes the
+  overlay traces when it lands, rather than switching them off at the start.
+- **Hold 3.2 s → 2.0 s** in both views, so the step from node to node is
+  quicker without the camera moving any faster.
+
+### Fixed: every tour left the markers slightly larger than they started
+
+- **A float comparison dropped the final restore.** `magnify` skipped steps
+  smaller than 0.08 and made an exception for the exact end values 1 and MAG,
+  which floating point defeats: the last value comes out as
+  `1.0000000000000002`, the equality fails, the restore is dropped as too small
+  a step, and the markers keep a little of each tour's growth. The last frame of
+  a flight now forces the update instead of testing for equality.
+- The baseline sizes are also captured before the first flight rather than
+  lazily inside `magnify`, where they were already a frame late.
+
 ### A stop lights the node's own edges, in both views
 
 - **The 3D tour now shows which papers the focus node connects to.** 2D has had

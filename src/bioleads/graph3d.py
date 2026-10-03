@@ -222,12 +222,14 @@ def write_graph_3d(
     fig.update_layout(
         title=dict(text=heading, font=dict(size=15, color="#1f2a36"), x=0.012,
                    xanchor="left"),
-        # The scene starts as a unit cube. A tour stop switches aspectmode to
-        # "manual" and grows the ratio, which is the zoom; "Reset view" puts it
-        # back to 1. Note that `scene.camera.center` is then in units of HALF
-        # the aspect ratio, which `centre()` in the injected script applies.
+        # The scene opens at TOUR_HOME_ZOOM, a tour stop grows the ratio to
+        # TOUR_ZOOM_3D, and "Reset view" goes back to TOUR_HOME_ZOOM. Note that
+        # `scene.camera.center` is in units of HALF the aspect ratio, which
+        # `centre()` in the injected script applies.
         scene=dict(xaxis=axes[0], yaxis=axes[1], zaxis=axes[2],
-                   dragmode="orbit", aspectmode="cube"),
+                   dragmode="orbit", aspectmode="manual",
+                   aspectratio=dict(x=TOUR_HOME_ZOOM, y=TOUR_HOME_ZOOM,
+                                    z=TOUR_HOME_ZOOM)),
         margin=dict(l=0, r=0, t=40, b=0),
         showlegend=False,
         paper_bgcolor="white",
@@ -251,6 +253,19 @@ SCENE_PAD = 0.06          # fraction of each axis span, so markers aren't clippe
 # fall outside the view, exactly as they do when 2D zooms. Every node is still
 # there to pan back to.
 TOUR_ZOOM_3D = 26.0
+# **What the page opens at, and what "Reset view" goes back to.**
+#
+# It is not 1. gl3d clamps the camera's distance, and Plotly's default eye of
+# 1.25 per axis is already past that clamp, so the scene cannot be opened
+# closer by moving the camera -- the graph just sits small in the middle of a
+# lot of white. Growing the aspect ratio is the only lever, and it is the same
+# one the tour uses.
+TOUR_HOME_ZOOM = 2.4
+# The focus color comes up and goes down with the flight rather than snapping
+# on, so a stop reads as arriving somewhere instead of as a light switch. These
+# are the two ends of that ramp; the dim end is the highlight mixed most of the
+# way to white, so it is the same hue throughout and only the intensity moves.
+TOUR_DIM_MIX = 0.72
 # **Scaling the scene is still only half of a zoom.** vis.js scales the whole
 # canvas, so in 2D the nodes and edges grow as the view closes in, and that
 # growth is most of what reads as "zoomed in". Plotly's markers are sized in
@@ -344,6 +359,20 @@ def unit_sphere(segments=TOUR_SPHERE_SEGMENTS):
         ys.append(ry)
         zs.append(rz)
     return xs, ys, zs
+
+
+def dim_color(hex_color: str, toward_white: float = TOUR_DIM_MIX) -> str:
+    """The quiet end of the focus ramp: one hue, mixed toward white.
+
+    Taking the dim end from the same color keeps the ramp a change in intensity
+    rather than a change in hue, which is what reads as one thing getting
+    brighter instead of two different marks.
+    """
+    h = hex_color.lstrip("#")
+    rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    out = [max(0, min(255, int(round(v + (255 - v) * toward_white))))
+           for v in rgb]
+    return "#%02x%02x%02x" % tuple(out)
 
 
 def _sphere_payload():
@@ -462,7 +491,7 @@ __CARD_CSS__
     padding:18px 20px 16px; color:#16202b;
     box-shadow:0 18px 50px rgba(16,26,40,.18), 0 2px 6px rgba(16,26,40,.06);
     opacity:0; transform:translateY(-50%) translateX(14px);
-    transition:opacity .5s ease-out, transform .6s cubic-bezier(.2,.7,.3,1)}
+    transition:opacity .5s ease-out, transform .5s cubic-bezier(.2,.7,.3,1)}
   #bl3-card.on {opacity:1; transform:translateY(-50%) translateX(0)}
 </style>
 <div id="bl3-panel">
@@ -480,8 +509,11 @@ __CARD_JS__
   var ZOOM = __ZOOM3D__, MAG = __MAGNIFY__, EDGE_W = __EDGE_W__;
   var SPH = __SPHERE__, SPAN = __SPAN__;
   var ORBIT = __ORBIT__ * Math.PI / 180, ACROSS = __ACROSS__;
+  var HILITE = "__HILITE__", DIM = "__DIM__";
+  var EDGE_LIT_W = 3.4, tinted = -1, CARD_FADE = 520;
   var BASE = null, shown = 1;
-  var atK = 1, atC = {x: 0, y: 0, z: 0};
+  var HOME_K = __HOME_K__;
+  var atK = HOME_K, atC = {x: 0, y: 0, z: 0};
   var HOME = {eye: {x: 1.25, y: 1.25, z: 1.25}, center: {x: 0, y: 0, z: 0}};
   var i = -1, playing = false, timer = null, anim = null;
   function gd() { return document.querySelector(".plotly-graph-div"); }
@@ -498,9 +530,38 @@ __CARD_JS__
     var L = 1.25 * Math.sqrt(3);          // the default view's distance
     return [v[0]/n*L, v[1]/n*L, v[2]/n*L];
   }
+  function hex(c) {
+    return [parseInt(c.substr(1, 2), 16), parseInt(c.substr(3, 2), 16),
+            parseInt(c.substr(5, 2), 16)];
+  }
+  function blend(a, b, u) {
+    var x = hex(a), y = hex(b), o = "#";
+    for (var i = 0; i < 3; i++) {
+      var v = Math.round(x[i] + (y[i] - x[i]) * u).toString(16);
+      o += v.length < 2 ? "0" + v : v;
+    }
+    return o;
+  }
+  function tint(u, force) {
+    // The rheostat. `u` runs 0 at the home view to 1 at the stop, so the focus
+    // color comes up as the camera arrives and goes back down as it leaves,
+    // using the same eased progress as the flight itself.
+    var el = gd();
+    if (el.data.length < 4) { return; }
+    if (!force && Math.abs(u - tinted) < 0.06) { return; }
+    tinted = u;
+    var c = blend(DIM, HILITE, u), b = base();
+    Plotly.restyle(el, {colorscale: [[[0, c], [1, c]]]}, [el.data.length - 1]);
+    Plotly.restyle(el, {"line.color": c,
+                        "line.width": b.width + (EDGE_LIT_W - b.width) * u},
+                   [el.data.length - 2]);
+  }
   function base() {
-    // The sizes the figure was drawn with, captured once. Reading them back
-    // from the traces after a magnification would compound it.
+    // The sizes the figure was drawn with, captured once and BEFORE the first
+    // flight. Captured lazily inside magnify() it was already a frame late,
+    // so the baseline came back about 1.5% too large and "Reset view" left the
+    // markers slightly bigger than the page had opened with, a little more
+    // each tour.
     var el = gd();
     if (!BASE) {
       var m = el.data[1].marker, ln = el.data[0].line;
@@ -508,14 +569,20 @@ __CARD_JS__
     }
     return BASE;
   }
-  function magnify(f) {
+  function magnify(f, force) {
     // The ordinary nodes are markers, sized in screen pixels, so they have to
     // be grown by hand as the view closes in. Applied in steps rather than
     // every frame: on a large
     // graph a per-frame restyle rewrites the whole size buffer and the flight
     // stutters, and at this speed the steps are not visible.
     var el = gd(), b = base();
-    if (Math.abs(f - shown) < 0.08 && f !== 1 && f !== MAG) { return; }
+    // `force` is passed on the last frame of a flight so the end state is
+    // exact. The step threshold used to be skipped by testing f against 1 and
+    // MAG, which floating point defeats: the final value comes out as
+    // 1.0000000000000002, the equality fails, the restore is dropped as too
+    // small a step, and every tour left the markers a little larger than the
+    // page had opened with.
+    if (!force && Math.abs(f - shown) < 0.08) { return; }
     shown = f;
     var t = MAG > 1 ? (f - 1) / (MAG - 1) : 0;
     Plotly.restyle(el, {"marker.size": [b.size.map(function (v) {
@@ -557,22 +624,33 @@ __CARD_JS__
         "scene.aspectratio": {x: k, y: k, z: k},
         "scene.camera": {center: c, eye: {x: c.x + dir[0], y: c.y + dir[1],
                                           z: c.z + dir[2]}}});
-      magnify(ZOOM > 1 ? 1 + (MAG - 1) * (k - 1) / (ZOOM - 1) : 1);
+      var u = ZOOM > HOME_K
+        ? Math.max(0, Math.min(1, (k - HOME_K) / (ZOOM - HOME_K))) : 1;
+      magnify(1 + (MAG - 1) * u, t >= 1);
+      tint(u, t >= 1);
       if (t < 1) { anim = requestAnimationFrame(frame); } else if (done) { done(); }
     })(t0);
   }
   function flyTo(p, done) { glide(ZOOM, {x: p[0], y: p[1], z: p[2]}, done); }
+  var cardTimer = null;
   function annotate(s) {
     var card = document.getElementById("bl3-card");
+    clearTimeout(cardTimer);
     card.innerHTML = BL_CARD(s.record);
     card.style.display = "block";
     void card.offsetWidth;                 // commit before the transition
     card.classList.add("on");
   }
   function unannotate() {
+    // Fades out rather than vanishing. `display:none` has to wait for the
+    // transition to finish, or the element is gone before it has faded and the
+    // card snaps off the screen however long the CSS says it should take.
     var card = document.getElementById("bl3-card");
+    clearTimeout(cardTimer);
+    if (card.style.display !== "block") { return; }
     card.classList.remove("on");
-    card.style.display = "none";
+    cardTimer = setTimeout(function () { card.style.display = "none"; },
+                           CARD_FADE);
   }
   function sphereRadius(px) {
     // Sized so that at the end of the flight the sphere is exactly as wide as
@@ -617,7 +695,7 @@ __CARD_JS__
       X.push(ax); Y.push(ay); Z.push(az);
     }
     var trace = {type: "surface", x: X, y: Y, z: Z,
-                 colorscale: [[0, "__HILITE__"], [1, "__HILITE__"]],
+                 colorscale: [[0, "__DIM__"], [1, "__DIM__"]],
                  showscale: false, hoverinfo: "skip", showlegend: false,
                  contours: {x: {show: false}, y: {show: false},
                             z: {show: false}},
@@ -625,12 +703,13 @@ __CARD_JS__
                             roughness: 0.80, fresnel: 0.05},
                  lightposition: {x: -1e4, y: 1e4, z: 1e4}};
     clearLit();
+    tinted = -1;
     // The node's own edges, drawn over the grey ones. A trace cannot be partly
     // recolored, so this is a second trace holding only these segments.
     var lit = {type: "scatter3d", mode: "lines",
                x: (seg && seg.x) || [], y: (seg && seg.y) || [],
                z: (seg && seg.z) || [],
-               line: {color: "__HILITE__", width: 3.4},
+               line: {color: "__DIM__", width: 1.4},
                hoverinfo: "skip", showlegend: false};
     Plotly.addTraces(el, [lit, trace]);
   }
@@ -641,7 +720,7 @@ __CARD_JS__
     // The ring is a brand-new trace, drawn at its unzoomed size. If the view
     // is already magnified from the previous stop it has to be brought up to
     // match, or the marker it is meant to circle sits outside it.
-    magnify(shown);
+    magnify(shown, true);
     unannotate();          // the old card must not ride along during the flight
     var rows = "";
     for (var r = 0; r < s.record.length; r++) {
@@ -666,6 +745,8 @@ __CARD_JS__
     show(i);
     if (playing) { timer = setTimeout(step, DWELL); }
   }
+  // Record the untouched sizes now, while nothing has been scaled yet.
+  try { base(); } catch (e) { /* Plotly not ready; magnify() will retry */ }
   var play = document.getElementById("bl3-play");
   document.getElementById("bl3-next").addEventListener("click", function () {
     playing = false; clearTimeout(timer); play.textContent = "Play tour"; step();
@@ -679,10 +760,12 @@ __CARD_JS__
   document.getElementById("bl3-reset").addEventListener("click", function () {
     playing = false; clearTimeout(timer); cancelAnimationFrame(anim);
     play.textContent = "Play tour";
-    unlight();
     unannotate();
     document.getElementById("bl3-info").style.display = "none";
-    glide(1, {x: 0, y: 0, z: 0});
+    // The highlight dims down on the way out instead of being switched off:
+    // the overlays stay until the flight home has finished, and the tint ramp
+    // takes them back to the quiet end as the aspect ratio falls.
+    glide(HOME_K, {x: 0, y: 0, z: 0}, unlight);
     Plotly.relayout(gd(), {"scene.camera": HOME});
   });
 })();
@@ -698,11 +781,13 @@ __CARD_JS__
                   .replace("__SPHERE__", _json.dumps(_sphere_payload()))
                   .replace("__ORBIT__", str(TOUR_ORBIT_DEG))
                   .replace("__ACROSS__", str(TOUR_SCENE_UNITS_ACROSS))
+                  .replace("__HOME_K__", str(TOUR_HOME_ZOOM))
                   .replace("__SPAN__", _json.dumps(
                       [b[1] - b[0] for b in bounds]))
                   .replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
                   .replace("__DWELL__", str(TOUR_DWELL_MS))
                   .replace("__HELP__", RECORD_HELP.replace('"', "&quot;"))
+                  .replace("__DIM__", dim_color(TOUR_HIGHLIGHT))
                   .replace("__HILITE__", TOUR_HIGHLIGHT))
     try:
         with open(path, encoding="utf-8") as fh:

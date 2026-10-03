@@ -2753,14 +2753,30 @@ def test_the_match_colors_are_not_red_green():
     assert TOUR_HIGHLIGHT not in MATCH_COLORS.values()
 
 
-def test_the_3d_scene_is_a_cube(tmp_path):
-    """A cube scene is what makes the normalised mapping linear per axis, and
-    so what makes the centring exact."""
+def test_the_3d_scene_opens_larger_than_the_default(tmp_path):
+    """The page must not open at aspectratio 1.
+
+    gl3d clamps the camera's distance and Plotly's default eye of 1.25 per axis
+    is already past that clamp, so the scene cannot be opened closer by moving
+    the camera: the graph just sits small in the middle of a lot of white.
+    Growing the aspect ratio is the only lever, and it is the same one the tour
+    uses, so the ratio is equal on all three axes and the scene stays a cube in
+    shape.
+    """
     import re
+    from bioleads.graph3d import TOUR_HOME_ZOOM, TOUR_ZOOM_3D
+
     html = _written_3d(tmp_path)
-    # Plotly serialises without spaces, and the page also embeds a template
-    # scene, so match the key/value pair rather than a formatted string.
-    assert re.search(r'"aspectmode":\s*"cube"', html)
+    # Plotly serialises without spaces, and the page embeds a template scene
+    # too, so match the key/value pair rather than a formatted string.
+    assert re.search(r'"aspectmode":\s*"manual"', html)
+    m = re.search(r'"aspectratio":\s*\{"x":([0-9.]+),"y":([0-9.]+),"z":([0-9.]+)\}',
+                  html)
+    assert m, "no explicit aspect ratio"
+    x, y, z = (float(v) for v in m.groups())
+    assert x == y == z, "an uneven ratio would distort the layout"
+    assert x == TOUR_HOME_ZOOM > 1, "the scene opens at the default size"
+    assert TOUR_ZOOM_3D > TOUR_HOME_ZOOM, "a stop does not zoom in"
 
 
 def test_3d_tour_zooms_without_hiding_any_of_the_network():

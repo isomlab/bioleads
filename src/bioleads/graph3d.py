@@ -209,12 +209,16 @@ def write_graph_3d(
     # visible=False hides ticks, gridlines, AND the bounding-box wireframe that
     # Plotly otherwise flashes up while you drag to rotate.
     axis = dict(visible=False)
+    # Pinned ranges, so a normalised position is an exact camera centre. See
+    # `scene_ranges`.
+    _r = scene_ranges(pos)
+    axes = ([dict(axis, range=list(r)) for r in _r] if _r else [axis] * 3)
     fig.update_layout(
         title=heading,
         # aspectmode="cube" fixes the scene to a unit cube, which is what makes
         # a node's normalised position a camera centre that actually centres it.
-        scene=dict(xaxis=axis, yaxis=axis, zaxis=axis, dragmode="orbit",
-                   aspectmode="cube"),
+        scene=dict(xaxis=axes[0], yaxis=axes[1], zaxis=axes[2],
+                   dragmode="orbit", aspectmode="cube"),
         margin=dict(l=0, r=0, t=40, b=0),
         showlegend=False,
         paper_bgcolor="white",
@@ -222,6 +226,38 @@ def write_graph_3d(
     fig.write_html(path, include_plotlyjs=True, full_html=True)
     _inject_tour_3d(path, stops, pos)
     return path
+
+
+SCENE_PAD = 0.06          # fraction of each axis span, so markers aren't clipped
+# How much of the graph a tour stop shows, as a fraction of the full span.
+# This is the zoom control. 0.30 keeps the focus node's neighbours in frame;
+# smaller crops to the node alone.
+TOUR_WINDOW = 0.30
+
+
+def scene_ranges(pos):
+    """Explicit ``[lo, hi]`` per axis, or None when there are no positions.
+
+    **This has to be pinned, not left to autorange.** Plotly maps each axis's
+    RANGE onto the scene cube, and ``scene.camera.center`` is given in that
+    cube's -1..1 space. With autorange the range is whatever Plotly decides,
+    so a position normalised against the data's own min and max is only
+    approximately the right camera centre. At a close standoff "approximately"
+    puts the focus node out of frame.
+
+    The same ranges are used to draw the figure and to convert positions for
+    the camera, which is the only way the two can agree.
+    """
+    raw = [list(map(float, p)) for p in (pos or {}).values()]
+    if not raw:
+        return None
+    out = []
+    for i in range(3):
+        lo = min(p[i] for p in raw)
+        hi = max(p[i] for p in raw)
+        pad = ((hi - lo) or 1.0) * SCENE_PAD
+        out.append([lo - pad, hi + pad])
+    return out
 
 
 def _inject_tour_3d(path: str, stops, pos) -> None:
@@ -243,25 +279,26 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
                                 TOUR_HIGHLIGHT)
     except Exception:          # pragma: no cover - citations is always present
         return
-    # `scene.camera.center` is in the scene's own normalised space, not in data
-    # coordinates. Passing raw positions put the camera near the node but not on
-    # it, which is why the focus node sat off to one side. With aspectmode cube
-    # each axis maps linearly onto -1..1, so the conversion is exact.
+    # **The tour moves the axis ranges, not the camera.** Three rounds were
+    # spent shortening `scene.camera.eye` to zoom in, and none of them did
+    # anything: gl3d clamps the camera's distance, so every standoff below
+    # about 0.5 renders identically. `scene.camera.center` is no better -- it
+    # is in a normalised space of its own, which is a second coordinate system
+    # to get wrong, and it was getting it wrong.
+    #
+    # Narrowing each axis range around the node does both jobs exactly and in
+    # ONE space, the data's own: the node is the centre of the cube, which is
+    # what the default camera looks at, and the window width is the zoom. Every
+    # other piece of the tour (the highlight trace, the annotation) is already
+    # in data coordinates, so there is now only one.
     raw = {n: list(map(float, p)) for n, p in (pos or {}).items()}
-    coords = {}
-    if raw:
-        lo = [min(p[i] for p in raw.values()) for i in range(3)]
-        hi = [max(p[i] for p in raw.values()) for i in range(3)]
-        rng = [(hi[i] - lo[i]) or 1.0 for i in range(3)]
-        coords = {n: [2 * (p[i] - lo[i]) / rng[i] - 1 for i in range(3)]
-                  for n, p in raw.items()}
-    # Two coordinate systems, and they are not interchangeable. The camera
-    # centre is in the scene's normalised space; a scene annotation is anchored
-    # in DATA space. Carrying both is cheaper than converting in JavaScript and
-    # makes which-is-which explicit.
-    stops = [dict(st, xyz=coords.get(st["id"]), xyzData=raw.get(st["id"]))
-             for st in stops if coords.get(st["id"])]
+    bounds = scene_ranges(pos)
+    stops = [dict(st, xyz=raw.get(st["id"])) for st in stops
+             if raw.get(st["id"])]
     if not stops:
+        return
+
+    if not bounds:
         return
 
     block = """
@@ -292,42 +329,44 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
 <script>
 (function () {
   var STOPS = __STOPS__, FLIGHT = __FLIGHT__, DWELL = __DWELL__;
+  var BOUNDS = __BOUNDS__, WINDOW = __WINDOW__, AX = ["x", "y", "z"];
   var HOME = {eye: {x: 1.25, y: 1.25, z: 1.25}, center: {x: 0, y: 0, z: 0}};
   var i = -1, playing = false, timer = null, anim = null;
   function gd() { return document.querySelector(".plotly-graph-div"); }
   function ease(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3)/2; }
-  function span(a, b) {
-    // Normalise the node's coordinates so the camera sits a constant distance
-    // away whatever the scene's scale happens to be.
-    var n = Math.sqrt(a*a + b*b) || 1;
-    return n;
+  function ranges() {
+    // Whatever the scene is showing now, so a flight starts where the last one
+    // left off instead of jumping back to the full view first.
+    var sc = gd()._fullLayout.scene;
+    return AX.map(function (a, i) {
+      var r = sc[a + "axis"] && sc[a + "axis"].range;
+      return r ? [r[0], r[1]] : [BOUNDS[i][0], BOUNDS[i][1]];
+    });
   }
-  function flyTo(p, done) {
-    var el = gd(), from = (el.layout.scene && el.layout.scene.camera) || HOME;
-    // The node IS the centre, so it lands in the middle of the view. The eye
-    // sits a fixed distance away along a constant direction, which keeps every
-    // stop framed the same way instead of depending on where the node happens
-    // to be in the scene.
-    // The standoff has come down twice, 0.8 -> 0.35 -> 0.14. In normalised
-    // scene space the whole graph spans 2 units per axis, so 0.14 puts the
-    // camera well inside it and the focus node fills the view.
-    var d = 0.14;
-    var to = {center: {x: p[0], y: p[1], z: p[2]},
-              eye: {x: p[0] + d, y: p[1] + d, z: p[2] + d}};
-    var t0 = performance.now();
+  function windowAt(p) {
+    // A box of the same size on every stop, centred on the node. Equal widths
+    // are what make the stops comparable: the node is always the middle of the
+    // view and always at the same magnification.
+    return AX.map(function (a, i) {
+      var h = (BOUNDS[i][1] - BOUNDS[i][0]) * WINDOW / 2;
+      return [p[i] - h, p[i] + h];
+    });
+  }
+  function glide(to, done) {
+    var el = gd(), from = ranges(), t0 = performance.now();
     cancelAnimationFrame(anim);
     (function frame(now) {
-      var t = Math.min(1, (now - t0) / FLIGHT), e = ease(t);
-      function mix(a, b) { return a + (b - a) * e; }
-      Plotly.relayout(el, {"scene.camera": {
-        center: {x: mix(from.center ? from.center.x : 0, to.center.x),
-                 y: mix(from.center ? from.center.y : 0, to.center.y),
-                 z: mix(from.center ? from.center.z : 0, to.center.z)},
-        eye: {x: mix(from.eye.x, to.eye.x), y: mix(from.eye.y, to.eye.y),
-              z: mix(from.eye.z, to.eye.z)}}});
+      var t = Math.min(1, (now - t0) / FLIGHT), e = ease(t), u = {};
+      for (var i = 0; i < 3; i++) {
+        u["scene." + AX[i] + "axis.range"] = [
+          from[i][0] + (to[i][0] - from[i][0]) * e,
+          from[i][1] + (to[i][1] - from[i][1]) * e];
+      }
+      Plotly.relayout(el, u);
       if (t < 1) { anim = requestAnimationFrame(frame); } else if (done) { done(); }
     })(t0);
   }
+  function flyTo(p, done) { glide(windowAt(p), done); }
   function annotate(s) {
     // A scene annotation is anchored in the data, so it travels with the node
     // as the camera moves instead of sitting in a corner of the window.
@@ -336,7 +375,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
       lines.push("<b>" + s.record[r][0] + "</b>  " + s.record[r][1]);
     }
     Plotly.relayout(gd(), {"scene.annotations": [{
-      x: s.xyzData[0], y: s.xyzData[1], z: s.xyzData[2],
+      x: s.xyz[0], y: s.xyz[1], z: s.xyz[2],
       text: lines.join("<br>"), showarrow: true, arrowhead: 2, arrowsize: 1,
       arrowwidth: 1.2, arrowcolor: "#5b6b7c", ax: 90, ay: 0,
       align: "left", xanchor: "left", bgcolor: "rgba(255,255,255,0.94)",
@@ -351,7 +390,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     var el = gd();
     var trace = {x: [p[0]], y: [p[1]], z: [p[2]], mode: "markers",
                  type: "scatter3d", hoverinfo: "skip", showlegend: false,
-                 marker: {size: 22, color: "__HILITE__", opacity: 0.55,
+                 marker: {size: 30, color: "__HILITE__", opacity: 0.55,
                           line: {width: 2, color: "#7a0f37"}}};
     if (el.data.length > 2) { Plotly.deleteTraces(el, el.data.length - 1); }
     Plotly.addTraces(el, trace);
@@ -402,6 +441,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     unlight();
     unannotate();
     document.getElementById("bl3-info").style.display = "none";
+    glide(BOUNDS);
     Plotly.relayout(gd(), {"scene.camera": HOME});
   });
 })();
@@ -409,6 +449,8 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
 """
     import json as _json
     block = (block.replace("__STOPS__", _json.dumps(stops))
+                  .replace("__BOUNDS__", _json.dumps(bounds))
+                  .replace("__WINDOW__", str(TOUR_WINDOW))
                   .replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
                   .replace("__DWELL__", str(TOUR_DWELL_MS))
                   .replace("__HELP__", RECORD_HELP.replace('"', "&quot;"))

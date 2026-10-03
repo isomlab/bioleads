@@ -2753,20 +2753,6 @@ def test_the_match_colors_are_not_red_green():
     assert TOUR_HIGHLIGHT not in MATCH_COLORS.values()
 
 
-def test_the_3d_camera_centre_is_in_scene_space_not_data_space(tmp_path):
-    """`scene.camera.center` is normalised to the scene box, not data
-    coordinates. Passing raw positions put the camera near the node but not on
-    it, so the focus node sat off to one side."""
-    import json
-    import re
-    html = _written_3d(tmp_path)
-    stops = json.loads(re.search(r"var STOPS = (\[.*?\]), FLIGHT", html, re.S).group(1))
-    for s in stops:
-        assert all(-1.001 <= c <= 1.001 for c in s["xyz"]), s["xyz"]
-    # The node is the centre, so it lands in the middle of the view.
-    assert "center: {x: p[0], y: p[1], z: p[2]}" in html
-
-
 def test_the_3d_scene_is_a_cube(tmp_path):
     """A cube scene is what makes the normalised mapping linear per axis, and
     so what makes the centring exact."""
@@ -2775,3 +2761,62 @@ def test_the_3d_scene_is_a_cube(tmp_path):
     # Plotly serialises without spaces, and the page also embeds a template
     # scene, so match the key/value pair rather than a formatted string.
     assert re.search(r'"aspectmode":\s*"cube"', html)
+
+
+def test_3d_tour_zooms_by_window_not_by_camera():
+    """The tour must move the axis RANGES, and live in one coordinate space.
+
+    Three rounds were spent shortening `scene.camera.eye`, and none of them
+    changed the view: gl3d clamps the camera distance, so every standoff below
+    roughly 0.5 renders identically. `scene.camera.center` is a second,
+    normalised space, and feeding the highlight trace (which is drawn in DATA
+    space) a camera coordinate put a loose marker in the scene attached to no
+    node at all.
+
+    So two invariants: the flight narrows the ranges, and a stop carries data
+    coordinates only -- there is no second space left to confuse.
+    """
+    pytest.importorskip("plotly")
+    import json
+    import re
+    import tempfile
+
+    import networkx as nx
+
+    from bioleads import citations, graph3d
+
+    g = nx.DiGraph()
+    for i in range(6):
+        g.add_node(f"PMID:{i}", pmid=str(i), title=f"P{i}", in_corpus_citations=i)
+    g.add_edges_from([("PMID:5", f"PMID:{j}") for j in range(3)])
+
+    with tempfile.TemporaryDirectory() as d:
+        out = graph3d.write_graph_3d(g, os.path.join(d, "t.html"),
+                                     size_attr="in_corpus_citations",
+                                     stops=citations.tour_stops(g, 3))
+        html = open(out, encoding="utf-8").read()
+
+    # The zoom is the window, not the camera.
+    assert "axis.range" in html
+    assert "var d = 0." not in html, "the camera standoff is back"
+
+    # One coordinate space.
+    assert "xyzData" not in html
+    stops = json.loads(re.search(r"var STOPS = (\[.*\]), FLIGHT = ", html, re.S).group(1))
+    bounds = json.loads(re.search(r"var BOUNDS = (\[\[.*?\]\]), WINDOW", html, re.S).group(1))
+    assert stops and len(bounds) == 3
+
+    # Every stop sits inside the scene, and the window is a real crop of it.
+    window = float(re.search(r"WINDOW = ([0-9.]+)", html).group(1))
+    assert 0 < window < 1
+    for s in stops:
+        for i in range(3):
+            lo, hi = bounds[i]
+            assert lo <= s["xyz"][i] <= hi, "a stop lies outside the scene"
+
+    # The axis ranges the figure is drawn with are the ones the tour flies back
+    # to, or "Reset view" would snap to a different frame than it started in.
+    drawn = [[float(v) for v in m]
+             for m in re.findall(r'"range":\s*\[([-\d.e]+),\s*([-\d.e]+)\]',
+                                 html)[:3]]
+    assert drawn == [[b[0], b[1]] for b in bounds]

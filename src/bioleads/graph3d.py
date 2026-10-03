@@ -308,9 +308,10 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
     // sits a fixed distance away along a constant direction, which keeps every
     // stop framed the same way instead of depending on where the node happens
     // to be in the scene.
-    // 0.35, not 0.8: at 0.8 the node was centred but still small, which is
-    // being shown where it is rather than being shown what it is.
-    var d = 0.35;
+    // The standoff has come down twice, 0.8 -> 0.35 -> 0.14. In normalised
+    // scene space the whole graph spans 2 units per axis, so 0.14 puts the
+    // camera well inside it and the focus node fills the view.
+    var d = 0.14;
     var to = {center: {x: p[0], y: p[1], z: p[2]},
               eye: {x: p[0] + d, y: p[1] + d, z: p[2] + d}};
     var t0 = performance.now();
@@ -362,7 +363,7 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
   function show(k) {
     var s = STOPS[k]; if (!s) { return; }
     light(s.xyz);
-    annotate(s);
+    unannotate();          // the old card must not ride along during the flight
     var rows = "";
     for (var r = 0; r < s.record.length; r++) {
       var v = s.record[r][1];
@@ -376,7 +377,9 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
       "</b> &middot; " + s.degree + " connection(s) &middot; " +
       (s.label || "") + "</div>";
     info.style.display = "block";
-    flyTo(s.xyz);
+    // The label waits for the camera. Annotating first means reading a card
+    // that is sliding across the screen.
+    flyTo(s.xyz, function () { annotate(s); });
   }
   function step() {
     i = (i + 1) % STOPS.length;

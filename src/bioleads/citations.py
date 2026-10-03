@@ -774,14 +774,18 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
   #bl-tour-controls button {margin-left:5px}
   #bl-tour-help {cursor:help; margin-left:6px; color:#5b6b7c;
     font-size:13px; border-bottom:1px dotted #9aa8b6}
-  #bl-tour-info {display:none; margin-top:7px; width:380px; max-height:62vh;
-    overflow-y:auto; border-top:1px solid #d7dee6; padding-top:6px;
-    color:#1f2a36}
-  #bl-tour-info .bl-tour-head {margin-bottom:5px; color:#5b6b7c}
-  #bl-tour-info table {border-collapse:collapse; width:100%}
-  #bl-tour-info th {text-align:left; vertical-align:top; font-weight:600;
+  #bl-tour-info {display:none; margin-top:7px; border-top:1px solid #d7dee6;
+    padding-top:6px; color:#5b6b7c; max-width:300px}
+  /* The record itself rides next to the node, not in the corner. */
+  #bl-node-card {display:none; position:fixed; z-index:10000; width:330px;
+    max-height:60vh; overflow-y:auto; font:12px/1.35 system-ui,sans-serif;
+    background:rgba(255,255,255,.96); border:1px solid #d7dee6;
+    border-radius:6px; padding:7px 9px; color:#1f2a36;
+    box-shadow:0 2px 6px rgba(0,0,0,.15); pointer-events:auto}
+  #bl-node-card table {border-collapse:collapse; width:100%}
+  #bl-node-card th {text-align:left; vertical-align:top; font-weight:600;
     color:#5b6b7c; padding:2px 8px 2px 0; white-space:nowrap}
-  #bl-tour-info td {vertical-align:top; padding:2px 0; word-break:break-word}
+  #bl-node-card td {vertical-align:top; padding:2px 0; word-break:break-word}
 </style>
 <div id="bl-physics">
   <button id="bl-physics-toggle">Pause layout</button>
@@ -794,6 +798,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
   </span>
   <div id="bl-tour-info"></div>
 </div>
+<div id="bl-node-card"></div>
 <script type="text/javascript">
 (function () {
   var on = true;
@@ -803,7 +808,9 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     // the nodes keep moving out from under it mid-flight.
     var i = -1, playing = false, timer = null, lit = null;
     var panel = document.getElementById("bl-tour-info");
+    var card = document.getElementById("bl-node-card");
     var play = document.getElementById("bl-tour-play");
+    var at = null, landed = false;
     var nodes = net.body.data.nodes;
     function unlight() {
       if (lit) { nodes.update({id: lit.id, color: lit.color, size: lit.size,
@@ -818,12 +825,33 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
                                     {background: "__HILITE__", border: "#7a0f37"}},
                     size: (n.size || 10) * 1.6, borderWidth: 3});
     }
+    // Canvas coordinates survive panning and zooming; DOM coordinates do not.
+    // So the card is positioned from the node's canvas position on every
+    // redraw rather than once, which is what keeps it beside its node when
+    // the view moves afterwards.
+    function place() {
+      if (!landed || !at) { card.style.display = "none"; return; }
+      var pos = net.getPositions([at.id])[at.id];
+      if (!pos) { card.style.display = "none"; return; }
+      var dom = net.canvasToDOM(pos);
+      var box = net.body.container.getBoundingClientRect();
+      card.style.display = "block";
+      var w = card.offsetWidth, h = card.offsetHeight;
+      var x = box.left + dom.x + 26, y = box.top + dom.y - h / 2;
+      // Flip to the other side rather than running off the window edge.
+      if (x + w > window.innerWidth - 8) { x = box.left + dom.x - w - 26; }
+      card.style.left = Math.max(8, x) + "px";
+      card.style.top = Math.min(Math.max(8, y), window.innerHeight - h - 8) + "px";
+    }
     function show(k) {
       var s = STOPS[k];
       if (!s) { return; }
       net.setOptions({physics: {enabled: false}});
       light(s.id);
       net.selectNodes([s.id]);
+      // The card goes away for the duration of the flight. Showing it first
+      // means reading a card that is still travelling.
+      at = s; landed = false; card.style.display = "none";
       net.focus(s.id, {scale: __ZOOM__, animation:
         {duration: __FLIGHT__, easingFunction: "easeInOutCubic"}});
       var rows = "";
@@ -835,11 +863,19 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
         }
         rows += "<tr><th>" + s.record[r][0] + "</th><td>" + val + "</td></tr>";
       }
+      card.innerHTML = "<table>" + rows + "</table>";
       panel.innerHTML = '<div class="bl-tour-head"><b>' + (k + 1) + " of " +
-        STOPS.length + "</b> &middot; " + s.degree + " connection(s)</div>" +
-        "<table>" + rows + "</table>";
+        STOPS.length + "</b> &middot; " + s.degree + " connection(s) &middot; " +
+        (s.label || "") + "</div>";
       panel.style.display = "block";
+      // `animationFinished` is the real signal; the timer is the fallback,
+      // because a focus that is interrupted never fires the event at all.
+      var mine = s;
+      var land = function () { if (at === mine) { landed = true; place(); } };
+      net.once("animationFinished", land);
+      setTimeout(land, __FLIGHT__ + 120);
     }
+    net.on("afterDrawing", place);
     function step() {
       i = (i + 1) % STOPS.length;
       show(i);
@@ -857,6 +893,7 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     document.getElementById("bl-tour-reset").addEventListener("click", function () {
       playing = false; clearTimeout(timer); play.textContent = "Play tour";
       panel.style.display = "none";
+      at = null; landed = false; card.style.display = "none";
       unlight();
       net.unselectAll();
       net.fit({animation: {duration: 1400, easingFunction: "easeInOutCubic"}});

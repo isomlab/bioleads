@@ -233,7 +233,8 @@ def write_graph_3d(
         paper_bgcolor="white",
     )
     fig.write_html(path, include_plotlyjs=True, full_html=True)
-    _inject_tour_3d(path, stops, pos, dict(zip(nodes, marker_sizes)))
+    _inject_tour_3d(path, stops, pos, dict(zip(nodes, marker_sizes)),
+                    _incident_segments(g, pos, stops))
     return path
 
 
@@ -249,7 +250,7 @@ SCENE_PAD = 0.06          # fraction of each axis span, so markers aren't clippe
 # distance, so the graph gets bigger and the parts that no longer fit simply
 # fall outside the view, exactly as they do when 2D zooms. Every node is still
 # there to pan back to.
-TOUR_ZOOM_3D = 14.0
+TOUR_ZOOM_3D = 26.0
 # **Scaling the scene is still only half of a zoom.** vis.js scales the whole
 # canvas, so in 2D the nodes and edges grow as the view closes in, and that
 # growth is most of what reads as "zoomed in". Plotly's markers are sized in
@@ -258,7 +259,7 @@ TOUR_ZOOM_3D = 14.0
 # Measured against the 2D tour on a 1096px canvas, where the nodes run 32px
 # to 90px across and the focused one is 82px. 3.5x puts the 3D markers at
 # 24-91px, which is the same graph at the same size.
-TOUR_MAGNIFY = 2.5        # node markers at the end of a flight
+TOUR_MAGNIFY = 2.0        # node markers at the end of a flight
 TOUR_EDGE_WIDTH = 2.6     # edge width at the end of a flight
 # **The focus node is a real sphere in the scene, not a marker and not an
 # overlay.** Markers are sized in screen pixels, so they never grow as the
@@ -350,7 +351,38 @@ def _sphere_payload():
     return {"x": xs, "y": ys, "z": zs}
 
 
-def _inject_tour_3d(path: str, stops, pos, sizes=None) -> None:
+def _incident_segments(g, pos, stops):
+    """For each stop, its own edges as ready-to-draw line segments.
+
+    The whole graph is one line trace, and a trace cannot be partly recolored,
+    so lighting a node's connections means drawing them again on top. Computed
+    here, once, rather than walking the adjacency in the browser on every stop.
+
+    Direction is dropped deliberately: at a tour stop the question is which
+    papers this one is connected to, not which way each citation points, and
+    the heading already says the graph is directed.
+    """
+    out = {}
+    for st in stops or []:
+        n = st.get("id")
+        if n not in (pos or {}):
+            continue
+        xs, ys, zs = [], [], []
+        seen = set()
+        for m in set(g.predecessors(n)) | set(g.successors(n)) \
+                if g.is_directed() else set(g.neighbors(n)):
+            if m == n or m in seen or m not in pos:
+                continue
+            seen.add(m)
+            (xa, ya, za), (xb, yb, zb) = pos[n], pos[m]
+            xs += [float(xa), float(xb), None]
+            ys += [float(ya), float(yb), None]
+            zs += [float(za), float(zb), None]
+        out[n] = {"x": xs, "y": ys, "z": zs}
+    return out
+
+
+def _inject_tour_3d(path: str, stops, pos, sizes=None, segments=None) -> None:
     """Give a 3D view the same tour and record panel as the 2D one.
 
     There is no physics here — Plotly draws a fixed scene — so there is nothing
@@ -393,8 +425,10 @@ def _inject_tour_3d(path: str, stops, pos, sizes=None) -> None:
     # sized from. Without it the sphere would be a fixed ball that says nothing
     # about the paper it stands for.
     sizes = sizes or {}
+    segments = segments or {}
     stops = [dict(st, xyz=raw.get(st["id"]), cam=cam.get(st["id"]),
-                  px=round(float(sizes.get(st["id"], 12.0)), 2))
+                  px=round(float(sizes.get(st["id"], 12.0)), 2),
+                  seg=segments.get(st["id"], {"x": [], "y": [], "z": []}))
              for st in stops if raw.get(st["id"]) and cam.get(st["id"])]
     if not stops:
         return
@@ -487,8 +521,8 @@ __CARD_JS__
     Plotly.restyle(el, {"marker.size": [b.size.map(function (v) {
       return v * f; })]}, [1]);
     Plotly.restyle(el, {"line.width": b.width + (EDGE_W - b.width) * t}, [0]);
-    // The focus sphere needs nothing here: it is in the data, so the zoom
-    // grows it on its own.
+    // The focus sphere and the lit edges need nothing here: both are in the
+    // data, so the zoom grows them on its own.
   }
   // **`scene.camera.center` is in units of half the aspect ratio.** A node at
   // normalised position n sits at n * k / 2, so the centre has to be rescaled
@@ -554,7 +588,14 @@ __CARD_JS__
     if (!(ZOOM > 0) || !(plotMin > 0)) { return px / 900; }
     return px * MAG * ACROSS / (2 * ZOOM * plotMin);
   }
-  function light(p, px) {
+  function clearLit() {
+    // The sphere and the lit edges are the two traces added on top of the
+    // figure's own pair. Removing them by index from the end is only safe if
+    // they always come off together, so they do.
+    var el = gd();
+    while (el.data.length > 2) { Plotly.deleteTraces(el, el.data.length - 1); }
+  }
+  function light(p, px, seg) {
     // A real sphere, in the data. It grows because the camera comes closer,
     // which is the whole point: a marker would stay the same size however far
     // in the flight went, and an overlay would be a sticker on the glass.
@@ -583,16 +624,20 @@ __CARD_JS__
                  lighting: {ambient: 0.60, diffuse: 0.85, specular: 0.14,
                             roughness: 0.80, fresnel: 0.05},
                  lightposition: {x: -1e4, y: 1e4, z: 1e4}};
-    if (el.data.length > 2) { Plotly.deleteTraces(el, el.data.length - 1); }
-    Plotly.addTraces(el, trace);
+    clearLit();
+    // The node's own edges, drawn over the grey ones. A trace cannot be partly
+    // recolored, so this is a second trace holding only these segments.
+    var lit = {type: "scatter3d", mode: "lines",
+               x: (seg && seg.x) || [], y: (seg && seg.y) || [],
+               z: (seg && seg.z) || [],
+               line: {color: "__HILITE__", width: 3.4},
+               hoverinfo: "skip", showlegend: false};
+    Plotly.addTraces(el, [lit, trace]);
   }
-  function unlight() {
-    var el = gd();
-    if (el.data.length > 2) { Plotly.deleteTraces(el, el.data.length - 1); }
-  }
+  function unlight() { clearLit(); }
   function show(k) {
     var s = STOPS[k]; if (!s) { return; }
-    light(s.xyz, s.px);
+    light(s.xyz, s.px, s.seg);
     // The ring is a brand-new trace, drawn at its unzoomed size. If the view
     // is already magnified from the previous stop it has to be brought up to
     // match, or the marker it is meant to circle sits outside it.

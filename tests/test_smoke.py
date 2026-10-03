@@ -2825,7 +2825,7 @@ def test_3d_tour_zooms_without_hiding_any_of_the_network():
     # node and the only reason it grows is that the camera came closer. A fixed
     # fraction of the graph made every focus node the same enormous ball and hid
     # what a node's size means here.
-    assert "sphereRadius(px)" in tour and "light(s.xyz, s.px)" in tour
+    assert "sphereRadius(px)" in tour and "light(s.xyz, s.px," in tour
     assert "var SR" not in tour, "the fixed sphere fraction is back"
     assert across > 2, (
         "the cube does not fill the viewport: the default camera sits back, so "
@@ -2959,3 +2959,59 @@ def test_both_tours_share_one_card_and_keep_clear_of_bootstrap():
         assert "window.BL_CARD" in page and ".bl-card .bl-row" in page
         # Controls belong in a bottom corner, out of the picture.
         assert "bottom:16px; left:16px" in page
+
+
+def test_3d_tour_lights_the_focus_node_s_own_edges():
+    """A stop should show which papers this one connects to, in both views.
+
+    2D gets this from vis.js, which repaints a selected node's edges. Plotly
+    has no equivalent: the whole graph is **one line trace**, and a trace
+    cannot be partly recolored, so the node's own edges are drawn again on top
+    as a second trace. The segments are computed in Python, once, rather than
+    walking the adjacency in the browser on every stop.
+    """
+    pytest.importorskip("plotly")
+    import json
+    import re
+    import tempfile
+
+    import networkx as nx
+
+    from bioleads import citations, graph3d
+
+    g = nx.DiGraph()
+    for i in range(7):
+        g.add_node(f"PMID:{i}", pmid=str(i), title=f"P{i}", in_corpus_citations=i)
+    # PMID:6 cites three papers and is cited by one, and one of those is
+    # reciprocal, so its degree exceeds its neighbour count.
+    g.add_edges_from([("PMID:6", "PMID:0"), ("PMID:6", "PMID:1"),
+                      ("PMID:6", "PMID:2"), ("PMID:0", "PMID:6")])
+
+    with tempfile.TemporaryDirectory() as d:
+        out = graph3d.write_graph_3d(g, os.path.join(d, "t.html"),
+                                     size_attr="in_corpus_citations",
+                                     stops=citations.tour_stops(g, 3))
+        html = open(out, encoding="utf-8").read()
+
+    tour = [m.group(1) for m in
+            re.finditer(r"<script[^>]*>(.*?)</script>", html, re.S)
+            if "bl3-play" in m.group(1)][0]
+    stops = json.loads(re.search(r"var STOPS = (\[.*\]), FLIGHT = ", tour,
+                                 re.S).group(1))
+    top = stops[0]
+    assert top["id"] == "PMID:6"
+    assert top["degree"] == 4, "setup changed"
+
+    # Three distinct neighbours, each one segment of two points plus a None.
+    seg = top["seg"]
+    assert len(seg["x"]) == 9, seg["x"]
+    assert seg["x"][2] is None and seg["x"][5] is None
+    assert len(seg["y"]) == len(seg["x"]) == len(seg["z"])
+    # The reciprocal pair is one edge on screen, not two drawn over each other.
+    assert top["degree"] > len(seg["x"]) // 3
+
+    # Both overlay traces come off together, or deleting by index unlights the
+    # wrong one.
+    assert "function clearLit()" in tour
+    assert "while (el.data.length > 2)" in tour
+    assert "Plotly.addTraces(el, [lit, trace])" in tour

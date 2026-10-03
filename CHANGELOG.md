@@ -32,6 +32,19 @@ while the major version is 0, a minor bump may change defaults.
 - **The canvas fills what is left** rather than a fixed 800px, with the card
   padding and borders removed. The graph is the page now.
 
+### A stop lights the node's own edges, in both views
+
+- **The 3D tour now shows which papers the focus node connects to.** 2D has had
+  this from vis.js, which repaints a selected node's edges; Plotly has no
+  equivalent, because the whole graph is **one line trace** and a trace cannot
+  be partly recolored. The node's own edges are drawn again on top as a second
+  trace in the highlight color.
+- The segments are computed in Python, once per stop, rather than walking the
+  adjacency in the browser every time the camera lands.
+- **Direction is dropped.** At a stop the question is which papers this one is
+  connected to, not which way each citation points, so a reciprocal pair is one
+  line rather than two drawn over each other.
+
 ### The 3D focus node is the size of the node, not of the screen
 
 - **Its radius comes from that node's own marker**, so the only reason it gets
@@ -40,7 +53,7 @@ while the major version is 0, a minor bump may change defaults.
   the one thing a node's size means here: how often the paper was cited.
 - Sized to end exactly as wide as the node's magnified marker, so it sits among
   its neighbours instead of swallowing them.
-- **The flight goes to aspectratio 14, and the markers grow 2.5x rather than
+- **The flight goes to aspectratio 26, and the markers grow 2x rather than
   3.5x.** Both changes are about the same thing: at a stop you should be able to
   see that the most connected nodes are separate nodes. Zooming spreads them
   apart and magnifying pushes them back together, so the previous pair worked

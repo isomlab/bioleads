@@ -609,7 +609,13 @@ TOUR_STOPS = 10
 
 # Tour pacing. The first version flew in 1.4 s and moved on after 4.2 s, which
 # is long enough to see that something happened and not long enough to read it.
-TOUR_FLIGHT_MS = 4200      # camera travel, slower so the move can be followed
+TOUR_FLIGHT_MS = 4200      # camera travel in 3D, where the camera only moves
+
+# 2D needs longer than 3D for the same distance to feel the same. vis.js `focus`
+# changes position *and* zoom level together, and the scale change is what the
+# eye reads as speed, so a duration that is gentle in a Plotly scene is abrupt
+# here.
+TOUR_FLIGHT_2D_MS = 6500
 TOUR_HOLD_MS = 3200        # time to read the record, AFTER the camera arrives
 TOUR_ZOOM = 1.6            # gentler than the 1.9 it started at
 
@@ -617,6 +623,7 @@ TOUR_ZOOM = 1.6            # gentler than the 1.9 it started at
 # the zoom be slowed and the advance be quickened at the same time: when the
 # two were one number, a slower camera meant less reading time.
 TOUR_DWELL_MS = TOUR_FLIGHT_MS + TOUR_HOLD_MS
+TOUR_DWELL_2D_MS = TOUR_FLIGHT_2D_MS + TOUR_HOLD_MS
 
 # Hard limit on how long the layout may simulate before physics is switched off
 # regardless. vis.js does not always emit `stabilizationIterationsDone` on a
@@ -900,8 +907,8 @@ def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
         return
     snippet = snippet.replace("__TOOLTIP_DELAY__", str(TOOLTIP_DELAY_MS))
     snippet = snippet.replace("__TOUR_STOPS__", json.dumps(stops or []))
-    snippet = snippet.replace("__FLIGHT__", str(TOUR_FLIGHT_MS))
-    snippet = snippet.replace("__DWELL__", str(TOUR_DWELL_MS))
+    snippet = snippet.replace("__FLIGHT__", str(TOUR_FLIGHT_2D_MS))
+    snippet = snippet.replace("__DWELL__", str(TOUR_DWELL_2D_MS))
     snippet = snippet.replace("__ZOOM__", str(TOUR_ZOOM))
     snippet = snippet.replace("__RECORD_HELP__", RECORD_HELP)
     snippet = snippet.replace("__SETTLE_LIMIT__", str(SETTLE_LIMIT_MS))

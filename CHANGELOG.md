@@ -5,6 +5,22 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### The 2D zoom is slower, and the 3D focus node is actually centred
+
+- **2D flies for 6.5 s, 3D for 4.2 s.** The same duration does not feel the same
+  in both: vis.js `focus` changes zoom level as well as position, and **the
+  scale change is what the eye reads as speed**, so what is gentle in a Plotly
+  scene is abrupt here. Two constants, `TOUR_FLIGHT_2D_MS` and
+  `TOUR_FLIGHT_MS`.
+- **The 3D focus node now lands in the middle of the view.** It sat off to one
+  side because `scene.camera.center` is in the scene's **normalised** space, not
+  in data coordinates, and raw node positions were being passed straight in.
+  Positions are converted per axis, and the scene is pinned to
+  `aspectmode="cube"` so that conversion is exactly linear.
+- The eye now sits a fixed distance along a constant direction from the centre,
+  so **every stop is framed the same way** rather than depending on where in the
+  scene the node happens to be.
+
 ### Colors that work for red-green color blindness
 
 - **Green and amber are gone.** That is the one pair a red-green color blind

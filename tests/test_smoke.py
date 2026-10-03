@@ -2599,9 +2599,13 @@ def test_the_tour_is_paced_to_be_read(tmp_path):
     assert TOUR_FLIGHT_MS >= 3500
     assert TOUR_HOLD_MS <= 4000
     assert TOUR_DWELL_MS == TOUR_FLIGHT_MS + TOUR_HOLD_MS
+    from bioleads.citations import TOUR_FLIGHT_2D_MS, TOUR_DWELL_2D_MS
+    # 2D is slower than 3D for the same distance: vis.js `focus` changes zoom
+    # as well as position, and the scale change is what reads as speed.
+    assert TOUR_FLIGHT_2D_MS > TOUR_FLIGHT_MS
     html = _written_network(tmp_path)
-    assert f"duration: {TOUR_FLIGHT_MS}" in html
-    assert f"setTimeout(step, {TOUR_DWELL_MS})" in html
+    assert f"duration: {TOUR_FLIGHT_2D_MS}" in html
+    assert f"setTimeout(step, {TOUR_DWELL_2D_MS})" in html
     assert not any(x in html for x in ("__FLIGHT__", "__DWELL__", "__ZOOM__"))
 
 
@@ -2747,3 +2751,27 @@ def test_the_match_colors_are_not_red_green():
         return 0.2126 * r + 0.7152 * g + 0.0722 * b
     assert abs(lum(MATCH_COLORS["all"]) - lum(MATCH_COLORS["partial"])) > 40
     assert TOUR_HIGHLIGHT not in MATCH_COLORS.values()
+
+
+def test_the_3d_camera_centre_is_in_scene_space_not_data_space(tmp_path):
+    """`scene.camera.center` is normalised to the scene box, not data
+    coordinates. Passing raw positions put the camera near the node but not on
+    it, so the focus node sat off to one side."""
+    import json
+    import re
+    html = _written_3d(tmp_path)
+    stops = json.loads(re.search(r"var STOPS = (\[.*?\]), FLIGHT", html, re.S).group(1))
+    for s in stops:
+        assert all(-1.001 <= c <= 1.001 for c in s["xyz"]), s["xyz"]
+    # The node is the centre, so it lands in the middle of the view.
+    assert "center: {x: p[0], y: p[1], z: p[2]}" in html
+
+
+def test_the_3d_scene_is_a_cube(tmp_path):
+    """A cube scene is what makes the normalised mapping linear per axis, and
+    so what makes the centring exact."""
+    import re
+    html = _written_3d(tmp_path)
+    # Plotly serialises without spaces, and the page also embeds a template
+    # scene, so match the key/value pair rather than a formatted string.
+    assert re.search(r'"aspectmode":\s*"cube"', html)

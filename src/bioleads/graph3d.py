@@ -211,7 +211,10 @@ def write_graph_3d(
     axis = dict(visible=False)
     fig.update_layout(
         title=heading,
-        scene=dict(xaxis=axis, yaxis=axis, zaxis=axis, dragmode="orbit"),
+        # aspectmode="cube" fixes the scene to a unit cube, which is what makes
+        # a node's normalised position a camera centre that actually centres it.
+        scene=dict(xaxis=axis, yaxis=axis, zaxis=axis, dragmode="orbit",
+                   aspectmode="cube"),
         margin=dict(l=0, r=0, t=40, b=0),
         showlegend=False,
         paper_bgcolor="white",
@@ -240,7 +243,18 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
                                 TOUR_HIGHLIGHT)
     except Exception:          # pragma: no cover - citations is always present
         return
-    coords = {n: list(map(float, p)) for n, p in (pos or {}).items()}
+    # `scene.camera.center` is in the scene's own normalised space, not in data
+    # coordinates. Passing raw positions put the camera near the node but not on
+    # it, which is why the focus node sat off to one side. With aspectmode cube
+    # each axis maps linearly onto -1..1, so the conversion is exact.
+    raw = {n: list(map(float, p)) for n, p in (pos or {}).items()}
+    coords = {}
+    if raw:
+        lo = [min(p[i] for p in raw.values()) for i in range(3)]
+        hi = [max(p[i] for p in raw.values()) for i in range(3)]
+        rng = [(hi[i] - lo[i]) or 1.0 for i in range(3)]
+        coords = {n: [2 * (p[i] - lo[i]) / rng[i] - 1 for i in range(3)]
+                  for n, p in raw.items()}
     stops = [dict(st, xyz=coords.get(st["id"])) for st in stops
              if coords.get(st["id"])]
     if not stops:
@@ -286,13 +300,13 @@ def _inject_tour_3d(path: str, stops, pos) -> None:
   }
   function flyTo(p, done) {
     var el = gd(), from = (el.layout.scene && el.layout.scene.camera) || HOME;
-    var n = Math.sqrt(p[0]*p[0] + p[1]*p[1] + p[2]*p[2]) || 1;
-    // Closer than the first attempt: k was 0.55 with a 0.35 standoff, which
-    // framed the neighbourhood rather than the node.
-    var k = 0.22, pad = 0.14;
+    // The node IS the centre, so it lands in the middle of the view. The eye
+    // sits a fixed distance away along a constant direction, which keeps every
+    // stop framed the same way instead of depending on where the node happens
+    // to be in the scene.
+    var d = 0.8;
     var to = {center: {x: p[0], y: p[1], z: p[2]},
-              eye: {x: p[0] + k*p[0]/n + pad, y: p[1] + k*p[1]/n + pad,
-                    z: p[2] + k*p[2]/n + pad}};
+              eye: {x: p[0] + d, y: p[1] + d, z: p[2] + d}};
     var t0 = performance.now();
     cancelAnimationFrame(anim);
     (function frame(now) {

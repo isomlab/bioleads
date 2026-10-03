@@ -616,12 +616,14 @@ TOUR_FLIGHT_MS = 4200      # camera travel in 3D, where the camera only moves
 # eye reads as speed, so a duration that is gentle in a Plotly scene is abrupt
 # here.
 TOUR_FLIGHT_2D_MS = 6500
-TOUR_HOLD_MS = 3200        # time to read the record, AFTER the camera arrives
+TOUR_HOLD_MS = 2500        # time to read the record, AFTER the camera arrives
 TOUR_ZOOM = 1.6            # gentler than the 1.9 it started at
 
 # Total time on a stop. Keeping the hold separate from the flight is what lets
 # the zoom be slowed and the advance be quickened at the same time: when the
-# two were one number, a slower camera meant less reading time.
+# two were one number, a slower camera meant less reading time. The hold has
+# since come down 3.2 s -> 2.5 s, which quickens the step from node to node
+# without touching how fast the camera moves.
 TOUR_DWELL_MS = TOUR_FLIGHT_MS + TOUR_HOLD_MS
 TOUR_DWELL_2D_MS = TOUR_FLIGHT_2D_MS + TOUR_HOLD_MS
 

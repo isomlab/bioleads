@@ -149,7 +149,7 @@ fit fall outside the view exactly as they do when the 2D view zooms.
 ### Tour pacing is per view, and 2D is the slower one
 
 - **The camera is slower (3D 4.2 s) and the wait after it lands is shorter
-  (3.2 s).** Both at once, which the old single `TOUR_DWELL_MS` could not do:
+  (2.5 s).** Both at once, which the old single `TOUR_DWELL_MS` could not do:
   slowing the zoom used to eat the reading time.
 - **2D flies for 6.5 s.** The same duration does not feel the same in both:
   vis.js `focus` changes zoom level as well as position, and **the scale change

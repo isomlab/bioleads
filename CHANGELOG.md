@@ -5,6 +5,26 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### Seeds survive every filter, not only the display trim
+
+- **`min_paper_degree`, `min_author_degree` and `min_author_papers` no longer
+  remove seeds.** A seed is in the picture because the search returned it, not
+  because of how connected it turned out to be, and a paper published last
+  month has no in-corpus citations by construction.
+- **The exemption is for seeds only.** A non-seed of the same degree is still
+  dropped, so the control is not quietly disabled, and the log says how many
+  seeds were kept below the threshold rather than leaving it to be noticed.
+- **Seeds still count toward their neighbours' degree**, so exempting one does
+  not inflate anyone else and does not rescue a neighbour that only reaches the
+  threshold through it.
+- **The promise these controls make has changed, and it is worth being clear
+  about.** It was "every node you see clears the number". It is now "every
+  **non-seed** node you see clears the number". Seven tests encoded the old
+  promise and were rewritten rather than deleted.
+- **The consequence to know: on a run with no expansion every document is a
+  seed, so these three controls do nothing.** They act on what expansion
+  brought in, which is what they were useful for anyway.
+
 ### Seeds are ranked, so "the top n" means something
 
 - **E-utilities does not sort by relevance.** Its default returns the most

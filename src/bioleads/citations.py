@@ -266,21 +266,33 @@ def _prune_by_degree(g: nx.DiGraph, min_degree: int, noun: str, say) -> nx.DiGra
     The cost is that a high threshold can cascade, since each round can expose
     more nodes to the next. That is the honest consequence of the setting, so
     the log reports the rounds and the total rather than hiding it in one line.
+
+    **Seeds are exempt.** A seed is a paper the search returned or an author of
+    one, and it is in the picture because it is what was asked for, not because
+    of how connected it turned out to be. A new paper has no in-corpus citations
+    by construction, so any threshold above zero removes exactly the thing the
+    run was about. Seeds still count toward their neighbours' degree, so
+    exempting them does not inflate anyone else's.
     """
     if min_degree <= 0 or not g.number_of_nodes():
         return g
     before = g.number_of_nodes()
     rounds = 0
     while g.number_of_nodes():
-        keep = [n for n, d in g.degree() if d >= min_degree]
+        keep = [n for n, d in g.degree()
+                if d >= min_degree or g.nodes[n].get("seed")]
         if len(keep) == g.number_of_nodes():
             break
         g = g.subgraph(keep).copy()
         rounds += 1
     dropped = before - g.number_of_nodes()
     if dropped:
+        spared = sum(1 for n, d in g.degree()
+                     if d < min_degree and g.nodes[n].get("seed"))
+        extra = (f" {spared} seed(s) kept below the threshold."
+                 if spared else "")
         say(f"  dropped {dropped} {noun}(s) below degree {min_degree} "
-            f"in {rounds} round(s); {g.number_of_nodes()} left.")
+            f"in {rounds} round(s); {g.number_of_nodes()} left.{extra}")
     if dropped and not g.number_of_nodes():
         # Not a failure and not an empty corpus: there is simply no group of
         # {noun}s this size all connected to each other. Said plainly, because
@@ -463,11 +475,19 @@ def build_author_citation_graph(
     g = _prune_by_degree(g, cfg.min_author_degree, "author", say)
 
     if rank_by == "papers" and cfg.min_author_papers > 0:
+        # Seeds are exempt here for the same reason as everywhere else: an
+        # author is in this picture because the search found their paper, and
+        # one paper is all a search needs to have found.
         keep = [n for n, d in g.nodes(data=True)
-                if (d.get("papers") or 0) >= cfg.min_author_papers]
+                if (d.get("papers") or 0) >= cfg.min_author_papers
+                or d.get("seed")]
         if len(keep) < g.number_of_nodes():
+            spared = sum(1 for n in keep
+                         if (g.nodes[n].get("papers") or 0) < cfg.min_author_papers)
+            extra = f" {spared} seed author(s) kept below it." if spared else ""
             say(f"  dropped {g.number_of_nodes() - len(keep)} author(s) below "
-                f"{cfg.min_author_papers} corpus paper(s); {len(keep)} left.")
+                f"{cfg.min_author_papers} corpus paper(s); {len(keep)} left."
+                f"{extra}")
             g = g.subgraph(keep).copy()
 
     # Trim by whatever the view is about. Ranking by citations while displaying

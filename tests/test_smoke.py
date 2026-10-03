@@ -758,6 +758,20 @@ _ICITE_FAKE = {
 }
 
 
+def _as_expanded(docs):
+    """Mark a corpus as expansion-discovered.
+
+    Seeds are exempt from the degree and paper-count filters, deliberately: a
+    seed is in the picture because the search returned it. So a test about what
+    a threshold *does* has to be run on non-seed nodes, or it is testing the
+    exemption instead. The promise those controls make is now "every non-seed
+    node you see clears the number", and that is what these check.
+    """
+    for d in docs:
+        d.meta["expanded"] = True
+    return docs
+
+
 def _citation_docs():
     return [
         Document(doc_id="PMID:1", text="foundational work", title="Foundational paper",
@@ -1065,8 +1079,8 @@ def test_senior_author_accumulates_papers_and_edge_weight(monkeypatch):
         "12": {"pmid": 12, "citation_count": 90, "authors": "Cy C, Mor M",
                "references": [], "cited_by": ["10", "11"]},
     }
-    docs = [Document(doc_id=f"PMID:{p}", text="x", source="pubmed",
-                     meta={"pmid": p}) for p in ("10", "11", "12")]
+    docs = _as_expanded([Document(doc_id=f"PMID:{p}", text="x", source="pubmed",
+                                  meta={"pmid": p}) for p in ("10", "11", "12")])
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
     g = build_author_citation_graph(docs, Config())
 
@@ -1088,9 +1102,9 @@ def test_min_paper_degree_drops_isolated_papers(monkeypatch):
     fake["4"] = {"pmid": 4, "title": "Unconnected", "year": 2021,
                  "journal": "PLoS One", "citation_count": 3, "authors": "Eve E",
                  "references": [], "cited_by": []}
-    docs = _citation_docs() + [
+    docs = _as_expanded(_citation_docs() + [
         Document(doc_id="PMID:4", text="unrelated", title="Unconnected",
-                 source="pubmed", meta={"pmid": "4"})]
+                 source="pubmed", meta={"pmid": "4"})])
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
 
     kept_all = build_citation_graph(docs, Config())
@@ -1127,8 +1141,9 @@ def test_min_degree_settles_instead_of_pruning_once(monkeypatch):
         "7": {"pmid": 7, "title": "C", "authors": "Cal C",
               "references": [], "cited_by": ["6"]},
     }
-    docs = [Document(doc_id=f"PMID:{p}", text="t", title=p, source="pubmed",
-                     meta={"pmid": p}) for p in ("5", "6", "7")]
+    docs = _as_expanded([Document(doc_id=f"PMID:{p}", text="t", title=p,
+                                  source="pubmed", meta={"pmid": p})
+                         for p in ("5", "6", "7")])
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
 
     g = build_citation_graph(docs, Config(min_paper_degree=2))
@@ -1136,18 +1151,35 @@ def test_min_degree_settles_instead_of_pruning_once(monkeypatch):
 
 
 def test_nothing_below_the_threshold_survives_the_filter(monkeypatch):
-    """The promise the control makes: every node you see clears the number.
+    """The promise the control makes, as it now stands: every node you see
+    clears the number **unless it is a seed**.
 
-    Checked on a graph dense enough to leave a core behind, so this is about
-    the survivors clearing the bar rather than about an empty result.
+    Seeds are shown whatever their degree, because they are what the search
+    returned. Everything else has to earn its place. Checked on a graph dense
+    enough to leave a core behind, so this is about survivors clearing the bar
+    rather than about an empty result.
     """
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
-    docs = _citation_docs()
+    docs = _as_expanded(_citation_docs())
 
     for k in (1, 2, 3):
         g = build_citation_graph(docs, Config(min_paper_degree=k))
-        under = {n: d for n, d in g.degree() if d < k}
+        under = {n: d for n, d in g.degree()
+                 if d < k and not g.nodes[n].get("seed")}
         assert not under, f"min_paper_degree={k} left {under} in the graph"
+
+
+def test_a_seed_is_the_only_thing_shown_below_the_threshold(monkeypatch):
+    """The other half of the same promise: the exemption is for seeds only."""
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    docs = _citation_docs()
+    docs[0].meta["expanded"] = False        # a seed
+    for d in docs[1:]:
+        d.meta["expanded"] = True
+
+    g = build_citation_graph(docs, Config(min_paper_degree=3))
+    below = {n for n, d in g.degree() if d < 3}
+    assert all(g.nodes[n].get("seed") for n in below)
 
 
 def test_min_author_degree_drops_isolated_authors(monkeypatch):
@@ -1156,9 +1188,9 @@ def test_min_author_degree_drops_isolated_authors(monkeypatch):
     fake["4"] = {"pmid": 4, "title": "Unconnected", "year": 2021,
                  "journal": "PLoS One", "citation_count": 3, "authors": "Eve E",
                  "references": [], "cited_by": []}
-    docs = _citation_docs() + [
+    docs = _as_expanded(_citation_docs() + [
         Document(doc_id="PMID:4", text="unrelated", title="Unconnected",
-                 source="pubmed", meta={"pmid": "4"})]
+                 source="pubmed", meta={"pmid": "4"})])
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
 
     assert "Eve E" in build_author_citation_graph(docs, Config()).nodes
@@ -1179,9 +1211,9 @@ def test_degree_thresholds_reach_the_written_outputs(tmp_path, monkeypatch):
     fake["4"] = {"pmid": 4, "title": "Unconnected", "year": 2021,
                  "journal": "PLoS One", "citation_count": 3, "authors": "Eve E",
                  "references": [], "cited_by": []}
-    docs = _citation_docs() + [
+    docs = _as_expanded(_citation_docs() + [
         Document(doc_id="PMID:4", text="unrelated", title="Unconnected",
-                 source="pubmed", meta={"pmid": "4"})]
+                 source="pubmed", meta={"pmid": "4"})])
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
 
     res = run_pipeline(documents=docs,
@@ -1205,9 +1237,9 @@ def test_degree_thresholds_are_independent(monkeypatch):
     fake["4"] = {"pmid": 4, "title": "Unconnected", "year": 2021,
                  "journal": "PLoS One", "citation_count": 3, "authors": "Eve E",
                  "references": [], "cited_by": []}
-    docs = _citation_docs() + [
+    docs = _as_expanded(_citation_docs() + [
         Document(doc_id="PMID:4", text="unrelated", title="Unconnected",
-                 source="pubmed", meta={"pmid": "4"})]
+                 source="pubmed", meta={"pmid": "4"})])
     monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: fake)
 
     cfg = Config(min_paper_degree=2, min_author_degree=0)
@@ -2255,3 +2287,65 @@ def test_seeds_are_marked_on_the_citation_graph(monkeypatch):
         pytest.skip("no citation graph in this environment")
     assert g.nodes["PMID:1"]["seed"] is True
     assert g.nodes["PMID:3"]["seed"] is False
+
+
+# ── seeds survive every filter, not just the display trim ──────────────────────
+# A seed is in the picture because it is what was asked for. A paper published
+# last month has no in-corpus citations by construction, so any threshold above
+# zero removes exactly the thing the run was about.
+
+def _degree_graph():
+    import networkx as nx
+    g = nx.DiGraph()
+    g.add_node("seed", seed=True, papers=1)            # degree 0
+    g.add_node("lonely", seed=False, papers=1)         # degree 0, not a seed
+    for i in range(4):
+        g.add_node(f"p{i}", seed=False, papers=9)
+    g.add_edges_from([("p0", "p1"), ("p1", "p2"), ("p2", "p0"),
+                      ("p0", "p2"), ("p1", "p3")])
+    return g
+
+
+def test_a_seed_survives_min_degree():
+    from bioleads.citations import _prune_by_degree
+    kept = _prune_by_degree(_degree_graph(), 2, "paper", lambda m: None)
+    assert "seed" in kept
+
+
+def test_a_non_seed_of_the_same_degree_is_still_dropped():
+    """Exempting seeds must not quietly disable the control."""
+    from bioleads.citations import _prune_by_degree
+    kept = _prune_by_degree(_degree_graph(), 2, "paper", lambda m: None)
+    assert "lonely" not in kept
+
+
+def test_the_log_says_a_seed_was_spared():
+    from bioleads.citations import _prune_by_degree
+    lines = []
+    _prune_by_degree(_degree_graph(), 2, "paper", lines.append)
+    assert any("seed(s) kept below the threshold" in l for l in lines)
+
+
+def test_seeds_still_count_toward_their_neighbours_degree():
+    """Exempting a seed must not inflate anyone else, and must not rescue a
+    neighbour that only reaches the threshold through it."""
+    import networkx as nx
+    from bioleads.citations import _prune_by_degree
+    g = nx.DiGraph()
+    g.add_node("seed", seed=True)
+    g.add_node("friend", seed=False)
+    g.add_edge("seed", "friend")
+    kept = _prune_by_degree(g, 2, "paper", lambda m: None)
+    assert "seed" in kept
+    assert "friend" not in kept
+
+
+def test_min_author_papers_spares_seed_authors(monkeypatch):
+    monkeypatch.setattr(citations, "fetch_icite", lambda pmids, **kw: _ICITE_FAKE)
+    cfg = Config()
+    cfg.min_author_papers = 5          # no author in a tiny corpus clears this
+    g = build_author_citation_graph(_citation_docs(), cfg, rank_by="papers")
+    if g is None:
+        pytest.skip("no author graph in this environment")
+    # Every author here is a seed author, so the filter must keep them all.
+    assert all(d.get("seed") for _, d in g.nodes(data=True))

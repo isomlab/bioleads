@@ -5,6 +5,24 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### A guided tour of the most connected nodes
+
+- **Play tour** flies the camera to the most connected node, zooms in and shows
+  what it is, then steps to the next, ten stops by default. **Next** advances by
+  hand and **Reset view** returns to the whole graph.
+- **Degree, not size.** A node is large here because it was cited often; it is
+  *connected* because it touches much of the corpus, and a tour of a network
+  should follow the second. Ties break on the size attribute.
+- The stops carry **the same text the hover shows**, built from one function, so
+  the tour and the tooltip cannot drift into telling different stories about a
+  node.
+- Physics is switched off before each flight, since the camera cannot chase a
+  node that is still being simulated.
+- **This is a tour, not a video file.** Screen-record it to get a movie. Writing
+  an `.mp4` directly would mean driving a headless browser — a few hundred
+  megabytes of dependency for a package meant to be conda-installable — and the
+  tour is what such a recorder would drive anyway.
+
 ### Matching uses PubMed's own expansion of the query
 
 - **Searching `cytoneme` now colours a paper that says `cytonemes`.** The terms

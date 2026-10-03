@@ -2487,3 +2487,60 @@ def test_the_tooltip_waits_for_the_cursor_to_stop(tmp_path):
     assert TOOLTIP_DELAY_MS >= 500
     assert f"tooltipDelay: {TOOLTIP_DELAY_MS}" in html
     assert "__TOOLTIP_DELAY__" not in html      # the placeholder was substituted
+
+
+# ── the guided tour ────────────────────────────────────────────────────────────
+# Zoom to the most connected node and say what it is, then step through the
+# next. Degree, not size: a node is large here because it was cited often, but
+# it is connected because it touches much of the corpus, and a tour of a network
+# should follow the second.
+
+def test_the_tour_visits_the_most_connected_node_first():
+    import networkx as nx
+    from bioleads.citations import tour_stops
+    g = nx.DiGraph()
+    for i in range(6):
+        g.add_node(f"PMID:{i}", pmid=str(i), in_corpus_citations=0, title=f"P{i}")
+    # PMID:5 is the hub; PMID:0 is the most *cited* but barely connected.
+    g.nodes["PMID:0"]["in_corpus_citations"] = 99
+    g.add_edges_from([("PMID:5", f"PMID:{j}") for j in (1, 2, 3, 4)])
+    stops = tour_stops(g, 2)
+    assert stops[0]["id"] == "PMID:5"
+    assert stops[0]["degree"] == 4
+
+
+def test_tour_stops_carry_the_same_text_as_the_hover():
+    """The tour and the tooltip must not tell different stories about a node."""
+    import networkx as nx
+    from bioleads.citations import tour_stops, _citation_tip_lines
+    g = nx.DiGraph()
+    g.add_node("PMID:1", pmid="1", title="A paper", year="2020", journal="J",
+               in_corpus_citations=2, global_citations=9)
+    g.add_node("PMID:2", pmid="2", title="B", in_corpus_citations=0)
+    g.add_edge("PMID:1", "PMID:2")
+    stop = tour_stops(g, 1)[0]
+    assert stop["info"] == _citation_tip_lines("PMID:1", g.nodes["PMID:1"])
+
+
+def test_an_empty_graph_has_no_tour():
+    import networkx as nx
+    from bioleads.citations import tour_stops
+    assert tour_stops(nx.DiGraph()) == []
+
+
+def test_the_page_carries_the_tour_controls_and_its_stops(tmp_path):
+    import json
+    import re
+    html = _written_network(tmp_path)
+    for control in ("bl-tour-play", "bl-tour-next", "bl-tour-reset"):
+        assert control in html
+    stops = json.loads(re.search(r"var STOPS = (\[.*?\]);", html, re.S).group(1))
+    assert stops and stops[0]["degree"] >= stops[-1]["degree"]
+    assert "__TOUR_STOPS__" not in html          # placeholder substituted
+
+
+def test_the_tour_turns_physics_off_before_flying(tmp_path):
+    """The camera cannot chase a node that is still being simulated."""
+    html = _written_network(tmp_path)
+    assert "physics: {enabled: false}" in html
+    assert "net.focus(s.id" in html

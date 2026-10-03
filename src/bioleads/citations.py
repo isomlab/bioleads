@@ -16,6 +16,7 @@ documents can participate; PDFs / refs without a PMID are skipped.
 """
 from __future__ import annotations
 
+import json
 import warnings
 
 import networkx as nx
@@ -585,8 +586,45 @@ def authors_to_dataframe(graph: nx.DiGraph, by: str = "in_corpus_citations"):
 # reading any single node is hard. 700 waits for the cursor to actually stop.
 TOOLTIP_DELAY_MS = 700
 
+# How many nodes a guided tour visits, most connected first.
+TOUR_STOPS = 10
 
-def _freeze_physics_after_stabilization(path: str) -> None:
+
+def tour_stops(g, n: int = TOUR_STOPS) -> list[dict]:
+    """The most connected nodes, in order, with what to say about each.
+
+    **Degree, not size.** A node is large here because of how often it was
+    cited; it is *connected* because of how much of the corpus it touches, and
+    the second is what a tour of a network should follow. Ties break on the
+    size attribute so the bigger of two equally connected papers goes first.
+
+    Each stop carries the same text the hover shows, so the tour and the
+    tooltip can never tell different stories.
+    """
+    if not g.number_of_nodes():
+        return []
+    deg = dict(g.degree())
+    author = "author" in next(iter(g.nodes(data=True)))[1]
+    size_key = "papers" if author and "papers" in next(iter(g.nodes(data=True)))[1] \
+        else "in_corpus_citations"
+    order = sorted(g.nodes, key=lambda x: (deg.get(x, 0),
+                                           g.nodes[x].get(size_key) or 0),
+                   reverse=True)
+    stops = []
+    for node in order[:max(0, n)]:
+        d = g.nodes[node]
+        lines = (_author_tip_lines(node, d) if author
+                 else _citation_tip_lines(node, d))
+        stops.append({
+            "id": node,
+            "label": str(d.get("author") or d.get("pmid") or node),
+            "degree": deg.get(node, 0),
+            "info": lines,
+        })
+    return stops
+
+
+def _freeze_physics_after_stabilization(path: str, stops=None) -> None:
     """Give the page a physics switch, settle the layout, and calm the tooltips.
 
     **The layout is computed in the browser, which is what makes these graphs
@@ -619,17 +657,67 @@ def _freeze_physics_after_stabilization(path: str) -> None:
     border:1px solid #b9c6bd; background:#fff; border-radius:4px;
     padding:3px 9px}
   #bl-physics span {color:#5b6b7c; margin-left:7px}
+  #bl-tour-controls button {margin-left:5px}
+  #bl-tour-info {display:none; margin-top:7px; max-width:330px;
+    border-top:1px solid #d7dee6; padding-top:6px; color:#1f2a36;
+    line-height:1.45}
 </style>
 <div id="bl-physics">
   <button id="bl-physics-toggle">Pause layout</button>
   <span id="bl-physics-state">settling\u2026</span>
+  <span id="bl-tour-controls">
+    <button id="bl-tour-play">Play tour</button>
+    <button id="bl-tour-next">Next</button>
+    <button id="bl-tour-reset">Reset view</button>
+  </span>
+  <div id="bl-tour-info"></div>
 </div>
 <script type="text/javascript">
 (function () {
   var on = true;
+  var STOPS = __TOUR_STOPS__;
+  function tour(net) {
+    // The tour drives the camera, so physics is switched off first: otherwise
+    // the nodes keep moving out from under it mid-flight.
+    var i = -1, playing = false, timer = null;
+    var panel = document.getElementById("bl-tour-info");
+    var play = document.getElementById("bl-tour-play");
+    function show(k) {
+      var s = STOPS[k];
+      if (!s) { return; }
+      net.setOptions({physics: {enabled: false}});
+      net.selectNodes([s.id]);
+      net.focus(s.id, {scale: 1.9, animation:
+        {duration: 1400, easingFunction: "easeInOutCubic"}});
+      panel.innerHTML = "<b>" + (k + 1) + " of " + STOPS.length +
+        "</b> &middot; " + s.degree + " connection(s)<br>" + s.info.join("<br>");
+      panel.style.display = "block";
+    }
+    function step() {
+      i = (i + 1) % STOPS.length;
+      show(i);
+      if (playing) { timer = setTimeout(step, 4200); }
+    }
+    document.getElementById("bl-tour-next").addEventListener("click", function () {
+      playing = false; clearTimeout(timer); play.textContent = "Play tour"; step();
+    });
+    play.addEventListener("click", function () {
+      playing = !playing;
+      play.textContent = playing ? "Stop tour" : "Play tour";
+      clearTimeout(timer);
+      if (playing) { step(); }
+    });
+    document.getElementById("bl-tour-reset").addEventListener("click", function () {
+      playing = false; clearTimeout(timer); play.textContent = "Play tour";
+      panel.style.display = "none";
+      net.unselectAll();
+      net.fit({animation: {duration: 900, easingFunction: "easeInOutCubic"}});
+    });
+  }
   function wire(net) {
     // Tooltips should wait for the cursor to stop, not fire on the way past.
     net.setOptions({interaction: {hover: true, tooltipDelay: __TOOLTIP_DELAY__}});
+    if (STOPS.length) { tour(net); }
     var btn = document.getElementById("bl-physics-toggle");
     var lbl = document.getElementById("bl-physics-state");
     function set(state, note) {
@@ -662,6 +750,7 @@ def _freeze_physics_after_stabilization(path: str) -> None:
     except OSError:
         return
     snippet = snippet.replace("__TOOLTIP_DELAY__", str(TOOLTIP_DELAY_MS))
+    snippet = snippet.replace("__TOUR_STOPS__", json.dumps(stops or []))
     if "bl-physics" in html:          # already injected
         return
     if "</body>" in html:
@@ -815,11 +904,16 @@ def write_citation_html(
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
     if coloured:
         _inject_match_legend(path, title, query_terms or [])
-    _freeze_physics_after_stabilization(path)
+    _freeze_physics_after_stabilization(path, tour_stops(g))
     return path
 
 
-def _citation_hover(n, d) -> str:
+def _citation_tip_lines(n, d) -> list[str]:
+    """What a paper node says about itself, one line each.
+
+    Shared by the hover, the 3D hover and the guided tour, so the three cannot
+    drift into telling different stories about the same node.
+    """
     lines = [d.get("title") or d.get("pmid", n), f"PMID: {d.get('pmid', '')}"]
     if d.get("year"):
         lines.append(f"year: {d['year']}")
@@ -828,7 +922,15 @@ def _citation_hover(n, d) -> str:
     lines.append(f"cited by {d.get('in_corpus_citations', 0)} paper(s) in corpus")
     if d.get("global_citations") is not None:
         lines.append(f"global citations: {d['global_citations']}")
-    return "<br>".join(lines)
+    if "query_match" in d:
+        hits = d.get("query_terms_matched") or ""
+        lines.append(f"query terms found: {hits}" if hits
+                     else "query terms found: none in title/abstract")
+    return lines
+
+
+def _citation_hover(n, d) -> str:
+    return "<br>".join(_citation_tip_lines(n, d))
 
 
 def write_citation_html_3d(
@@ -972,7 +1074,7 @@ def write_author_html(
     _collapse_duplicate_heading(path, title)  # pyvis 0.3.2 doubles the <h1>
     if coloured:
         _inject_match_legend(path, title, query_terms or [], unit="author")
-    _freeze_physics_after_stabilization(path)
+    _freeze_physics_after_stabilization(path, tour_stops(g))
     return path
 
 

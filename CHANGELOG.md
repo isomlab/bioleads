@@ -5,6 +5,18 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
+### `docs/what_gets_in.md`
+
+- **Every gate a paper or an author has to clear, in order, with the defaults.**
+  Written because the filters now have exceptions — seeds are exempt from most
+  of them — and a rule with exceptions is not something to reconstruct from
+  source each time.
+- Includes the two silent exclusions that catch people out: **records with no
+  abstract are dropped on arrival**, and **papers with no author list never
+  reach the author networks**.
+- Ends with a table for tracing a paper that is missing from a particular
+  output, which is the question this document exists to answer.
+
 ### Seeds survive every filter, not only the display trim
 
 - **`min_paper_degree`, `min_author_degree` and `min_author_papers` no longer

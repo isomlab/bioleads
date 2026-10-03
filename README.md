@@ -22,7 +22,9 @@ terms rather than from you.
 
 **For a stage-by-stage walkthrough of the whole pipeline — what each step does,
 why it's there, and which control changes it — see [How bioleads
-works](docs/how_it_works.md).** The citation-expansion strategy is benchmarked
+works](docs/how_it_works.md).** For which papers and authors survive each
+filter, and how to trace one that did not, see **[What gets in, and what gets
+cut](docs/what_gets_in.md)**. The citation-expansion strategy is benchmarked
 against systematic reviews with `tools/benchmark_expansion.py`; see
 [Benchmarking citation expansion](docs/benchmark.md).
 

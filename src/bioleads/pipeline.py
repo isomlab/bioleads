@@ -267,7 +267,7 @@ def run_pipeline(
             say("Rendering citation network…")
             cit_html = os.path.join(out_dir, "citation_network.html")
             result.outputs["citation_network"] = write_citation_html(
-                citation_graph, cit_html, query_terms=query_terms, seed=cfg.seed)
+                citation_graph, cit_html, query_terms=query_terms)
             cit_3d = write_citation_html_3d(
                 citation_graph, os.path.join(out_dir, "citation_network_3d.html"),
                 seed=cfg.seed)
@@ -290,7 +290,7 @@ def run_pipeline(
                                             "citation_network_matches.html")
                     result.outputs["citation_network_matches"] = (
                         write_citation_html(
-                            sub, sub_html, seed=cfg.seed,
+                            sub, sub_html,
                             title="bioleads citation network \u2014 papers "
                                   "containing the query terms",
                             query_terms=query_terms))
@@ -306,7 +306,7 @@ def run_pipeline(
             say("Rendering senior-author citation network…")
             auth_html = os.path.join(out_dir, "author_network.html")
             result.outputs["author_network"] = write_author_html(
-                author_graph, auth_html, query_terms=query_terms, seed=cfg.seed)
+                author_graph, auth_html, query_terms=query_terms)
             auth_3d = write_author_html_3d(
                 author_graph, os.path.join(out_dir, "author_network_3d.html"),
                 seed=cfg.seed)
@@ -334,7 +334,7 @@ def run_pipeline(
                 result.outputs["author_paper_network"] = write_author_html(
                     paper_graph, ap_html,
                     title="bioleads senior-author paper-count network",
-                    size_attr="papers", query_terms=query_terms, seed=cfg.seed)
+                    size_attr="papers", query_terms=query_terms)
                 ap_3d = write_author_html_3d(
                     paper_graph,
                     os.path.join(out_dir, "author_paper_network_3d.html"),

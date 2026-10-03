@@ -2414,3 +2414,62 @@ def test_the_citation_writer_degrades_to_graphml_without_pyvis(tmp_path, monkeyp
     out = write_citation_html(_graph_with_nulls(), str(tmp_path / "net.html"))
     assert out.endswith(".graphml")
     assert os.path.exists(out)
+
+
+# ── the physics switch ─────────────────────────────────────────────────────────
+# Physics starts on load, because the browser layout is what makes these graphs
+# readable: a server-side spring layout collapsed a 150-node network onto a
+# diagonal line of overlapping nodes. What it needed was control, not removal.
+
+def _written_network(tmp_path, n=8):
+    import networkx as nx
+    from bioleads.citations import write_citation_html
+    g = nx.DiGraph()
+    for i in range(n):
+        g.add_node(f"PMID:{i}", pmid=str(i), in_corpus_citations=i,
+                   title=f"P{i}", global_citations=i)
+    g.add_edges_from([(f"PMID:{i}", f"PMID:{(i + 1) % n}") for i in range(n)])
+    path = write_citation_html(g, str(tmp_path / "net.html"))
+    if path.endswith(".graphml"):
+        pytest.skip("pyvis not installed; no HTML to inspect")
+    return open(path, encoding="utf-8").read()
+
+
+def test_physics_starts_on_load(tmp_path):
+    html = _written_network(tmp_path)
+    assert '"enabled": true' in html.split('"physics"')[1][:120]
+    assert '"solver": "forceAtlas2Based"' in html
+
+
+def test_nodes_carry_no_precomputed_coordinates(tmp_path):
+    """The server-side layout is gone. vis.js places the nodes."""
+    import json
+    import re
+    html = _written_network(tmp_path)
+    nodes = json.loads(re.search(r"nodes = new vis.DataSet\((\[.*?\])\);",
+                                 html, re.S).group(1))
+    assert nodes and not any("x" in n or "y" in n for n in nodes)
+
+
+def test_the_page_has_a_physics_switch(tmp_path):
+    html = _written_network(tmp_path)
+    assert 'id="bl-physics-toggle"' in html
+    assert "Pause layout" in html
+
+
+def test_the_switch_waits_for_the_network_object(tmp_path):
+    """`network` is assigned inside drawGraph(); assuming it exists is how the
+    old automatic freeze came to look like it worked when it did not."""
+    html = _written_network(tmp_path)
+    assert 'typeof network !== "undefined"' in html
+    assert "setTimeout(wait, 50)" in html
+
+
+def test_physics_also_stops_on_its_own(tmp_path):
+    html = _written_network(tmp_path)
+    assert "stabilizationIterationsDone" in html
+
+
+def test_the_control_is_injected_once(tmp_path):
+    html = _written_network(tmp_path)
+    assert html.count('id="bl-physics"') == 1

@@ -5,19 +5,20 @@ while the major version is 0, a minor bump may change defaults.
 
 ## Unreleased
 
-### Networks open already settled
+### The networks have a physics switch
 
-- **The 2D networks no longer drift, rotate or rearrange while you are trying to
-  click on a node.** The layout is computed here, once, with networkx, and the
-  page ships with vis.js physics **off** and every node carrying its
-  coordinates.
-- Freezing physics after stabilization was not enough, because **the settling
-  itself is what makes a graph hard to interrogate**, and it happened on every
-  open.
-- **A side benefit worth having: the picture is now reproducible.** The same
-  corpus and `--seed` give the same arrangement, so two runs can be compared and
-  a figure can be regenerated.
-- Nodes are still draggable. Physics is off; interaction is not.
+- **Physics starts on load, as it always did, and a button pauses and resumes
+  it.** It also stops by itself once stabilization finishes, so the graph is
+  still by the time you try to click a node.
+- **Why the button and not a fixed layout:** a server-side spring layout was
+  tried first and was far worse — it collapsed a 150-node network onto a
+  diagonal line of overlapping nodes with the labels piled on top of each other.
+  The browser's force layout is what makes these graphs readable. What it needed
+  was control, not removal. **Reverted.**
+- The automatic stop existed before and **never ran**. It assumed pyvis's
+  `network` object was already defined, when it is assigned inside
+  `drawGraph()`; the injected script attached nothing and failed silently. It
+  now waits for the object.
 
 ### `expand_rounds` now defaults to 3
 

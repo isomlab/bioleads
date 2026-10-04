@@ -32,7 +32,7 @@ from .embeddings import cluster_terms, TermCluster, write_cluster_scatter
 from .expansion import relevance_guided_expand
 from .pipeline import run_pipeline, PipelineResult
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "Document",

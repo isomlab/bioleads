@@ -3,7 +3,7 @@
 Notable changes to bioleads. Versions follow [semantic versioning](https://semver.org);
 while the major version is 0, a minor bump may change defaults.
 
-## Unreleased
+## 0.4.0 — 2026-10-03
 
 ### The 3D tour flies into the node, and the node is a real sphere
 
